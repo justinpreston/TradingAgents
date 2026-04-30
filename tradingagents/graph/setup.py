@@ -20,6 +20,7 @@ class GraphSetup:
         tool_nodes: Dict[str, ToolNode],
         conditional_logic: ConditionalLogic,
         persona_llms: Optional[Dict[str, Any]] = None,
+        risk_profile: Optional[str] = None,
     ):
         """Initialize with required components.
 
@@ -32,12 +33,17 @@ class GraphSetup:
                     fundamentals_analyst, bull_researcher, bear_researcher,
                     research_manager, trader, aggressive_analyst,
                     neutral_analyst, conservative_analyst, portfolio_manager.
+            risk_profile: Optional risk-tolerance profile that drives a PM
+                prompt addendum. One of "aggressive", "conservative",
+                "neutral", or None. Default behavior (no addendum) is
+                preserved when None or "neutral".
         """
         self.quick_thinking_llm = quick_thinking_llm
         self.deep_thinking_llm = deep_thinking_llm
         self.tool_nodes = tool_nodes
         self.conditional_logic = conditional_logic
         self.persona_llms = persona_llms or {}
+        self.risk_profile = risk_profile
 
     def _llm(self, role: str, default: Any) -> Any:
         """Return the LLM bound to ``role``, falling back to ``default``."""
@@ -116,7 +122,8 @@ class GraphSetup:
             self._llm("conservative_analyst", self.quick_thinking_llm)
         )
         portfolio_manager_node = create_portfolio_manager(
-            self._llm("portfolio_manager", self.deep_thinking_llm)
+            self._llm("portfolio_manager", self.deep_thinking_llm),
+            risk_profile=self.risk_profile,
         )
 
         # Create workflow

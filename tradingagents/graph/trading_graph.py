@@ -145,6 +145,7 @@ class TradingAgentsGraph:
             self.tool_nodes,
             self.conditional_logic,
             persona_llms=persona_llms,
+            risk_profile=self.config.get("risk_profile"),
         )
 
         self.propagator = Propagator()

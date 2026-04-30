@@ -123,7 +123,7 @@ class _TeeStream(io.TextIOBase):
                 pass
 
 
-def _build_config() -> dict:
+def _build_config(risk_profile: str | None = None) -> dict:
     cfg = DEFAULT_CONFIG.copy()
     cfg["llm_provider"] = "copilot"
     # quick / deep fall-throughs for any role NOT in persona_models. With the
@@ -134,7 +134,40 @@ def _build_config() -> dict:
     cfg["max_debate_rounds"] = 1
     cfg["checkpoint_enabled"] = True
     cfg["persona_models"] = PERSONA_MODELS
+    if risk_profile:
+        cfg["risk_profile"] = risk_profile
     return cfg
+
+
+PM_STATE_KEYS = (
+    "company_of_interest",
+    "trade_date",
+    "investment_plan",
+    "trader_investment_plan",
+    "past_context",
+    "final_trade_decision",
+    "risk_debate_state",
+    "investment_debate_state",
+)
+
+
+def _persist_state_for_resynthesis(final_state, state_path: Path, ticker: str, trade_date: str) -> None:
+    """Persist the slice of final_state that the PM needs for resynthesis.
+
+    Captures investment_plan, trader_investment_plan, past_context, and the
+    full risk_debate_state.history so resynthesize_pm.py can re-invoke the
+    Portfolio Manager with a different risk_profile addendum without
+    re-running the upstream debate (~3 min vs ~50+ min full rerun).
+    """
+    snapshot = {"_ticker": ticker, "_trade_date": trade_date}
+    for key in PM_STATE_KEYS:
+        if key in final_state:
+            try:
+                json.dumps(final_state[key])
+                snapshot[key] = final_state[key]
+            except (TypeError, ValueError):
+                snapshot[key] = str(final_state[key])
+    state_path.write_text(json.dumps(snapshot, indent=2, default=str), encoding="utf-8")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -151,6 +184,13 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable the live progress dashboard and stream raw agent output.",
     )
+    p.add_argument(
+        "--risk-profile",
+        choices=["aggressive", "neutral", "conservative"],
+        default=None,
+        help="Inject a Portfolio Manager prompt addendum reflecting the "
+             "investor's risk tolerance. Default: no addendum (neutral synthesis).",
+    )
     return p.parse_args()
 
 
@@ -166,7 +206,7 @@ def main() -> int:
     run_id = args.run_id or f"persona_aligned_{trade_date}"
 
     os.environ["GITHUB_TOKEN"] = _resolve_github_token()
-    config = _build_config()
+    config = _build_config(risk_profile=args.risk_profile)
 
     runs_dir = Path("runs") / run_id
     runs_dir.mkdir(parents=True, exist_ok=True)
@@ -179,6 +219,7 @@ def main() -> int:
     # so the comparative analysis later doesn't have to grep through code.
     manifest = {
         "run_id": run_id,
+        "risk_profile": args.risk_profile,
         "trade_date": trade_date,
         "trade_date_label": date_label,
         "system_date_at_run": system_date,
@@ -267,6 +308,10 @@ def main() -> int:
                 record["tool_calls"] = stats["tool_calls"]
                 record["tokens_in"] = stats["tokens_in"]
                 record["tokens_out"] = stats["tokens_out"]
+
+                state_path = runs_dir / f"{ticker}.state.json"
+                _persist_state_for_resynthesis(final_state, state_path, ticker, trade_date)
+                record["state"] = str(state_path)
             except KeyboardInterrupt:
                 record["status"] = "interrupted"
                 record["error"] = "KeyboardInterrupt"

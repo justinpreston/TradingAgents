@@ -641,6 +641,54 @@ class TestPortfolioManagerInjection:
         result = pm_node(_make_pm_state())
         assert result["final_trade_decision"] == plain_response
 
+    # Risk-profile addendum
+
+    def test_pm_prompt_no_risk_profile_addendum_by_default(self):
+        """Default behavior: no risk-profile language in the prompt."""
+        captured = {}
+        llm = _structured_pm_llm(captured)
+        pm_node = create_portfolio_manager(llm)
+        pm_node(_make_pm_state())
+        assert "Investor Risk Profile" not in captured["prompt"]
+
+    def test_pm_prompt_aggressive_addendum_injected(self):
+        """--risk-profile aggressive injects the aggressive addendum."""
+        captured = {}
+        llm = _structured_pm_llm(captured)
+        pm_node = create_portfolio_manager(llm, risk_profile="aggressive")
+        pm_node(_make_pm_state())
+        assert "Investor Risk Profile: Aggressive Growth" in captured["prompt"]
+        assert "prefer **Buy** or **Overweight** over Hold" in captured["prompt"]
+
+    def test_pm_prompt_conservative_addendum_injected(self):
+        """--risk-profile conservative injects the conservative addendum."""
+        captured = {}
+        llm = _structured_pm_llm(captured)
+        pm_node = create_portfolio_manager(llm, risk_profile="conservative")
+        pm_node(_make_pm_state())
+        assert "Investor Risk Profile: Conservative" in captured["prompt"]
+        assert "prefer **Hold** or **Underweight**" in captured["prompt"]
+
+    def test_pm_prompt_neutral_profile_omits_addendum(self):
+        """'neutral' is treated identically to None — no addendum block."""
+        captured = {}
+        llm = _structured_pm_llm(captured)
+        pm_node = create_portfolio_manager(llm, risk_profile="neutral")
+        pm_node(_make_pm_state())
+        assert "Investor Risk Profile" not in captured["prompt"]
+
+    def test_pm_prompt_unknown_profile_silently_ignored(self):
+        """Unknown profile strings don't crash; they just produce no addendum.
+
+        This protects against typos in CLI args being mistakenly accepted.
+        The CLI layer enforces choices=, so this is a defense-in-depth check.
+        """
+        captured = {}
+        llm = _structured_pm_llm(captured)
+        pm_node = create_portfolio_manager(llm, risk_profile="ultra-yolo")
+        pm_node(_make_pm_state())
+        assert "Investor Risk Profile" not in captured["prompt"]
+
     # get_past_context ordering and limits
 
     def test_same_ticker_prioritised(self, tmp_path):
