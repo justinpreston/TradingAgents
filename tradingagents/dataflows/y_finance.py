@@ -245,11 +245,79 @@ def get_stockstats_indicator(
     return str(indicator_value)
 
 
+# Fields in `Ticker.info` that yfinance always returns at *live* values
+# (current price-derived, current market cap, TTM ratios computed off the
+# trailing window ending today). When the caller requests a historical
+# `curr_date`, these are look-ahead data and must be omitted.
+_YF_LIVE_SNAPSHOT_FIELDS = (
+    ("Market Cap", "marketCap"),
+    ("PE Ratio (TTM)", "trailingPE"),
+    ("Forward PE", "forwardPE"),
+    ("PEG Ratio", "pegRatio"),
+    ("Price to Book", "priceToBook"),
+    ("EPS (TTM)", "trailingEps"),
+    ("Forward EPS", "forwardEps"),
+    ("Dividend Yield", "dividendYield"),
+    ("52 Week High", "fiftyTwoWeekHigh"),
+    ("52 Week Low", "fiftyTwoWeekLow"),
+    ("50 Day Average", "fiftyDayAverage"),
+    ("200 Day Average", "twoHundredDayAverage"),
+    ("Revenue (TTM)", "totalRevenue"),
+    ("Gross Profit", "grossProfits"),
+    ("EBITDA", "ebitda"),
+    ("Net Income", "netIncomeToCommon"),
+    ("Profit Margin", "profitMargins"),
+    ("Operating Margin", "operatingMargins"),
+    ("Return on Equity", "returnOnEquity"),
+    ("Return on Assets", "returnOnAssets"),
+    ("Debt to Equity", "debtToEquity"),
+    ("Current Ratio", "currentRatio"),
+    ("Book Value", "bookValue"),
+    ("Free Cash Flow", "freeCashflow"),
+)
+
+# Structural facts that don't materially change across historical dates.
+_YF_STABLE_FIELDS = (
+    ("Name", "longName"),
+    ("Sector", "sector"),
+    ("Industry", "industry"),
+    ("Beta", "beta"),
+)
+
+
+def _is_historical_curr_date(curr_date):
+    """Return True iff curr_date is a parseable date strictly before today."""
+    if not curr_date:
+        return False
+    try:
+        curr_dt = datetime.strptime(curr_date, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return False
+    return curr_dt < datetime.now().date()
+
+
 def get_fundamentals(
     ticker: Annotated[str, "ticker symbol of the company"],
-    curr_date: Annotated[str, "current date (not used for yfinance)"] = None
+    curr_date: Annotated[
+        str,
+        "current date in YYYY-MM-DD format. When in the past, live snapshot "
+        "fields (Market Cap, P/E, TTM ratios, 52-week ranges) are omitted to "
+        "prevent look-ahead bias.",
+    ] = None,
 ):
-    """Get company fundamentals overview from yfinance."""
+    """Get company fundamentals overview from yfinance.
+
+    yfinance's ``Ticker.info`` always returns *live* values (current price,
+    current market cap, TTM ratios computed off the trailing window ending
+    today) regardless of the requested ``curr_date``. When ``curr_date`` is
+    in the past this function therefore omits those fields to prevent
+    look-ahead bias and emits a header note explaining the omission. Stable
+    structural fields (name, sector, industry, beta) are always returned.
+
+    For point-in-time financial statements, use :func:`get_income_statement`,
+    :func:`get_balance_sheet`, and :func:`get_cashflow`, which apply fiscal-
+    period filtering via ``filter_financials_by_date``.
+    """
     try:
         ticker_obj = yf.Ticker(ticker.upper())
         info = yf_retry(lambda: ticker_obj.info)
@@ -257,44 +325,34 @@ def get_fundamentals(
         if not info:
             return f"No fundamentals data found for symbol '{ticker}'"
 
-        fields = [
-            ("Name", info.get("longName")),
-            ("Sector", info.get("sector")),
-            ("Industry", info.get("industry")),
-            ("Market Cap", info.get("marketCap")),
-            ("PE Ratio (TTM)", info.get("trailingPE")),
-            ("Forward PE", info.get("forwardPE")),
-            ("PEG Ratio", info.get("pegRatio")),
-            ("Price to Book", info.get("priceToBook")),
-            ("EPS (TTM)", info.get("trailingEps")),
-            ("Forward EPS", info.get("forwardEps")),
-            ("Dividend Yield", info.get("dividendYield")),
-            ("Beta", info.get("beta")),
-            ("52 Week High", info.get("fiftyTwoWeekHigh")),
-            ("52 Week Low", info.get("fiftyTwoWeekLow")),
-            ("50 Day Average", info.get("fiftyDayAverage")),
-            ("200 Day Average", info.get("twoHundredDayAverage")),
-            ("Revenue (TTM)", info.get("totalRevenue")),
-            ("Gross Profit", info.get("grossProfits")),
-            ("EBITDA", info.get("ebitda")),
-            ("Net Income", info.get("netIncomeToCommon")),
-            ("Profit Margin", info.get("profitMargins")),
-            ("Operating Margin", info.get("operatingMargins")),
-            ("Return on Equity", info.get("returnOnEquity")),
-            ("Return on Assets", info.get("returnOnAssets")),
-            ("Debt to Equity", info.get("debtToEquity")),
-            ("Current Ratio", info.get("currentRatio")),
-            ("Book Value", info.get("bookValue")),
-            ("Free Cash Flow", info.get("freeCashflow")),
-        ]
+        is_historical = _is_historical_curr_date(curr_date)
+        field_specs = _YF_STABLE_FIELDS if is_historical else (
+            _YF_STABLE_FIELDS + _YF_LIVE_SNAPSHOT_FIELDS
+        )
 
         lines = []
-        for label, value in fields:
+        for label, key in field_specs:
+            value = info.get(key)
             if value is not None:
                 lines.append(f"{label}: {value}")
 
         header = f"# Company Fundamentals for {ticker.upper()}\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        if is_historical:
+            header += (
+                f"# Point-in-time mode (curr_date={curr_date}): live snapshot "
+                f"fields\n"
+                f"#   (Market Cap, P/E, Forward P/E, PEG, P/B, TTM ratios, "
+                f"52-week ranges,\n"
+                f"#   moving averages, dividend yield, TTM revenue/income) "
+                f"omitted to prevent\n"
+                f"#   look-ahead bias. yfinance does not provide historical "
+                f"equivalents;\n"
+                f"#   use get_income_statement, get_balance_sheet, and "
+                f"get_cashflow for\n"
+                f"#   point-in-time financial statements.\n"
+            )
+        header += "\n"
 
         return header + "\n".join(lines)
 
