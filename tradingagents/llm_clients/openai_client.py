@@ -48,6 +48,17 @@ _PROVIDER_CONFIG = {
     "glm": ("https://api.z.ai/api/paas/v4/", "ZHIPU_API_KEY"),
     "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
     "ollama": ("http://localhost:11434/v1", None),
+    "github": ("https://models.github.ai/inference", "GITHUB_TOKEN"),
+    "copilot": ("https://api.githubcopilot.com", "GITHUB_TOKEN"),
+}
+
+# Provider-specific request headers (e.g., Copilot Chat API requires
+# editor identification headers).
+_PROVIDER_HEADERS = {
+    "copilot": {
+        "Copilot-Integration-Id": "vscode-chat",
+        "Editor-Version": "vscode/1.95.0",
+    },
 }
 
 
@@ -93,9 +104,20 @@ class OpenAIClient(BaseLLMClient):
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
 
+        # Provider-specific extra headers (Copilot Chat API requires these).
+        if self.provider in _PROVIDER_HEADERS:
+            existing_headers = llm_kwargs.get("default_headers", {}) or {}
+            llm_kwargs["default_headers"] = {**_PROVIDER_HEADERS[self.provider], **existing_headers}
+
         # Native OpenAI: use Responses API for consistent behavior across
-        # all model families. Third-party providers use Chat Completions.
-        if self.provider == "openai":
+        # all model families. Third-party providers use Chat Completions
+        # — except Copilot's GPT-5 family, which only exposes /responses
+        # (the /chat/completions endpoint returns unsupported_api_for_model
+        # for any gpt-5* model on api.githubcopilot.com).
+        needs_responses_api = self.provider == "openai" or (
+            self.provider == "copilot" and self.model.lower().startswith("gpt-5")
+        )
+        if needs_responses_api:
             llm_kwargs["use_responses_api"] = True
 
         return NormalizedChatOpenAI(**llm_kwargs)
