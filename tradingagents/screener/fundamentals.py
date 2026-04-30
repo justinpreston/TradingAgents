@@ -24,7 +24,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
-from tradingagents.dataflows.polygon_common import paginated_results
+from tradingagents.dataflows.polygon_common import (
+    PolygonNotFoundError,
+    paginated_results,
+)
 
 log = logging.getLogger(__name__)
 
@@ -51,7 +54,13 @@ class FundamentalSignals:
 
 
 def fetch_quarterly_financials(ticker: str, *, max_quarters: int = 8) -> list[dict]:
-    """Pull last ``max_quarters`` of quarterly SEC filings from Polygon."""
+    """Pull last ``max_quarters`` of quarterly SEC filings from Polygon.
+
+    Only swallows :class:`PolygonNotFoundError` (ticker not covered by SEC
+    filings — typical for ADRs, recent IPOs, foreign issuers). Auth and
+    rate-limit errors propagate so the orchestrator can flag the run as
+    partial rather than silently labelling tickers ``insufficient_data``.
+    """
     try:
         results = paginated_results(
             "/vX/reference/financials",
@@ -64,8 +73,8 @@ def fetch_quarterly_financials(ticker: str, *, max_quarters: int = 8) -> list[di
             },
             max_pages=2,
         )
-    except Exception as e:  # noqa: BLE001
-        log.debug("financials fetch failed for %s: %s", ticker, e)
+    except PolygonNotFoundError:
+        log.debug("financials 404 for %s — no SEC filings indexed", ticker)
         return []
     return results[:max_quarters]
 

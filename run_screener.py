@@ -58,6 +58,10 @@ def _parse_args() -> argparse.Namespace:
                    help="Cap stage-2 enrichment for testing (default: no cap)")
     p.add_argument("--ticker-limit", type=int, default=None,
                    help="Cap technical+fundamental scans for testing (default: no cap)")
+    p.add_argument("--min-request-interval", type=float, default=0.25,
+                   help="Min seconds between Polygon REST calls (default 0.25 ≈ 4 req/s, "
+                        "with adaptive throttle that ratchets up on 429). "
+                        "Raise if hitting rate limits; set 0 to disable pacing.")
     p.add_argument("--top", type=int, default=25, help="Number of top names to keep")
     p.add_argument("--technical-weight", type=float, default=0.55)
     p.add_argument("--fundamental-weight", type=float, default=0.45)
@@ -116,6 +120,7 @@ def main() -> int:
         top_n=args.top,
         technical_weight=args.technical_weight,
         fundamental_weight=args.fundamental_weight,
+        min_request_interval_s=args.min_request_interval,
         progress_cb=_make_progress(),
     )
     elapsed = time.time() - t0
@@ -130,6 +135,8 @@ def main() -> int:
         "elapsed_seconds": round(elapsed, 1),
         "universe_size": result.universe_size,
         "config": result.config,
+        "is_partial": result.is_partial,
+        "rate_limited_failures": result.rate_limited_failures,
         "outputs": {
             "json": "screener.json",
             "markdown": "screener.md",
@@ -140,6 +147,25 @@ def main() -> int:
 
     print(f"\n[screener] done in {elapsed/60:.1f}m — top {len(result.candidates)} candidates", flush=True)
     print(f"[screener] outputs: {out_dir}", flush=True)
+
+    if result.is_partial:
+        n_fail = len(result.rate_limited_failures)
+        print(
+            f"\n[screener] ⚠️  PARTIAL RESULT — {n_fail} ticker stage(s) dropped to "
+            f"Polygon rate limits. Top-N may be missing legitimate names.",
+            flush=True,
+        )
+        print(
+            f"[screener] mitigation: re-run with --min-request-interval {args.min_request_interval * 1.5:.2f} "
+            f"(currently {args.min_request_interval}) or shrink the universe with --min-mcap/--max-mcap.",
+            flush=True,
+        )
+        if args.chain_top > 0:
+            print(
+                "[screener] refusing to chain into TradingAgents on a partial result — "
+                "rerun the screener clean first.",
+                flush=True,
+            )
 
     if result.candidates:
         print("\n[screener] top 10 preview:", flush=True)
@@ -152,6 +178,8 @@ def main() -> int:
             )
 
     if args.chain_top > 0:
+        if result.is_partial:
+            return 0
         chain_n = min(args.chain_top, len(result.candidates))
         chain_tickers = [c.ticker for c in result.candidates[:chain_n]]
         print(f"\n[chain] running TradingAgents pipeline on top {chain_n}: "

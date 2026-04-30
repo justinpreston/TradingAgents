@@ -15,6 +15,8 @@ def write_json(result: ScreenerResult, path: Path) -> None:
         "universe_size": result.universe_size,
         "top_n": result.top_n,
         "config": result.config,
+        "is_partial": result.is_partial,
+        "rate_limited_failures": result.rate_limited_failures,
         "candidates": [
             {
                 "rank": c.rank,
@@ -48,6 +50,13 @@ def write_markdown(result: ScreenerResult, path: Path) -> None:
     lines: list[str] = []
     lines.append(f"# Early-cycle screener — {result.trading_date.isoformat()}")
     lines.append("")
+    if result.is_partial:
+        lines.append(
+            f"> ⚠️ **PARTIAL RESULT** — {len(result.rate_limited_failures)} "
+            f"ticker stage(s) dropped due to Polygon rate limits. "
+            f"Top-N may be missing legitimate names."
+        )
+        lines.append("")
     lines.append(
         f"Universe: **{result.universe_size}** mid/large-cap names · "
         f"showing top **{len(result.candidates)}** by composite score"

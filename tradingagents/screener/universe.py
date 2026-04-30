@@ -31,7 +31,10 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Iterable
 
-from tradingagents.dataflows.polygon_common import _make_request
+from tradingagents.dataflows.polygon_common import (
+    PolygonNotFoundError,
+    _make_request,
+)
 
 log = logging.getLogger(__name__)
 
@@ -146,11 +149,17 @@ def fetch_grouped_aggs(target_date: date | None = None, *, max_lookback: int = 7
 
 
 def _enrich_with_reference(ticker: str) -> dict:
-    """Pull /v3/reference/tickers/{T} for canonical metadata + market_cap."""
+    """Pull /v3/reference/tickers/{T} for canonical metadata + market_cap.
+
+    Only swallows :class:`PolygonNotFoundError` (delisted/unknown ticker —
+    drop from universe). Auth, rate-limit, and transient errors propagate
+    so the orchestrator can mark the run as partial / abort, rather than
+    silently dropping universe entries when Polygon is throttling.
+    """
     try:
         payload = _make_request(f"/v3/reference/tickers/{ticker}")
-    except Exception as e:
-        log.debug("reference fetch failed for %s: %s", ticker, e)
+    except PolygonNotFoundError:
+        log.debug("reference 404 for %s — skipping", ticker)
         return {}
     return payload.get("results") or {}
 
