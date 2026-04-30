@@ -8,10 +8,12 @@ from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
 )
+from tradingagents.agents.managers._risk_profile import format_risk_profile_block
 
 
-def create_research_manager(llm):
+def create_research_manager(llm, risk_profile: str | None = None):
     structured_llm = bind_structured(llm, ResearchPlan, "Research Manager")
+    risk_profile_block = format_risk_profile_block(risk_profile)
 
     def research_manager_node(state) -> dict:
         instrument_context = build_instrument_context(state["company_of_interest"])
@@ -33,7 +35,7 @@ def create_research_manager(llm):
 - **Sell**: Strong conviction in the bear thesis; recommend exiting or avoiding the position
 
 Commit to a clear stance whenever the debate's strongest arguments warrant one; reserve Hold for situations where the evidence on both sides is genuinely balanced.
-
+{risk_profile_block}
 ---
 
 **Debate History:**

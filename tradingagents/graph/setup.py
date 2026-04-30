@@ -105,7 +105,8 @@ class GraphSetup:
             self._llm("bear_researcher", self.quick_thinking_llm)
         )
         research_manager_node = create_research_manager(
-            self._llm("research_manager", self.deep_thinking_llm)
+            self._llm("research_manager", self.deep_thinking_llm),
+            risk_profile=self.risk_profile,
         )
         trader_node = create_trader(
             self._llm("trader", self.quick_thinking_llm)

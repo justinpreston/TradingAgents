@@ -102,6 +102,38 @@ def _structured_pm_llm(captured: dict, decision: PortfolioDecision | None = None
     return llm
 
 
+def _make_rm_state():
+    """Minimal AgentState dict for research_manager_node."""
+    return {
+        "company_of_interest": "NVDA",
+        "investment_debate_state": {
+            "history": "Bull/bear debate history.",
+            "bull_history": "Bull arguments.",
+            "bear_history": "Bear arguments.",
+            "judge_decision": "",
+            "current_response": "",
+            "count": 1,
+        },
+    }
+
+
+def _structured_rm_llm(captured: dict):
+    """Build a MagicMock LLM that captures the RM prompt and returns a ResearchPlan."""
+    from tradingagents.agents.schemas import ResearchPlan
+    plan = ResearchPlan(
+        recommendation=PortfolioRating.HOLD,
+        rationale="Bull and bear cases both carry weight; deferring.",
+        strategic_actions="Hold the position; reassess on next earnings print.",
+    )
+    structured = MagicMock()
+    structured.invoke.side_effect = lambda prompt: (
+        captured.__setitem__("prompt", prompt) or plan
+    )
+    llm = MagicMock()
+    llm.with_structured_output.return_value = structured
+    return llm
+
+
 # ---------------------------------------------------------------------------
 # Core: storage and read path
 # ---------------------------------------------------------------------------
@@ -687,6 +719,51 @@ class TestPortfolioManagerInjection:
         llm = _structured_pm_llm(captured)
         pm_node = create_portfolio_manager(llm, risk_profile="ultra-yolo")
         pm_node(_make_pm_state())
+        assert "Investor Risk Profile" not in captured["prompt"]
+
+    # Research Manager risk-profile addendum (mirrors PM seat — same disposition
+    # is applied upstream so the Trader's BUY/SELL/HOLD lineage carries the frame)
+
+    def test_rm_prompt_no_risk_profile_addendum_by_default(self):
+        from tradingagents.agents.managers.research_manager import create_research_manager
+        captured = {}
+        llm = _structured_rm_llm(captured)
+        rm_node = create_research_manager(llm)
+        rm_node(_make_rm_state())
+        assert "Investor Risk Profile" not in captured["prompt"]
+
+    def test_rm_prompt_aggressive_addendum_injected(self):
+        from tradingagents.agents.managers.research_manager import create_research_manager
+        captured = {}
+        llm = _structured_rm_llm(captured)
+        rm_node = create_research_manager(llm, risk_profile="aggressive")
+        rm_node(_make_rm_state())
+        assert "Investor Risk Profile: Aggressive Growth" in captured["prompt"]
+        assert "prefer **Buy** or **Overweight** over Hold" in captured["prompt"]
+
+    def test_rm_prompt_conservative_addendum_injected(self):
+        from tradingagents.agents.managers.research_manager import create_research_manager
+        captured = {}
+        llm = _structured_rm_llm(captured)
+        rm_node = create_research_manager(llm, risk_profile="conservative")
+        rm_node(_make_rm_state())
+        assert "Investor Risk Profile: Conservative" in captured["prompt"]
+        assert "prefer **Hold** or **Underweight**" in captured["prompt"]
+
+    def test_rm_prompt_neutral_profile_omits_addendum(self):
+        from tradingagents.agents.managers.research_manager import create_research_manager
+        captured = {}
+        llm = _structured_rm_llm(captured)
+        rm_node = create_research_manager(llm, risk_profile="neutral")
+        rm_node(_make_rm_state())
+        assert "Investor Risk Profile" not in captured["prompt"]
+
+    def test_rm_prompt_unknown_profile_silently_ignored(self):
+        from tradingagents.agents.managers.research_manager import create_research_manager
+        captured = {}
+        llm = _structured_rm_llm(captured)
+        rm_node = create_research_manager(llm, risk_profile="ultra-yolo")
+        rm_node(_make_rm_state())
         assert "Investor Risk Profile" not in captured["prompt"]
 
     # get_past_context ordering and limits
