@@ -141,11 +141,13 @@ class RunDashboard:
         run_id: str,
         title: str = "TradingAgents",
         *,
+        system_date: Optional[str] = None,
         console: Optional[Console] = None,
         refresh_per_second: int = 4,
     ) -> None:
         self._tickers = list(tickers)
         self._trade_date = trade_date
+        self._system_date = system_date
         self._run_id = run_id
         self._title = title
 
@@ -374,12 +376,23 @@ class RunDashboard:
             if self._batch_started_at is not None
             else 0
         )
+        # Show system date alongside trade_date when they differ so the
+        # operator can never confuse a backtest for a live run.
+        if self._system_date and self._system_date != self._trade_date:
+            date_segment = Text.assemble(
+                (f"{self._trade_date}", "magenta"),
+                ("  (sys ", "dim"),
+                (f"{self._system_date}", "yellow"),
+                (")", "dim"),
+            )
+        else:
+            date_segment = Text(self._trade_date, style="magenta")
         head = Text.assemble(
             (f"{self._title}", "bold"),
             "  ·  ",
             (self._run_id, "cyan"),
             "  ·  ",
-            (f"{self._trade_date}", "magenta"),
+            date_segment,
             "  ·  elapsed ",
             (_format_elapsed(elapsed), "yellow"),
         )

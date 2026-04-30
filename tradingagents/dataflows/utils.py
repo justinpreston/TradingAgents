@@ -16,6 +16,41 @@ def get_current_date():
     return date.today().strftime("%Y-%m-%d")
 
 
+def resolve_trade_date(value, *, today=None):
+    """Resolve and validate a trade date.
+
+    ``value`` may be ``None`` / empty (falls back to today's system date) or
+    an ISO ``YYYY-MM-DD`` string. Future dates are refused — running an
+    analysis "as-of" a date the data layer cannot have observed is a bug.
+
+    Returns a ``(canonical_date, label)`` tuple where ``label`` is
+    ``"today"`` for delta=0 and ``"backtest ({N}d ago)"`` otherwise. The
+    label is operator-facing only (banner/manifest); it is *not* propagated
+    into agent prompts so PIT discipline is preserved.
+
+    Raises ``ValueError`` on malformed input or future dates.
+    """
+    today = today or date.today()
+    if value is None or not str(value).strip():
+        return today.strftime("%Y-%m-%d"), "today"
+    try:
+        parsed = datetime.strptime(str(value).strip(), "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError(
+            f"--date must be ISO YYYY-MM-DD (got {value!r}). "
+            f"System date is {today.isoformat()}."
+        ) from exc
+    if parsed > today:
+        raise ValueError(
+            f"Trade date {parsed.isoformat()} is in the future "
+            f"(system date is {today.isoformat()}). Refusing to run."
+        )
+    if parsed == today:
+        return parsed.isoformat(), "today"
+    delta = (today - parsed).days
+    return parsed.isoformat(), f"backtest ({delta}d ago)"
+
+
 def decorate_all_methods(decorator):
     def class_decorator(cls):
         for attr_name, attr_value in cls.__dict__.items():

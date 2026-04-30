@@ -53,13 +53,17 @@ from dotenv import load_dotenv
 
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.dataflows.utils import resolve_trade_date
 from tradingagents.ui import RunDashboard, TokenToolCallbackHandler
 
 load_dotenv()
 
 
 DEFAULT_TICKERS = ["NVDA", "AAPL", "MSFT", "GOOGL"]
-DEFAULT_DATE = "2024-05-10"
+# ``--date`` defaults to today's system date. The 2024-05-10 batches in
+# ``runs/mega_ai_2024-05-10`` and ``runs/gpt55_2024-05-10`` are reachable
+# explicitly via ``--date 2024-05-10`` for the 3-way comparison.
+DEFAULT_DATE: str | None = None
 
 OPUS = "claude-opus-4.7-xhigh"
 GPT55 = "gpt-5.5"
@@ -136,7 +140,11 @@ def _build_config() -> dict:
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("tickers", nargs="*", help=f"Tickers (default: {' '.join(DEFAULT_TICKERS)})")
-    p.add_argument("--date", default=DEFAULT_DATE)
+    p.add_argument(
+        "--date",
+        default=DEFAULT_DATE,
+        help="Trade date YYYY-MM-DD (default: today's system date). Refuses future dates.",
+    )
     p.add_argument("--run-id", default=None)
     p.add_argument(
         "--no-dashboard",
@@ -149,7 +157,12 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     tickers = [t.upper().strip() for t in (args.tickers or DEFAULT_TICKERS)]
-    trade_date = args.date
+    try:
+        trade_date, date_label = resolve_trade_date(args.date)
+    except ValueError as exc:
+        sys.stderr.write(f"❌ {exc}\n")
+        return 2
+    system_date = datetime.now().date().isoformat()
     run_id = args.run_id or f"persona_aligned_{trade_date}"
 
     os.environ["GITHUB_TOKEN"] = _resolve_github_token()
@@ -167,6 +180,8 @@ def main() -> int:
     manifest = {
         "run_id": run_id,
         "trade_date": trade_date,
+        "trade_date_label": date_label,
+        "system_date_at_run": system_date,
         "provider": "copilot",
         "max_debate_rounds": 1,
         "pit_fundamentals_fix": "Path D (yf_pit_derivations) — landed 2026-04-29",
@@ -178,6 +193,12 @@ def main() -> int:
     (runs_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     real_stdout, real_stderr = sys.stdout, sys.stderr
+
+    # Always announce the resolved date pair so backtests vs. live can never
+    # be confused. Goes to stdout *before* the dashboard takes over.
+    real_stdout.write(f"System date : {system_date}\n")
+    real_stdout.write(f"Trade date  : {trade_date}  ({date_label})\n")
+    real_stdout.flush()
 
     if not use_dashboard:
         # Legacy banner — only when the dashboard isn't going to draw one.
@@ -200,6 +221,7 @@ def main() -> int:
             trade_date=trade_date,
             run_id=run_id,
             title="TradingAgents · persona-aligned",
+            system_date=system_date,
         )
         if use_dashboard
         else None
@@ -290,6 +312,8 @@ def main() -> int:
     summary_json.write_text(
         json.dumps(
             {"run_id": run_id, "trade_date": trade_date,
+             "trade_date_label": date_label,
+             "system_date_at_run": system_date,
              "persona_models": PERSONA_MODELS, "results": results},
             indent=2,
         ),
@@ -299,7 +323,8 @@ def main() -> int:
     md_lines = [
         f"# TradingAgents persona-aligned batch — {run_id}",
         "",
-        f"- **Date:** {trade_date}",
+        f"- **Date:** {trade_date}  ({date_label})",
+        f"- **System date at run:** {system_date}",
         f"- **Provider:** copilot",
         f"- **PIT fix:** Path D (yf_pit_derivations) active",
         f"- **PM model:** GPT-5.5",
