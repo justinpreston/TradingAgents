@@ -8,6 +8,7 @@ from stockstats import wrap
 from typing import Annotated
 import os
 from .config import get_config
+from .utils import safe_ticker_component
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,10 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     ``yf.download``. Both paths cache to disk per ``(symbol, vendor)`` and
     filter rows after ``curr_date`` so backtests never see future prices.
     """
+    # Reject ticker values that would escape the cache directory when
+    # interpolated into the cache filename (e.g. ``../../tmp/x``).
+    safe_symbol = safe_ticker_component(symbol)
+
     config = get_config()
     curr_date_dt = pd.to_datetime(curr_date)
 
@@ -110,7 +115,7 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     cache_tag = "Polygon" if primary_vendor == "polygon" else "YFin"
     data_file = os.path.join(
         config["data_cache_dir"],
-        f"{symbol}-{cache_tag}-data-{start_str}-{end_str}.csv",
+        f"{safe_symbol}-{cache_tag}-data-{start_str}-{end_str}.csv",
     )
 
     if os.path.exists(data_file):
