@@ -190,6 +190,56 @@ def _trade_synthesis_md(run_id: str, screener_run: str, ledger: list[dict],
         )
     lines += ["", "**Compression interpretation**: < 5% = strong dual-frame agreement on price target. **Negative compression** (cons PT > aggr PT) = rarest/strongest conviction signal.", ""]
 
+    aggr_dist: dict[str, int] = {}
+    cons_dist: dict[str, int] = {}
+    cons_pick_dist: dict[str, int] = {}
+    for r in ledger:
+        aggr_dist[r["aggressive_rating"]] = aggr_dist.get(r["aggressive_rating"], 0) + 1
+        cons_dist[r["conservative_rating"]] = cons_dist.get(r["conservative_rating"], 0) + 1
+        if r.get("classification") == "PICK":
+            cons_pick_dist[r["conservative_rating"]] = cons_pick_dist.get(r["conservative_rating"], 0) + 1
+
+    def _fmt_dist(d: dict[str, int]) -> str:
+        return ", ".join(f"{v} {k}" for k, v in sorted(d.items(), key=lambda kv: -kv[1])) or "—"
+
+    lines += [
+        "## Dual-frame asymmetry — what the ratings actually mean here",
+        "",
+        "**Important**: in this pipeline the conservative frame functions as a **veto gate**, not a conviction amplifier. "
+        "Empirically, conservative rarely (if ever) issues Overweight or Buy on names that aggressive flagged — the strongest "
+        "rating it gives on a pick is `Hold`. Differentiation among picks therefore comes from *whether* and *how* conservative "
+        "engages with the thesis (PT set vs not, PT compression vs aggressive's PT) — not from the rating word itself.",
+        "",
+        f"- **Aggressive distribution (all {len(ledger)})**: {_fmt_dist(aggr_dist)}",
+        f"- **Conservative distribution (all {len(ledger)})**: {_fmt_dist(cons_dist)}",
+        f"- **Conservative on PICKS only**: {_fmt_dist(cons_pick_dist)}",
+        "",
+        "### Picks tiered by conservative engagement",
+        "",
+        "Within the `Cons=Hold` cohort that all picks share, real signal differentiation comes from the conservative PT:",
+        "",
+        "| Tier | Criterion | Read | Picks |",
+        "|---|---|---|---|",
+    ]
+    tier1, tier2, tier3 = [], [], []
+    for r in picks:
+        comp = r["pt_compression_pct"]
+        if r["conservative_pt"] is None:
+            tier3.append(r["ticker"])
+        elif comp is not None and comp < 5.0:
+            tier1.append(r["ticker"])
+        else:
+            tier2.append(r["ticker"])
+    lines += [
+        f"| **A — Dual-frame agreement** | Cons PT set, compression < 5% (incl. negative) | Both frames model the same target — strongest size-up candidates | {', '.join(f'**{t}**' for t in tier1) or '—'} |",
+        f"| **B — Cons engaged but skeptical** | Cons PT set, compression ≥ 5% | Cons sees a thesis but discounts it materially | {', '.join(tier2) or '—'} |",
+        f"| **C — Aggressive-only thesis** | Cons did not set a PT | Cons won't block but declines to model — thinner conviction | {', '.join(tier3) or '—'} |",
+        "",
+        "Practical sizing implication: Tier A names earn full intended exposure; Tier B names use the conservative PT as the "
+        "first profit-taking zone; Tier C names stay at starter size until aggressive entry triggers confirm.",
+        "",
+    ]
+
     lines += ["## Per-pick trade plans", "",
               "Each pick's verdict, full executive summary (the actionable trade plan), and link to per-ticker file.",
               ""]
