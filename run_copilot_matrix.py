@@ -197,8 +197,15 @@ def _run_cell(
 
     started = time.time()
     try:
+        # stdin=DEVNULL is critical: when the matrix orchestrator is launched
+        # detached (nohup ... &) and its parent shell exits, the inherited
+        # stdin file descriptor can become invalid. Children inheriting that
+        # broken descriptor crash with "Fatal Python error: init_sys_streams:
+        # can't initialize sys standard streams. OSError: [Errno 9] Bad file
+        # descriptor" before any user code runs.
         completed = subprocess.run(
             cmd,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             env=env,

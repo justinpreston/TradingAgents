@@ -289,3 +289,51 @@ class TestScreenerLoader:
         }))
         result = matrix_mod._load_screener_tickers(screener, top=10)
         assert result == ["ABNB", "TVTX"]
+
+
+# ---------------------------------------------------------------------------
+# Subprocess invocation hygiene
+# ---------------------------------------------------------------------------
+
+class TestRunCellSubprocessInvocation:
+    """Regression: when the orchestrator is launched detached (nohup ... &)
+    and its parent shell exits, the inherited stdin file descriptor can
+    become invalid, causing every child Python to die with
+    "Fatal Python error: init_sys_streams: ... Bad file descriptor".
+
+    Fix: explicitly close the child's stdin via subprocess.DEVNULL.
+    """
+
+    def test_run_cell_passes_stdin_devnull(self, tmp_path, monkeypatch):
+        import subprocess as _sp
+
+        captured: dict = {}
+
+        class _FakeCompleted:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(cmd, **kwargs):
+            captured["kwargs"] = kwargs
+            captured["cmd"] = cmd
+            return _FakeCompleted()
+
+        monkeypatch.setattr(matrix_mod.subprocess, "run", fake_run)
+
+        result = matrix_mod._run_cell(
+            ticker="FOO",
+            profile="aggressive",
+            trade_date="2026-04-30",
+            matrix_dir=tmp_path,
+            env={},
+            no_dashboard=True,
+        )
+
+        assert "kwargs" in captured, "_run_cell did not invoke subprocess.run"
+        assert captured["kwargs"].get("stdin") is _sp.DEVNULL, (
+            "_run_cell must pass stdin=subprocess.DEVNULL so children don't "
+            "inherit a (possibly broken) terminal stdin from a detached parent"
+        )
+        # And it should still capture stdout/stderr for forensics
+        assert captured["kwargs"].get("capture_output") is True
