@@ -2,6 +2,7 @@
 
 import logging
 import os
+import time
 from pathlib import Path
 import json
 from datetime import datetime, timedelta
@@ -55,6 +56,7 @@ class TradingAgentsGraph:
         debug=False,
         config: Dict[str, Any] = None,
         callbacks: Optional[List] = None,
+        progress_listener: Optional[Any] = None,
     ):
         """Initialize the trading agents graph and components.
 
@@ -63,10 +65,17 @@ class TradingAgentsGraph:
             debug: Whether to run in debug mode
             config: Configuration dictionary. If None, uses default config
             callbacks: Optional list of callback handlers (e.g., for tracking LLM/tool stats)
+            progress_listener: Optional :class:`tradingagents.ui.ProgressListener`
+                that receives per-node progress events. When set, the graph
+                streams with ``stream_mode=["updates", "values"]`` and
+                dispatches ``on_node_complete`` for each visible node;
+                ``debug=True`` chunk pretty-printing is suppressed so the
+                listener (typically a Rich Live UI) owns the terminal.
         """
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
         self.callbacks = callbacks or []
+        self.progress_listener = progress_listener
 
         # Update the interface's config
         set_config(self.config)
@@ -97,7 +106,29 @@ class TradingAgentsGraph:
 
         self.deep_thinking_llm = deep_client.get_llm()
         self.quick_thinking_llm = quick_client.get_llm()
-        
+
+        # Optional per-persona model overrides. ``persona_models`` maps a role
+        # name (market_analyst, bear_researcher, portfolio_manager, …) to a
+        # model identifier; we cache one client per unique model so two
+        # personas pointing at the same model share an LLM instance.
+        persona_models = self.config.get("persona_models") or {}
+        persona_llms: Dict[str, Any] = {}
+        if persona_models:
+            client_cache: Dict[str, Any] = {
+                self.config["deep_think_llm"]: self.deep_thinking_llm,
+                self.config["quick_think_llm"]: self.quick_thinking_llm,
+            }
+            for role, model_name in persona_models.items():
+                if model_name not in client_cache:
+                    client = create_llm_client(
+                        provider=self.config["llm_provider"],
+                        model=model_name,
+                        base_url=self.config.get("backend_url"),
+                        **llm_kwargs,
+                    )
+                    client_cache[model_name] = client.get_llm()
+                persona_llms[role] = client_cache[model_name]
+
         self.memory_log = TradingMemoryLog(self.config)
 
         # Create tool nodes
@@ -113,6 +144,8 @@ class TradingAgentsGraph:
             self.deep_thinking_llm,
             self.tool_nodes,
             self.conditional_logic,
+            persona_llms=persona_llms,
+            risk_profile=self.config.get("risk_profile"),
         )
 
         self.propagator = Propagator()
@@ -140,6 +173,14 @@ class TradingAgentsGraph:
                 kwargs["thinking_level"] = thinking_level
 
         elif provider == "openai":
+            reasoning_effort = self.config.get("openai_reasoning_effort")
+            if reasoning_effort:
+                kwargs["reasoning_effort"] = reasoning_effort
+
+        elif provider == "copilot":
+            # Copilot's Claude family encodes effort in the model id
+            # (claude-opus-4.7-xhigh). Copilot's GPT-5 family takes effort
+            # via the standard reasoning_effort kwarg (Responses API).
             reasoning_effort = self.config.get("openai_reasoning_effort")
             if reasoning_effort:
                 kwargs["reasoning_effort"] = reasoning_effort
@@ -292,6 +333,24 @@ class TradingAgentsGraph:
                 logger.info("Starting fresh for %s on %s", company_name, trade_date)
 
         try:
+            if self.progress_listener is not None:
+                started = time.time()
+                try:
+                    self.progress_listener.on_run_start(company_name, str(trade_date))
+                    final_state, signal = self._run_graph(company_name, trade_date)
+                    self.progress_listener.on_run_complete(
+                        company_name,
+                        signal or "",
+                        time.time() - started,
+                        final_state,
+                    )
+                    return final_state, signal
+                except BaseException as exc:
+                    try:
+                        self.progress_listener.on_run_error(company_name, exc)
+                    except Exception:
+                        pass
+                    raise
             return self._run_graph(company_name, trade_date)
         finally:
             if self._checkpointer_ctx is not None:
@@ -313,7 +372,33 @@ class TradingAgentsGraph:
             tid = thread_id(company_name, str(trade_date))
             args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
 
-        if self.debug:
+        if self.progress_listener is not None:
+            # Multi-mode stream: 'updates' drives per-node progress events,
+            # 'values' chunks accumulate the full state so we don't have
+            # to merge deltas ourselves. Last 'values' chunk wins.
+            stream_args = dict(args)
+            stream_args["stream_mode"] = ["updates", "values"]
+            final_state = None
+            for mode, chunk in self.graph.stream(init_agent_state, **stream_args):
+                if mode == "updates":
+                    # 'updates' yields {node_name: state_delta}. There may be
+                    # multiple keys in a single super-step (e.g. parallel
+                    # branches), so iterate.
+                    if isinstance(chunk, dict):
+                        for node_name, delta in chunk.items():
+                            try:
+                                self.progress_listener.on_node_complete(
+                                    company_name, node_name, delta or {}
+                                )
+                            except Exception:
+                                # Never let UI bugs break the run.
+                                pass
+                elif mode == "values":
+                    final_state = chunk
+            if final_state is None:
+                # Defensive: should not happen, but keep behaviour stable.
+                final_state = self.graph.invoke(init_agent_state, **args)
+        elif self.debug:
             trace = []
             for chunk in self.graph.stream(init_agent_state, **args):
                 if len(chunk["messages"]) == 0:

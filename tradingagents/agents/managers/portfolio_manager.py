@@ -19,10 +19,18 @@ from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
 )
+from tradingagents.agents.managers._risk_profile import (
+    RISK_PROFILE_ADDENDA,
+    format_risk_profile_block,
+)
 
 
-def create_portfolio_manager(llm):
+_format_risk_profile = format_risk_profile_block
+
+
+def create_portfolio_manager(llm, risk_profile: str | None = None):
     structured_llm = bind_structured(llm, PortfolioDecision, "Portfolio Manager")
+    risk_profile_block = format_risk_profile_block(risk_profile)
 
     def portfolio_manager_node(state) -> dict:
         instrument_context = build_instrument_context(state["company_of_interest"])
@@ -51,7 +59,7 @@ def create_portfolio_manager(llm):
 - **Hold**: Maintain current position, no action needed
 - **Underweight**: Reduce exposure, take partial profits
 - **Sell**: Exit position or avoid entry
-
+{risk_profile_block}
 **Context:**
 - Research Manager's investment plan: **{research_plan}**
 - Trader's transaction proposal: **{trader_plan}**
