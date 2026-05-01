@@ -53,9 +53,10 @@ def _score(row: dict, cross_band_set: set[str]) -> float:
     return s
 
 
-def _load_runs(run_specs: list[str]) -> tuple[list[dict], dict]:
+def _load_runs(run_specs: list[str]) -> tuple[list[dict], dict, dict]:
     rows = []
     metadata = {}
+    options_by_ticker_run: dict[tuple[str, str], dict] = {}
     for spec in run_specs:
         path_str, label = spec.split(":", 1)
         run_dir = Path(path_str)
@@ -73,7 +74,17 @@ def _load_runs(run_specs: list[str]) -> tuple[list[dict], dict]:
             r["_run"] = label
             r["_run_dir"] = run_dir.name
             rows.append(r)
-    return rows, metadata
+
+        # Optional: options overlay
+        ovl_path = run_dir / "options_overlay.json"
+        if ovl_path.exists():
+            ovl = json.loads(ovl_path.read_text())
+            metadata[label]["options_snapshot"] = ovl.get("snapshot_date")
+            metadata[label]["options_built"] = ovl.get("strategies_built", 0)
+            for o in ovl.get("overlays", []):
+                if "strategy" in o and "error" not in o:
+                    options_by_ticker_run[(o["ticker"], label)] = o
+    return rows, metadata, options_by_ticker_run
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -653,6 +664,85 @@ td.tkr { font-weight: 700; }
   color: var(--text);
 }
 
+/* Options section */
+.options-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 20px;
+  margin: 20px 0;
+}
+.opt-card {
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.opt-card .head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+.opt-card .head .tkr { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+.opt-card .head .strat {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+.opt-card .legs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.opt-card .leg {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.opt-card .leg .side {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.opt-card .leg .side.long { background: rgba(34, 197, 94, 0.15); color: var(--green); }
+.opt-card .leg .side.short { background: rgba(239, 68, 68, 0.15); color: var(--red); }
+.opt-card .econ {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+  background: var(--bg-elev-2);
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.opt-card .econ .row {
+  display: flex;
+  justify-content: space-between;
+}
+.opt-card .econ .lbl { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.opt-card .econ .val { font-weight: 600; }
+.opt-card .econ .val.green { color: var(--green); }
+.opt-card .econ .val.red { color: var(--red); }
+.opt-card .liquidity {
+  font-size: 11px;
+  color: var(--yellow);
+  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid rgba(234, 179, 8, 0.2);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+}
+
 /* Vetoed */
 details.vetoed {
   background: var(--bg-elev-1);
@@ -812,7 +902,89 @@ def _dist_chart(title: str, entries: list[tuple[str, int, str]], total: int) -> 
     )
 
 
-def render(rows: list[dict], metadata: dict, title: str, subtitle: str) -> str:
+def _opt_card(row: dict, ovl: dict | None) -> str:
+    """Render an options strategy card for one pick. ovl may be None."""
+    tkr = row["ticker"]
+    if not ovl:
+        return (
+            f'<div class="opt-card">'
+            f'<div class="head"><span class="tkr">{html.escape(tkr)}</span>'
+            f'<span class="strat" style="color:var(--text-dim)">No overlay</span></div>'
+            f'<div style="color:var(--text-dim);font-size:13px">No options strategy generated for this run.</div>'
+            f'</div>'
+        )
+
+    legs = ovl.get("legs") or []
+    legs_html = []
+    for leg in legs:
+        iv_str = f"IV {leg['iv']:.0%}" if leg.get("iv") else ""
+        oi_str = f"OI {leg['open_interest']}" if leg.get("open_interest") is not None else ""
+        meta = " · ".join(filter(None, [iv_str, oi_str]))
+        legs_html.append(
+            f'<div class="leg">'
+            f'<span><span class="side {leg["side"]}">{leg["side"]}</span> '
+            f'${leg["strike"]:,.2f} call · {leg["expiration"]}</span>'
+            f'<span style="color:var(--text-dim);font-size:11px">{html.escape(meta)} · ${leg["price"]:.2f}</span>'
+            f'</div>'
+        )
+
+    nd = ovl.get("net_debit_per_share") or 0
+    nd_contract = ovl.get("net_debit_per_contract") or 0
+    max_p = ovl.get("max_profit_per_contract")
+    max_l = ovl.get("max_loss_per_contract") or 0
+    rr = ovl.get("risk_reward")
+    be = ovl.get("breakeven_underlying")
+    be_pct = ovl.get("breakeven_pct_from_current")
+    upside = ovl.get("upside_to_short_strike_pct")
+
+    econ_rows = [
+        ("Net debit", f"${nd:.2f}/sh", "neutral"),
+        ("Per contract", f"${nd_contract:,.0f}", "neutral"),
+    ]
+    if max_p is not None:
+        econ_rows.append(("Max profit", f"${max_p:,.0f}", "green"))
+    econ_rows.append(("Max loss", f"${max_l:,.0f}", "red"))
+    if rr:
+        econ_rows.append(("R/R", f"{rr:.2f}×", "green"))
+    if be is not None:
+        econ_rows.append(("Breakeven", f"${be:.2f} ({be_pct:+.1f}%)", "neutral"))
+    if upside is not None:
+        econ_rows.append(("Upside to short K", f"{upside:+.1f}%", "neutral"))
+
+    econ_html = "".join(
+        f'<div class="row"><span class="lbl">{html.escape(lbl)}</span>'
+        f'<span class="val {cls if cls != "neutral" else ""}">{html.escape(val)}</span></div>'
+        for lbl, val, cls in econ_rows
+    )
+
+    warns = ovl.get("liquidity_warnings") or []
+    warn_html = ""
+    if warns:
+        warn_html = (
+            '<div class="liquidity">⚠ '
+            + html.escape(" · ".join(warns))
+            + "</div>"
+        )
+
+    strat = ovl.get("strategy", "—").replace("_", " ").title()
+    tier = ovl.get("tier", "—")
+
+    return (
+        f'<div class="opt-card">'
+        f'<div class="head">'
+        f'<span class="tkr">{html.escape(tkr)} <span style="font-size:11px;color:var(--text-dim);font-weight:500">Tier {tier}</span></span>'
+        f'<span class="strat">{html.escape(strat)} · {ovl.get("dte", "—")}d</span>'
+        f'</div>'
+        f'<div class="legs">{"".join(legs_html)}</div>'
+        f'<div class="econ">{econ_html}</div>'
+        f'{warn_html}'
+        f'</div>'
+    )
+
+
+def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
+           options_map: dict | None = None) -> str:
+    options_map = options_map or {}
     picks = [r for r in rows if r["classification"] == "PICK"]
     vetoed = [r for r in rows if r["classification"] == "VETOED"]
 
@@ -968,6 +1140,57 @@ def render(rows: list[dict], metadata: dict, title: str, subtitle: str) -> str:
         )
     parts.append('</div>')
     parts.append('</section>')
+
+    # ── Options Playbook for top 5
+    if options_map:
+        parts.append('<section class="section">')
+        parts.append('<h2>📈 Options Playbook · Top 5</h2>')
+        parts.append('<p class="lede">Tier-driven options structures for each top-5 pick. <strong>Tier A/B</strong> → defined-risk bull call spreads with the upper strike anchored to the conservative PT (the "where do both frames agree" zone). <strong>Tier C</strong> → ATM long calls (no credible upper bound from cons → don\'t cap upside). Strikes round to listed contracts; pricing uses Polygon\'s reported IV via Black-Scholes when bid/ask is unavailable. <em>Validate on a live broker chain before trading.</em></p>')
+        parts.append('<div class="options-grid">')
+        for r in top5:
+            ovl = options_map.get((r["ticker"], r["_run"]))
+            parts.append(_opt_card(r, ovl))
+        parts.append('</div>')
+
+        # All-picks options summary table
+        all_ovls = [(r, options_map.get((r["ticker"], r["_run"])))
+                    for r in ranked if options_map.get((r["ticker"], r["_run"]))]
+        if all_ovls:
+            parts.append('<h3 style="margin-top:32px">All picks · options snapshot</h3>')
+            parts.append('<div class="table-wrap"><table>')
+            parts.append('<thead><tr><th>Ticker</th><th>Run</th><th>Tier</th><th>Strategy</th><th>Exp</th><th class="num">DTE</th><th class="num">Long K</th><th class="num">Short K</th><th class="num">Net Debit</th><th class="num">Max Profit</th><th class="num">Breakeven</th><th class="num">R/R</th><th>Liq</th></tr></thead>')
+            parts.append('<tbody>')
+            for r, ovl in all_ovls:
+                legs = ovl.get("legs") or []
+                long_k = legs[0]["strike"] if legs else None
+                short_k = legs[1]["strike"] if len(legs) > 1 else None
+                tier = ovl.get("tier", "—")
+                strat = ovl.get("strategy", "—").replace("_", " ").title()
+                rr = ovl.get("risk_reward")
+                rr_str = f"{rr:.2f}×" if rr else "—"
+                max_p = ovl.get("max_profit_per_contract")
+                max_p_str = f"${max_p/100:,.2f}" if max_p is not None else "—"
+                liq = "⚠" if ovl.get("liquidity_warnings") else "✓"
+                parts.append(
+                    f'<tr>'
+                    f'<td class="tkr">{html.escape(r["ticker"])}</td>'
+                    f'<td>{_badge(r["_run"].upper(), "badge-" + r["_run"])}</td>'
+                    f'<td>{_badge("Tier " + tier, "badge-tier-" + tier.lower())}</td>'
+                    f'<td>{html.escape(strat)}</td>'
+                    f'<td class="muted">{html.escape(ovl.get("expiration", "—"))}</td>'
+                    f'<td class="num">{ovl.get("dte", "—")}</td>'
+                    f'<td class="num">{_fmt_price(long_k)}</td>'
+                    f'<td class="num">{_fmt_price(short_k)}</td>'
+                    f'<td class="num">${ovl.get("net_debit_per_share", 0):.2f}</td>'
+                    f'<td class="num green-text">{max_p_str}</td>'
+                    f'<td class="num">{_fmt_price(ovl.get("breakeven_underlying"))}</td>'
+                    f'<td class="num">{rr_str}</td>'
+                    f'<td>{liq}</td>'
+                    f'</tr>'
+                )
+            parts.append('</tbody></table></div>')
+
+        parts.append('</section>')
 
     # ── Asymmetry callout
     parts.append('<section class="section">')
@@ -1139,10 +1362,10 @@ def main():
     p.add_argument("--subtitle", default="Cross-run dual-frame matrix analysis")
     args = p.parse_args()
 
-    rows, metadata = _load_runs(args.runs)
+    rows, metadata, options_map = _load_runs(args.runs)
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    html_text = render(rows, metadata, args.title, args.subtitle)
+    html_text = render(rows, metadata, args.title, args.subtitle, options_map)
     out_path.write_text(html_text)
 
     n_picks = sum(1 for r in rows if r["classification"] == "PICK")
