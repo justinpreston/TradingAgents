@@ -238,8 +238,33 @@ def _contract_summary(c: dict, S: float, r: float, today: date) -> dict:
 # Strategy builders per tier
 # ──────────────────────────────────────────────────────────────────────
 
+def _pick_strike_by_delta(contracts_at_exp: list[dict], spot: float,
+                          target_delta: float, min_oi: int) -> dict | None:
+    """Pick the call contract whose delta is closest to target_delta.
+    Falls back to ATM-by-strike if no contract reports a delta. Prefers
+    contracts with OI ≥ min_oi when available."""
+    candidates = [c for c in contracts_at_exp if c["details"].get("contract_type") == "call"]
+    if not candidates:
+        return None
+
+    def _d(c: dict):
+        return (c.get("greeks") or {}).get("delta")
+
+    has_delta = [c for c in candidates if _d(c) is not None]
+    if has_delta:
+        liquid = [c for c in has_delta if (c.get("open_interest") or 0) >= min_oi]
+        pool = liquid or has_delta
+        return min(pool, key=lambda c: abs(_d(c) - target_delta))
+
+    liquid = [c for c in candidates if (c.get("open_interest") or 0) >= min_oi]
+    pool = liquid or candidates
+    return min(pool, key=lambda c: abs(c["details"]["strike_price"] - spot))
+
+
 def _build_strategy(row: dict, contracts: list[dict], today: date,
-                    risk_free: float, min_oi: int) -> dict | None:
+                    risk_free: float, min_oi: int,
+                    strategy_mode: str = "tier-driven",
+                    long_call_delta: float = 0.55) -> dict | None:
     tier = _tier(row)
     S = row.get("current_price_usd")
     aggr_pt = row.get("aggressive_pt")
@@ -288,29 +313,42 @@ def _build_strategy(row: dict, contracts: list[dict], today: date,
 
     available_strikes = sorted({c["details"]["strike_price"] for c in same_exp_all})
 
-    # Strategy selection per tier
-    if tier == "A":
-        comp = row.get("pt_compression_pct")
-        upper_target = max(aggr_pt, cons_pt) if (cons_pt and comp is not None and comp < 0) else aggr_pt
-        lower_target = S
-        strategy = "bull_call_spread"
-    elif tier == "B":
-        upper_target = cons_pt or aggr_pt
-        lower_target = S
-        strategy = "bull_call_spread"
-    else:  # Tier C
-        upper_target = None
-        lower_target = S
+    # ── Strategy selection
+    if strategy_mode == "long-call":
+        # Always long call. Strike is delta-targeted (slightly ITM by default
+        # for less time decay and more stock-like price action).
         strategy = "long_call"
+        upper_target = None
+        long_leg_contract = _pick_strike_by_delta(
+            same_exp_all, S, long_call_delta, min_oi
+        )
+        if not long_leg_contract:
+            return {"error": f"No call contract for delta target {long_call_delta} at exp {exp}"}
+    else:
+        # Tier-driven (original behavior)
+        if tier == "A":
+            comp = row.get("pt_compression_pct")
+            upper_target = max(aggr_pt, cons_pt) if (cons_pt and comp is not None and comp < 0) else aggr_pt
+            lower_target = S
+            strategy = "bull_call_spread"
+        elif tier == "B":
+            upper_target = cons_pt or aggr_pt
+            lower_target = S
+            strategy = "bull_call_spread"
+        else:  # Tier C
+            upper_target = None
+            lower_target = S
+            strategy = "long_call"
 
-    lower_K = _round_to_listed_strike(lower_target, available_strikes)
-    long_leg_contract = next((c for c in same_exp_all if c["details"]["strike_price"] == lower_K), None)
-    if not long_leg_contract:
-        return {"error": f"Could not find listed contract at strike {lower_K}"}
+        lower_K = _round_to_listed_strike(lower_target, available_strikes)
+        long_leg_contract = next((c for c in same_exp_all if c["details"]["strike_price"] == lower_K), None)
+        if not long_leg_contract:
+            return {"error": f"Could not find listed contract at strike {lower_K}"}
 
     legs = [{"side": "long", **_contract_summary(long_leg_contract, S, risk_free, today)}]
 
     if strategy == "bull_call_spread" and upper_target:
+        lower_K = legs[0]["strike"]
         upper_K = _round_to_listed_strike(upper_target, available_strikes)
         if upper_K <= lower_K:
             higher_strikes = [s for s in available_strikes if s > lower_K]
@@ -365,9 +403,30 @@ def _build_strategy(row: dict, contracts: list[dict], today: date,
             f"tenor mismatch: chose {chosen_dte} DTE vs target {target_dte} DTE for horizon '{horizon}' (longest listed expiration)"
         )
 
+    # Long-call-specific extras
+    long_call_extras = {}
+    if strategy == "long_call":
+        long_strike = legs[0]["strike"]
+        long_delta = legs[0].get("delta")
+        if long_strike < S * 0.98:
+            moneyness = "ITM"
+        elif long_strike > S * 1.02:
+            moneyness = "OTM"
+        else:
+            moneyness = "ATM"
+        gain_aggr = max(0.0, aggr_pt - long_strike) * 100 - net_debit * 100
+        gain_cons = (max(0.0, cons_pt - long_strike) * 100 - net_debit * 100) if cons_pt else None
+        long_call_extras = {
+            "long_call_delta": long_delta,
+            "long_call_moneyness": moneyness,
+            "approx_gain_at_aggr_pt_per_contract": round(gain_aggr, 2),
+            "approx_gain_at_cons_pt_per_contract": round(gain_cons, 2) if gain_cons is not None else None,
+        }
+
     return {
         "tier": tier,
         "strategy": strategy,
+        "strategy_mode": strategy_mode,
         "expiration": exp,
         "dte": legs[0]["dte"],
         "horizon": horizon,
@@ -382,6 +441,7 @@ def _build_strategy(row: dict, contracts: list[dict], today: date,
         "risk_reward": round(rr, 2) if rr else None,
         "upside_to_short_strike_pct": round(upside_to_short_strike, 2) if upside_to_short_strike is not None else None,
         "liquidity_warnings": liquidity_warnings or None,
+        **long_call_extras,
     }
 
 
@@ -390,7 +450,9 @@ def _build_strategy(row: dict, contracts: list[dict], today: date,
 # ──────────────────────────────────────────────────────────────────────
 
 def _build_per_ticker_overlay(row: dict, today: date, risk_free: float,
-                              min_oi: int) -> dict:
+                              min_oi: int,
+                              strategy_mode: str = "tier-driven",
+                              long_call_delta: float = 0.55) -> dict:
     t = row["ticker"]
     S = row.get("current_price_usd")
     aggr_pt = row.get("aggressive_pt")
@@ -425,7 +487,9 @@ def _build_per_ticker_overlay(row: dict, today: date, risk_free: float,
         return {"ticker": t, "name": row.get("name"),
                 "skipped": f"no listed call chain in window {exp_min_date.isoformat()}..{exp_max_date.isoformat()} K {strike_min:.2f}-{strike_max:.2f}"}
 
-    strat = _build_strategy(row, chain, today, risk_free, min_oi)
+    strat = _build_strategy(row, chain, today, risk_free, min_oi,
+                            strategy_mode=strategy_mode,
+                            long_call_delta=long_call_delta)
     return {
         "ticker": t,
         "name": row.get("name"),
@@ -467,62 +531,112 @@ def _strategy_label(s: str | None) -> str:
 
 
 def _render_md(run_id: str, overlays: list[dict], today: date,
-               risk_free: float, min_oi: int) -> str:
+               risk_free: float, min_oi: int,
+               strategy_mode: str = "tier-driven",
+               long_call_delta: float = 0.55) -> str:
     valid = [o for o in overlays if "strategy" in o and "error" not in o]
     skipped = [o for o in overlays if "skipped" in o or "error" in o]
+
+    mode_label = (
+        f"Long-call (target Δ {long_call_delta})"
+        if strategy_mode == "long-call" else "Tier-driven (A/B → spreads, C → long calls)"
+    )
 
     lines = [
         f"# Options overlay · {run_id}",
         "",
-        f"**Generated**: {today.isoformat()} · **Risk-free rate**: {risk_free:.1%} · **Min OI filter**: {min_oi}",
+        f"**Generated**: {today.isoformat()} · **Risk-free rate**: {risk_free:.1%} · **Min OI filter**: {min_oi} · **Mode**: {mode_label}",
         "",
         f"**Picks analyzed**: {len(overlays)} · **Strategies built**: {len(valid)} · **Skipped**: {len(skipped)}",
         "",
         "## Strategy mapping",
         "",
-        "Per the dual-frame asymmetry convention (see `trade_synthesis.md`), each pick maps to an options structure based on its tier:",
+    ]
+
+    if strategy_mode == "long-call":
+        lines += [
+            f"All picks → **single long call** at delta ≈ {long_call_delta} (slightly ITM by default for less time decay and more stock-like price action). Tier label is preserved for sizing guidance:",
+            "",
+            "| Tier | Sizing guidance |",
+            "|---|---|",
+            "| **A** (cons PT set, comp < 5%) | Full intended exposure. Both frames target the same zone. |",
+            "| **B** (cons PT set, comp ≥ 5%) | 75% of intended exposure. Cons skeptical → take profits at cons PT. |",
+            "| **C** (cons declined to set PT) | Starter size only. Add only on confirmed entry triggers. |",
+            "",
+            f"Long-call mode chooses the listed call whose Polygon-reported delta is closest to {long_call_delta}, with a fallback to ATM-by-strike if no contract reports a delta. **Long calls have unbounded profit, simpler P&L, no leg-management — at the cost of higher premium and full directional time-decay exposure.**",
+            "",
+        ]
+    else:
+        lines += [
+            "Per the dual-frame asymmetry convention (see `trade_synthesis.md`), each pick maps to an options structure based on its tier:",
+            "",
+            "| Tier | Strategy | Rationale |",
+            "|---|---|---|",
+            "| **A** (cons PT set, comp < 5%) | Bull call spread | Both frames model the same target — defined-risk capture of the agreed move. Negative-compression names use cons PT as the upper strike. |",
+            "| **B** (cons PT set, comp ≥ 5%) | Bull call spread | Cons engaged but skeptical — use cons PT as upper strike (conservative-blessed take-profit). |",
+            "| **C** (cons did not set PT) | Long call | Aggressive-only thesis — no credible upper bound from cons; pay for full upside, smaller premium spend. |",
+            "",
+        ]
+
+    lines += [
+        "Tenor selection follows the aggressive horizon: `3-6m → ~120 DTE`, `6-12m → ~270 DTE`, `6-18m → ~365 DTE`. Longest available expiration is used when LEAPs are not listed.",
         "",
-        "| Tier | Strategy | Rationale |",
-        "|---|---|---|",
-        "| **A** (cons PT set, comp < 5%) | Bull call spread | Both frames model the same target — defined-risk capture of the agreed move. Negative-compression names use cons PT as the upper strike. |",
-        "| **B** (cons PT set, comp ≥ 5%) | Bull call spread | Cons engaged but skeptical — use cons PT as upper strike (conservative-blessed take-profit). |",
-        "| **C** (cons did not set PT) | Long call | Aggressive-only thesis — no credible upper bound from cons; pay for full upside, smaller premium spend. |",
+        "Pricing uses Polygon's reported implied volatility per contract via Black-Scholes when bid/ask is unavailable. **Always validate strikes, IV, and net debit on a real broker chain before trading** — Polygon snapshot data may lag intraday quotes.",
         "",
-        "Tenor selection follows the aggressive horizon: `3-6m → ~120 DTE`, `6-12m → ~210 DTE`, `6-18m → ~365 DTE`.",
-        "",
-        "Pricing uses Polygon's reported implied volatility per contract via Black-Scholes when bid/ask is unavailable. "
-        "**Always validate strikes, IV, and net debit on a real broker chain before trading** — Polygon snapshot data may lag intraday quotes.",
-        "",
-        "## Picks · ranked by tier × upside-to-short-strike",
+        "## Picks · ranked by tier × upside",
         "",
     ]
 
     def sort_key(o: dict) -> tuple:
         tier_order = {"A": 0, "B": 1, "C": 2}.get(o.get("tier", "—"), 3)
+        if strategy_mode == "long-call":
+            gain = o.get("approx_gain_at_aggr_pt_per_contract") or 0
+            return (tier_order, -gain)
         upside = o.get("upside_to_short_strike_pct") or 0
         return (tier_order, -upside)
 
     valid_sorted = sorted(valid, key=sort_key)
 
-    lines += [
-        "| Tkr | Tier | Strategy | Exp | DTE | Long K | Short K | Net Debit | Max Profit | Breakeven | RR | Upside to short K | Liq |",
-        "|---|:--:|---|---|--:|--:|--:|--:|--:|--:|--:|--:|:--:|",
-    ]
+    if strategy_mode == "long-call":
+        lines += [
+            "| Tkr | Tier | Exp | DTE | Strike | Δ | M/ness | Net Debit | Breakeven | Gain @ Aggr PT | Gain @ Cons PT | Liq |",
+            "|---|:--:|---|--:|--:|--:|:--:|--:|--:|--:|--:|:--:|",
+        ]
+    else:
+        lines += [
+            "| Tkr | Tier | Strategy | Exp | DTE | Long K | Short K | Net Debit | Max Profit | Breakeven | RR | Upside to short K | Liq |",
+            "|---|:--:|---|---|--:|--:|--:|--:|--:|--:|--:|--:|:--:|",
+        ]
     for o in valid_sorted:
         legs = o.get("legs") or []
         long_k = legs[0]["strike"] if legs else None
         short_k = legs[1]["strike"] if len(legs) > 1 else None
-        rr = o.get("risk_reward")
-        rr_str = f"{rr:.2f}×" if rr else "—"
         liq = "⚠" if o.get("liquidity_warnings") else "✓"
-        lines.append(
-            f"| **{o['ticker']}** | {o['tier']} | {_strategy_label(o['strategy'])} | "
-            f"{o['expiration']} | {o['dte']} | {_fmt_money(long_k)} | {_fmt_money(short_k)} | "
-            f"{_fmt_money(o['net_debit_per_share'])} | "
-            f"{_fmt_money((o['max_profit_per_contract'] / 100) if o.get('max_profit_per_contract') else None)} | "
-            f"{_fmt_money(o['breakeven_underlying'])} | {rr_str} | "
-            f"{_fmt_pct(o.get('upside_to_short_strike_pct'))} | {liq} |"
-        )
+        if strategy_mode == "long-call":
+            d = o.get("long_call_delta")
+            d_str = f"{d:.2f}" if d is not None else "—"
+            m = o.get("long_call_moneyness", "—")
+            gain_a = o.get("approx_gain_at_aggr_pt_per_contract")
+            gain_c = o.get("approx_gain_at_cons_pt_per_contract")
+            gain_a_str = f"${gain_a:,.0f}" if gain_a is not None else "—"
+            gain_c_str = f"${gain_c:,.0f}" if gain_c is not None else "—"
+            lines.append(
+                f"| **{o['ticker']}** | {o['tier']} | {o['expiration']} | {o['dte']} | "
+                f"{_fmt_money(long_k)} | {d_str} | {m} | "
+                f"{_fmt_money(o['net_debit_per_share'])} | {_fmt_money(o['breakeven_underlying'])} | "
+                f"{gain_a_str} | {gain_c_str} | {liq} |"
+            )
+        else:
+            rr = o.get("risk_reward")
+            rr_str = f"{rr:.2f}×" if rr else "—"
+            lines.append(
+                f"| **{o['ticker']}** | {o['tier']} | {_strategy_label(o['strategy'])} | "
+                f"{o['expiration']} | {o['dte']} | {_fmt_money(long_k)} | {_fmt_money(short_k)} | "
+                f"{_fmt_money(o['net_debit_per_share'])} | "
+                f"{_fmt_money((o['max_profit_per_contract'] / 100) if o.get('max_profit_per_contract') else None)} | "
+                f"{_fmt_money(o['breakeven_underlying'])} | {rr_str} | "
+                f"{_fmt_pct(o.get('upside_to_short_strike_pct'))} | {liq} |"
+            )
 
     lines += ["", "## Per-pick details", ""]
 
@@ -570,6 +684,21 @@ def _render_md(run_id: str, overlays: list[dict], today: date,
                 f"- Max loss: ${o['max_loss_per_contract']:,.0f}/contract (premium paid)",
                 "- Max profit: unbounded (long call)",
             ]
+            d = o.get("long_call_delta")
+            m = o.get("long_call_moneyness")
+            if d is not None or m:
+                d_str = f"Δ {d:.2f}" if d is not None else "Δ —"
+                lines.append(f"- Strike profile: {d_str} · {m or '—'}")
+            gain_a = o.get("approx_gain_at_aggr_pt_per_contract")
+            gain_c = o.get("approx_gain_at_cons_pt_per_contract")
+            if gain_a is not None:
+                pct_a = (gain_a / (o['net_debit_per_contract'] or 1)) * 100 if o.get('net_debit_per_contract') else None
+                pct_str = f" ({_fmt_pct(pct_a)} on premium)" if pct_a is not None else ""
+                lines.append(f"- Approx P&L if aggressive PT hits at expiry: **${gain_a:,.0f}/contract**{pct_str}")
+            if gain_c is not None:
+                pct_c = (gain_c / (o['net_debit_per_contract'] or 1)) * 100 if o.get('net_debit_per_contract') else None
+                pct_str = f" ({_fmt_pct(pct_c)} on premium)" if pct_c is not None else ""
+                lines.append(f"- Approx P&L if conservative PT hits at expiry: ${gain_c:,.0f}/contract{pct_str}")
         lines += [
             f"- Breakeven at expiration: {_fmt_money(o['breakeven_underlying'])} "
             f"({_fmt_pct(o['breakeven_pct_from_current'])} from current)",
@@ -589,16 +718,28 @@ def _render_md(run_id: str, overlays: list[dict], today: date,
             lines.append(f"- **{o['ticker']}**: {reason}")
         lines.append("")
 
-    lines += [
-        "## Caveats",
-        "",
-        "- **Pricing model**: Black-Scholes with Polygon's reported per-contract IV. Bid/ask is often unavailable in the snapshot endpoint outside US market hours; when missing, prices are BS-estimates marked `bs` in the source column. Validate on a live broker chain before trading.",
-        "- **American-style assumption**: BS undervalues American calls slightly when there's an upcoming dividend; for non-dividend names this is negligible.",
-        "- **Min OI filter is loose**: this script defaults to OI ≥ 50, which is fine for typical mid- and large-cap chains but may surface illiquid strikes. Tighten to ≥ 100 or ≥ 250 for production sizing.",
-        "- **No multi-leg validation**: spreads are picked from listed contracts at the *same expiration*, but the script doesn't validate that both legs are simultaneously executable (broker may show wider markets on one leg).",
-        "- **Tier C uses ATM long calls**: this is the highest-premium structure. Consider ITM (delta 0.65–0.75) for less time decay or OTM (delta 0.35) for cheaper directional speculation, depending on conviction.",
-        "",
-    ]
+    if strategy_mode == "long-call":
+        lines += [
+            "## Caveats",
+            "",
+            "- **Pricing model**: Black-Scholes with Polygon's reported per-contract IV. Bid/ask is often unavailable in the snapshot endpoint outside US market hours; when missing, prices are BS-estimates marked `bs` in the source column. Validate on a live broker chain before trading.",
+            "- **Long-call exposure**: full directional time-decay risk — the position bleeds theta if the underlying chops sideways. A move in the right direction by the right time is essential.",
+            f"- **Strike target Δ {long_call_delta}**: chosen for less time decay than ATM and more leverage than deep ITM. Lower delta (e.g. 0.40) for cheaper OTM speculation; higher delta (e.g. 0.70) for more stock-like behavior.",
+            "- **Approx-gain at PT**: assumes the underlying hits the agent's price target *at expiration*. Mid-life moves are worth more (extrinsic value still in the contract); leaving room for early exits is prudent.",
+            "- **Min OI filter is loose**: defaults to OI ≥ 50, fine for typical mid- and large-cap chains but may surface illiquid strikes. Tighten to ≥ 100 or ≥ 250 for production sizing.",
+            "",
+        ]
+    else:
+        lines += [
+            "## Caveats",
+            "",
+            "- **Pricing model**: Black-Scholes with Polygon's reported per-contract IV. Bid/ask is often unavailable in the snapshot endpoint outside US market hours; when missing, prices are BS-estimates marked `bs` in the source column. Validate on a live broker chain before trading.",
+            "- **American-style assumption**: BS undervalues American calls slightly when there's an upcoming dividend; for non-dividend names this is negligible.",
+            "- **Min OI filter is loose**: this script defaults to OI ≥ 50, which is fine for typical mid- and large-cap chains but may surface illiquid strikes. Tighten to ≥ 100 or ≥ 250 for production sizing.",
+            "- **No multi-leg validation**: spreads are picked from listed contracts at the *same expiration*, but the script doesn't validate that both legs are simultaneously executable (broker may show wider markets on one leg).",
+            "- **Tier C uses ATM long calls**: this is the highest-premium structure. Consider ITM (delta 0.65–0.75) for less time decay or OTM (delta 0.35) for cheaper directional speculation, depending on conviction.",
+            "",
+        ]
     return "\n".join(lines)
 
 
@@ -614,6 +755,12 @@ def main():
                    help="Annualized risk-free rate (default 4.5%%)")
     p.add_argument("--min-oi", type=int, default=50,
                    help="Minimum open interest for strike eligibility (default 50)")
+    p.add_argument("--strategy-mode", choices=["tier-driven", "long-call"],
+                   default="tier-driven",
+                   help="'tier-driven' (default): A/B → bull call spreads, C → long calls. "
+                        "'long-call': always single long call regardless of tier.")
+    p.add_argument("--long-call-delta", type=float, default=0.55,
+                   help="Target delta for long-call mode strike selection (default 0.55, slightly ITM)")
     p.add_argument("--snapshot-date", default=None,
                    help="Override 'today' for DTE calc (YYYY-MM-DD); defaults to system date")
     args = p.parse_args()
@@ -630,13 +777,19 @@ def main():
     today = date.fromisoformat(args.snapshot_date) if args.snapshot_date else date.today()
 
     print(f"[options] matrix: {matrix_run.name} · picks: {len(picks)} · "
-          f"today: {today.isoformat()} · rf: {args.risk_free:.1%} · min OI: {args.min_oi}")
+          f"today: {today.isoformat()} · rf: {args.risk_free:.1%} · min OI: {args.min_oi} · "
+          f"mode: {args.strategy_mode}"
+          + (f" (target Δ {args.long_call_delta})" if args.strategy_mode == "long-call" else ""))
 
     overlays = []
     for i, row in enumerate(picks, 1):
         t = row["ticker"]
         print(f"  [{i}/{len(picks)}] {t} ...", end=" ", flush=True)
-        ovl = _build_per_ticker_overlay(row, today, args.risk_free, args.min_oi)
+        ovl = _build_per_ticker_overlay(
+            row, today, args.risk_free, args.min_oi,
+            strategy_mode=args.strategy_mode,
+            long_call_delta=args.long_call_delta,
+        )
         if "skipped" in ovl:
             print(f"skipped ({ovl['skipped']})")
         elif ovl.get("error"):
@@ -647,9 +800,15 @@ def main():
             nd = ovl["net_debit_per_share"]
             be = ovl["breakeven_underlying"]
             warn = " ⚠liquidity" if ovl.get("liquidity_warnings") else ""
-            print(f"tier {tier} · {strat} · debit ${nd:.2f}/sh · BE ${be:.2f}{warn}")
+            extra = ""
+            if ovl["strategy"] == "long_call":
+                d = ovl.get("long_call_delta")
+                m = ovl.get("long_call_moneyness", "")
+                if d is not None:
+                    extra = f" · Δ{d:.2f} {m}"
+            print(f"tier {tier} · {strat} · debit ${nd:.2f}/sh · BE ${be:.2f}{extra}{warn}")
         overlays.append(ovl)
-        time.sleep(1.5)  # Polite pacing for Polygon
+        time.sleep(1.5)
 
     # Persist
     out_json = matrix_run / "options_overlay.json"
@@ -660,12 +819,16 @@ def main():
         "snapshot_date": today.isoformat(),
         "risk_free_rate": args.risk_free,
         "min_open_interest": args.min_oi,
+        "strategy_mode": args.strategy_mode,
+        "long_call_delta_target": args.long_call_delta if args.strategy_mode == "long-call" else None,
         "picks_analyzed": len(overlays),
         "strategies_built": sum(1 for o in overlays if "strategy" in o and "error" not in o),
         "overlays": overlays,
     }, indent=2, default=str))
 
-    out_md.write_text(_render_md(matrix_run.name, overlays, today, args.risk_free, args.min_oi))
+    out_md.write_text(_render_md(matrix_run.name, overlays, today,
+                                 args.risk_free, args.min_oi,
+                                 args.strategy_mode, args.long_call_delta))
 
     print()
     print(f"  ✅ {out_json}")
