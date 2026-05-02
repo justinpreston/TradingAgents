@@ -1,0 +1,304 @@
+# Coding-agent runbook — TradingAgents
+
+> **Read this first.** This file is the canonical operational guide for Claude
+> Code, GitHub Copilot, Cursor, or any other agent working in this repo. It
+> describes the locked-in pipeline cadence, command surface, and the invariants
+> that have historically broken when ignored.
+>
+> If you update this file, also update `.github/copilot-instructions.md`
+> (which is a pointer plus the most critical must-knows).
+
+---
+
+## TL;DR — running the pipeline
+
+```bash
+# Weekly Friday tick — auto-detects what's new vs catalog and prints next-step commands
+.venv/bin/python scripts/weekly_workflow.py --top 25
+
+# Reuse an existing screener output (e.g. you already ran it earlier today)
+.venv/bin/python scripts/weekly_workflow.py \
+    --use-screener-run runs/screener_<id> --top 25
+
+# Auto-launch matrix on the NEW tickers only (skips wasteful re-screening)
+.venv/bin/python scripts/weekly_workflow.py --top 25 --chain --chain-top 5
+
+# Same-day options refresh before any entry
+.venv/bin/python scripts/build_options_overlay.py \
+    --matrix-run runs/<matrix_id> --strategy-mode long-call
+
+# Tests (baseline: 267 pass, 41 subtests)
+.venv/bin/python -m pytest tests/ -x -q
+```
+
+---
+
+## The locked-in cadence
+
+User's explicit instruction (do not re-litigate without confirmation):
+
+> *"For your current workflow (long calls, multi-month tenors), a weekly
+> Friday screener + on-demand matrix on new names + same-day options refresh
+> before entry is the right rhythm."*
+
+| When | What | How |
+|---|---|---|
+| **Weekly, Friday EOD** | Run the screener | `scripts/weekly_workflow.py --top 25` |
+| **On-demand** | Matrix-run only NEW tickers (diff vs catalog) | `--chain --chain-top N` (or copy-paste from Phase 5 output) |
+| **Same-day, before entry** | Refresh options overlay | `scripts/build_options_overlay.py --matrix-run runs/<id> --strategy-mode long-call` |
+
+**Override triggers** (re-run outside cadence):
+- Earnings on an active pick → re-matrix that single ticker.
+- VIX > 25 or SPX −5%/week → full re-screen (regime shift).
+- Quarter-end → full refresh (screen + matrix + options).
+
+A launchd plist for Friday 17:00 local exists at
+`scripts/launchd/com.tradingagents.weekly.plist`. Install with:
+```bash
+cp scripts/launchd/com.tradingagents.weekly.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.tradingagents.weekly.plist
+```
+The launchd job intentionally does **not** auto-chain matrix runs — review the
+NEW ticker list before spending LLM cycles on it.
+
+---
+
+## Pipeline architecture
+
+```
+run_screener.py  →  runs/screener_<TS>/{screener.json, top_tickers.txt}
+                         │
+                         ▼
+run_copilot_matrix.py  →  runs/matrix_<TS>_top25/
+                            ├ cells/aggressive/<T>/<T>.state.json   (Stage A)
+                            └ cells/conservative/<T>/<T>.state.json (Stage B, on promotes)
+                            
+scripts/build_run_accounting.py  →  same dir, adds:
+                            ├ verdict_ledger.{csv,json}     ← AUTHORITATIVE per-ticker results
+                            ├ trade_synthesis.md            ← human-readable narrative
+                            ├ per_ticker/<T>.md
+                            └ current_prices.json
+
+scripts/build_options_overlay.py  →  same dir, adds:
+                            └ options_overlay.{md,json}     ← Polygon-pulled options structures
+
+scripts/build_html_report.py  →  runs/cross_run_<DATE>/report.html  (cross-run dashboard)
+
+scripts/index_runs.py  →  runs/index.db                     ← SQLite catalog (DERIVED, regenerable)
+
+scripts/weekly_workflow.py  →  orchestrates SCREEN → INDEX → DIFF → CHAIN → REPORT
+```
+
+`run_copilot_persona_aligned.py` is the per-ticker subrunner each matrix cell
+shells out to. Other runners (`run_copilot_aggressive_aligned.py`,
+`run_copilot_opus*.py`) exist for ad-hoc / experimental work.
+
+---
+
+## User preferences (drive defaults)
+
+1. **Long calls over multi-leg structures** — *"for ease of trading"*. Single
+   fill, no leg management, unbounded upside.
+   - Default mode: `--strategy-mode long-call --long-call-delta 0.55` (slightly
+     ITM — less time decay than ATM, retains leverage).
+   - The other mode (`--strategy-mode tier-driven`: A/B → bull call spreads,
+     C → ATM long calls) is still available for comparison/back-test.
+2. **Trade recommendations always include current price.** Without it,
+   risk/reward and upside are meaningless. Polygon
+   `/v2/aggs/ticker/{T}/prev` is the canonical source.
+3. **Hybrid storage** — raw JSON/markdown files in `runs/<id>/` are the
+   authoritative source of truth (immutable, easy to inspect). The SQLite
+   catalog `runs/index.db` is purely derived/regenerable for cross-run
+   queries. **Never write authoritative data to `index.db`. Never commit it.**
+4. **Cross-run reasoning matters.** When the user asks about a name, check
+   `runs/index.db` first via `scripts/index_runs.py --query` to see how often
+   it has appeared and at what tier.
+
+---
+
+## Tier A/B/C classification (canonical, must keep in sync)
+
+Tier is **derived per-row**, NOT a stored field. The `classification` column
+in `verdict_ledger.json` only takes values `PICK` or `VETOED`.
+
+```python
+def _tier(row):
+    if row['classification'] != 'PICK':
+        return 'VETO' if row['classification'] == 'VETOED' else '—'
+    if row.get('conservative_pt') is None:
+        return 'C'   # cons declined to model
+    if row.get('pt_compression_pct') is not None and row['pt_compression_pct'] < 5.0:
+        return 'A'   # tight dual-frame agreement
+    return 'B'       # cons engaged but skeptical
+```
+
+Implementations that must stay in sync:
+- `scripts/build_options_overlay.py::_tier()` (lines 65–73)
+- `scripts/index_runs.py::_classification_to_tier()` (lines 145–161)
+
+If the 5.0 threshold ever changes, both files must change together.
+
+**Empirical context** (cross-run, indexed in `runs/index.db`):
+
+| Tier | Long-call avg ROI | Notes |
+|---|---:|---|
+| A | **−35%** | "Equity only" — 5–7% modeled upside doesn't clear long-call premium. |
+| B | **+108%** ⭐ | Cons engaged but skeptical → wider modeled aggressive PT, premium clears it. |
+| C | **+41%** | Aggressive-only thesis. Stay at starter size. |
+
+---
+
+## Subprocess invariants (these have all broken matrix runs historically)
+
+1. **`stdin=subprocess.DEVNULL`** on every child process call. Without it,
+   headless / CI invocations hang waiting for input. Fixed in commit
+   `50b41e4`. Applies to: `run_copilot_matrix.py`, `weekly_workflow.py::_run()`,
+   anything that shells out to a per-ticker runner.
+2. **Flag is `--max-parallel`, NOT `--parallel`** on `run_copilot_matrix.py`.
+3. **`--stop-on-overweight 0`** for full-coverage matrix runs (otherwise the
+   matrix terminates on the first OVERWEIGHT verdict).
+4. **`load_dotenv('.env')` with explicit path** (Python 3.13 has a heredoc
+   invocation quirk where the implicit search path misses).
+
+---
+
+## Run output anatomy
+
+```
+runs/matrix_2026-05-01_top25/
+├── verdict_ledger.csv             ← spreadsheet-friendly per-ticker verdicts
+├── verdict_ledger.json            ← AUTHORITATIVE, programmatic source
+├── trade_synthesis.md             ← human narrative (top picks, asymmetry, tier breakdown)
+├── README.md                      ← run metadata
+├── current_prices.json
+├── options_overlay.md             ← human-readable options structures
+├── options_overlay.json           ← programmatic options data (consumed by HTML report + indexer)
+├── per_ticker/
+│   └── <T>.md                     ← per-ticker drilldown
+├── cells/
+│   ├── aggressive/<T>/<T>.state.json
+│   └── conservative/<T>/<T>.state.json
+└── manifest.json
+```
+
+`verdict_ledger.json` is the cross-script contract. Fields consumed downstream:
+`ticker`, `name`, `sector_sic`, `market_cap`, `current_price`,
+`aggressive_*`, `conservative_*`, `pt_compression_pct`, `classification`,
+`aggressive_executive_summary`.
+
+---
+
+## Setup / first-run
+
+```bash
+# Python 3.10+ required. The repo's existing venv lives at .venv/
+.venv/bin/python -m pip install -e .
+
+# Required env vars (in .env at repo root)
+POLYGON_API_KEY=...        # mandatory for screener + options overlay
+OPENAI_API_KEY=...         # OR any other supported LLM provider:
+ANTHROPIC_API_KEY=...      # (GOOGLE/XAI/DEEPSEEK/DASHSCOPE/ZHIPU/OPENROUTER)
+
+# Tests baseline
+.venv/bin/python -m pytest tests/ -x -q
+# → 267 passed, 41 subtests passed in ~4s
+```
+
+`runs/` is fully gitignored (so `runs/index.db` and all per-run artifacts
+stay local). `.env` is also gitignored.
+
+---
+
+## Common workflows
+
+### Weekly tick (most common)
+```bash
+.venv/bin/python scripts/weekly_workflow.py --top 25
+```
+Phase 3 (DIFF) prints NEW vs REPEAT vs DROPPED against the last matrix run.
+Phase 5 prints the exact next-step commands.
+
+### Just refresh options on an existing matrix
+```bash
+.venv/bin/python scripts/build_options_overlay.py \
+    --matrix-run runs/<matrix_id> \
+    --strategy-mode long-call \
+    --long-call-delta 0.55
+```
+
+### Build the cross-run HTML dashboard
+```bash
+.venv/bin/python scripts/build_html_report.py \
+    --runs runs/<matrix_id_1>:large runs/<matrix_id_2>:mid \
+    --output runs/cross_run_$(date +%Y-%m-%d)/report.html
+```
+
+### Query the catalog
+```bash
+# Summary
+.venv/bin/python scripts/index_runs.py --query
+
+# Or raw SQL
+sqlite3 runs/index.db "SELECT ticker, COUNT(*) AS n FROM ticker_history GROUP BY ticker ORDER BY n DESC LIMIT 10"
+```
+
+### Force re-index (e.g. after editing an indexer field)
+```bash
+.venv/bin/python scripts/index_runs.py --force
+```
+
+---
+
+## CLI flag reference (all scripts)
+
+`run_screener.py`: `--top`, `--chain-top`, `--chain-runner`, `--target-date`,
+`--output-dir`, `--technical-weight`, `--fundamental-weight`,
+`--min-mcap`, `--max-mcap`, `--min-dollar-adv`, `--min-price`,
+`--universe-limit`, `--min-request-interval`.
+
+`run_copilot_matrix.py`: `--tickers ...` **xor** `--tickers-from-latest-screener`,
+`--top N`, `--profiles aggressive conservative`, `--max-parallel`,
+`--stop-on-overweight`, `--no-stage-b`, `--date`, `--run-id`,
+`--no-dashboard`.
+
+`run_copilot_persona_aligned.py`: `<tickers>...`, `--run-id`, `--date`.
+
+`scripts/build_options_overlay.py`: `--matrix-run`, `--strategy-mode {tier-driven,long-call}`,
+`--long-call-delta` (default 0.55), `--min-oi`, `--risk-free`,
+`--ticker-limit`, `--snapshot-date`, `--verbose`.
+
+`scripts/build_run_accounting.py`: `--matrix-run`, `--snapshot-date`.
+
+`scripts/build_html_report.py`: `--runs`, `--output`, `--title`, `--subtitle`.
+
+`scripts/index_runs.py`: `--runs-dir`, `--db`, `--force`, `--query`, `--verbose`.
+
+`scripts/weekly_workflow.py`: `--top`, `--use-screener-run`, `--chain`,
+`--chain-top`, `--chain-runner`, `--dry-run`.
+
+---
+
+## Don'ts
+
+- ❌ Don't add new dependencies casually — `requirements.txt` is intentionally
+  minimal (`.` for editable). Heavy deps go in `pyproject.toml::dependencies`.
+- ❌ Don't commit anything under `runs/` — it's all gitignored for a reason.
+- ❌ Don't write to `runs/index.db` from anywhere except `scripts/index_runs.py`.
+- ❌ Don't add `--parallel` thinking it's an alias for `--max-parallel`. It isn't.
+- ❌ Don't drop the `stdin=subprocess.DEVNULL` from any subprocess invocation.
+- ❌ Don't rebuild the cadence around an arbitrary daily/intraday loop. The
+  user explicitly chose weekly + on-demand. If you think a different cadence
+  is better, raise it as a question, don't unilaterally implement it.
+
+---
+
+## Persisted session notes
+
+`~/.copilot/session-state/<id>/files/codebase_conventions.md` carries
+session-survival-grade notes. If `store_memory` is unavailable to your agent
+(e.g. the GitHub Copilot CLI memory store rejects writes for personal
+forks), persist new conventions there instead.
+
+A shell wrapper at `~/.zshrc` routes the GitHub Copilot CLI memory store to
+the correct identity for `justinpreston/*` repos. See
+`files/codebase_conventions.md` "store_memory limitation" for details.
