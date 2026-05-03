@@ -185,13 +185,17 @@ def _now() -> str:
 
 
 def _classify_run(run_dir: Path) -> str | None:
-    """Return run_type or None if unindexable."""
-    name = run_dir.name
-    if name.startswith("screener_") and (run_dir / "screener.json").exists():
+    """Return run_type or None if unindexable.
+
+    Detection prefers content-based markers over name prefixes so user-defined
+    run-ids (e.g. ``weekly_<ts>_chain`` or ``matrix_pipeline_test_<ts>``) are
+    indexed correctly.
+    """
+    if (run_dir / "screener.json").exists():
         return "screener"
-    if name.startswith("matrix_") and (run_dir / "verdict_ledger.json").exists():
+    if (run_dir / "verdict_ledger.json").exists():
         return "matrix"
-    if name.startswith("cross_run_"):
+    if run_dir.name.startswith("cross_run_"):
         return None  # Synthesized from other runs; nothing new to index here
     return None
 

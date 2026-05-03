@@ -103,6 +103,18 @@ def phase_screen(args: argparse.Namespace) -> Path:
     cmd = [".venv/bin/python", "run_screener.py", "--top", str(args.top)]
     if args.target_date:
         cmd += ["--target-date", args.target_date]
+    if args.min_mcap is not None:
+        cmd += ["--min-mcap", str(args.min_mcap)]
+    if args.max_mcap is not None:
+        cmd += ["--max-mcap", str(args.max_mcap)]
+    if args.min_dollar_adv is not None:
+        cmd += ["--min-dollar-adv", str(args.min_dollar_adv)]
+    if args.min_price is not None:
+        cmd += ["--min-price", str(args.min_price)]
+    if args.universe_limit is not None:
+        cmd += ["--universe-limit", str(args.universe_limit)]
+    if args.min_request_interval is not None:
+        cmd += ["--min-request-interval", str(args.min_request_interval)]
     rc = _run(cmd, args.dry_run)
     if rc != 0:
         print(f"  ❌ Screener exited with code {rc}", file=sys.stderr)
@@ -165,8 +177,12 @@ def phase_diff(screener_run: Path, top_n: int, dry_run: bool) -> dict[str, list[
     if CATALOG_DB.exists():
         conn = sqlite3.connect(CATALOG_DB)
         try:
+            # Pick the most recent matrix run that actually produced PICKs.
+            # An empty-pick run (e.g. a single-ticker smoke test) shouldn't
+            # reset the cadence's view of the catalog.
             cur = conn.execute(
-                """SELECT run_id FROM runs WHERE run_type='matrix'
+                """SELECT run_id FROM runs
+                   WHERE run_type='matrix' AND COALESCE(n_picks, 0) > 0
                    ORDER BY snapshot_date DESC, run_id DESC LIMIT 1"""
             )
             row = cur.fetchone()
@@ -202,7 +218,16 @@ def phase_diff(screener_run: Path, top_n: int, dry_run: bool) -> dict[str, list[
 
 
 def phase_chain(screener_run: Path, args: argparse.Namespace, diff: dict) -> None:
-    """Optionally launch the matrix runner directly on NEW tickers."""
+    """Optionally launch the matrix runner directly on NEW tickers.
+
+    The chain runner must be ``run_copilot_matrix.py`` for the rest of the
+    cadence to work — it is the only runner that produces the dual-frame
+    verdict_ledger.json + cells/ structure that
+    ``scripts/build_options_overlay.py`` and ``scripts/build_run_accounting.py``
+    consume. Other runners (e.g. ``run_copilot_persona_aligned.py``) produce
+    flat per-ticker state.json files that downstream cadence scripts can't
+    digest.
+    """
     _hr("Phase 4 · CHAIN")
 
     new_tickers = diff.get("NEW") or []
@@ -222,15 +247,28 @@ def phase_chain(screener_run: Path, args: argparse.Namespace, diff: dict) -> Non
         print(f"     Pass --chain-runner with a valid runner script.")
         return
 
+    is_matrix_runner = runner_path.name == "run_copilot_matrix.py"
+    if not is_matrix_runner:
+        print(f"  ⚠ {runner_path.name} produces flat output that the rest of the")
+        print(f"    cadence (options_overlay, accounting) cannot consume. Use")
+        print(f"    run_copilot_matrix.py for cadence chaining.")
+
     timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
-    run_id = f"weekly_{timestamp}_chain"
+    run_id = f"matrix_weekly_{timestamp}_chain"
 
     print(f"  Matrix-running top-{chain_n} NEW tickers via {runner_path.name}:")
     print(f"    {', '.join(chain_tickers)}")
     print(f"    → run_id = {run_id}")
 
-    cmd = [".venv/bin/python", str(runner_path.relative_to(REPO_ROOT)),
-           *chain_tickers, "--run-id", run_id]
+    cmd = [".venv/bin/python", str(runner_path.relative_to(REPO_ROOT))]
+    if is_matrix_runner:
+        cmd += ["--tickers", *chain_tickers,
+                "--run-id", run_id,
+                "--stop-on-overweight", "0",
+                "--max-parallel", str(args.chain_max_parallel)]
+    else:
+        # Persona-aligned runner takes positional tickers and only --run-id
+        cmd += [*chain_tickers, "--run-id", run_id]
     if args.target_date:
         cmd += ["--date", args.target_date]
 
@@ -253,11 +291,20 @@ def phase_report(screener_run: Path, args: argparse.Namespace, diff: dict) -> No
         target_list = " ".join(new_tickers[:chain_n])
         ts = datetime.now().strftime("%Y-%m-%d_%H%M")
         print(f"\n  🎯 MATRIX (run on {chain_n} NEW tickers — bypasses re-screening):")
-        print(
-            f"     .venv/bin/python {args.chain_runner} \\\n"
-            f"         {target_list} \\\n"
-            f"         --run-id weekly_{ts}_chain"
-        )
+        runner_name = Path(args.chain_runner).name
+        if runner_name == "run_copilot_matrix.py":
+            print(
+                f"     .venv/bin/python {args.chain_runner} \\\n"
+                f"         --tickers {target_list} \\\n"
+                f"         --run-id matrix_weekly_{ts}_chain \\\n"
+                f"         --stop-on-overweight 0 --max-parallel {args.chain_max_parallel}"
+            )
+        else:
+            print(
+                f"     .venv/bin/python {args.chain_runner} \\\n"
+                f"         {target_list} \\\n"
+                f"         --run-id matrix_weekly_{ts}_chain"
+            )
     elif new_tickers and args.chain:
         print("\n  🎯 MATRIX: launched in Phase 4 (above).")
     else:
@@ -300,11 +347,30 @@ def main() -> int:
                    help="Auto-launch matrix on NEW tickers using --chain-runner")
     p.add_argument("--chain-top", type=int, default=5,
                    help="When chaining matrix, how many NEW tickers to feed (default 5)")
-    p.add_argument("--chain-runner", type=str, default="run_copilot_persona_aligned.py",
+    p.add_argument("--chain-runner", type=str, default="run_copilot_matrix.py",
                    help="Runner script to invoke for chained matrix runs "
-                        "(default run_copilot_persona_aligned.py)")
+                        "(default run_copilot_matrix.py — produces verdict_ledger "
+                        "+ cells/ that the rest of the cadence consumes)")
+    p.add_argument("--chain-max-parallel", type=int, default=5,
+                   help="Max parallel cells when chaining matrix runs (default 5)")
     p.add_argument("--dry-run", action="store_true",
                    help="Print commands without executing")
+    # Universe-shaping pass-throughs to run_screener.py. Defaults match the
+    # locked-in cadence that produced runs/screener_2026-05-01_0750
+    # (mid-cap focus: $2B–$10B mcap, $50M ADV, $5 min price). Override here
+    # if you want a different universe.
+    p.add_argument("--min-mcap", type=float, default=2_000_000_000.0,
+                   help="Min market cap in $ (default 2B)")
+    p.add_argument("--max-mcap", type=float, default=10_000_000_000.0,
+                   help="Max market cap in $ (default 10B = mid-cap focus)")
+    p.add_argument("--min-dollar-adv", type=float, default=50_000_000.0,
+                   help="Min 20d dollar ADV in $ (default 50M)")
+    p.add_argument("--min-price", type=float, default=5.0,
+                   help="Min last close in $ (default 5.0)")
+    p.add_argument("--universe-limit", type=int, default=None,
+                   help="Cap stage-2 enrichment for testing (default: no cap)")
+    p.add_argument("--min-request-interval", type=float, default=None,
+                   help="Min seconds between Polygon REST calls (default: screener decides)")
     args = p.parse_args()
 
     started = datetime.now()

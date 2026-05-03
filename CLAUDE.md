@@ -90,8 +90,21 @@ scripts/weekly_workflow.py  →  orchestrates SCREEN → INDEX → DIFF → CHAI
 ```
 
 `run_copilot_persona_aligned.py` is the per-ticker subrunner each matrix cell
-shells out to. Other runners (`run_copilot_aggressive_aligned.py`,
+shells out to — also runnable directly for a quick single-stage analysis on
+one or more tickers (produces flat `<T>.state.json` files; **does not**
+produce the `verdict_ledger.json` + `cells/` structure that
+`build_options_overlay.py`/`build_run_accounting.py` consume — for that you
+need `run_copilot_matrix.py`). Other runners (`run_copilot_aggressive_aligned.py`,
 `run_copilot_opus*.py`) exist for ad-hoc / experimental work.
+
+`scripts/weekly_workflow.py --chain` defaults to `--chain-runner run_copilot_matrix.py`
+for exactly this reason — feed it any other runner and Phase 4 will warn that
+the rest of the cadence can't ingest the output.
+
+`scripts/index_runs.py` detects matrix vs screener runs by the presence of
+`verdict_ledger.json` or `screener.json` (not by directory name), so
+custom run-ids like `matrix_pipeline_test_<id>` or `matrix_weekly_<ts>_chain`
+are indexed correctly.
 
 ---
 
@@ -271,10 +284,14 @@ sqlite3 runs/index.db "SELECT ticker, COUNT(*) AS n FROM ticker_history GROUP BY
 
 `scripts/build_html_report.py`: `--runs`, `--output`, `--title`, `--subtitle`.
 
-`scripts/index_runs.py`: `--runs-dir`, `--db`, `--force`, `--query`, `--verbose`.
+`scripts/index_runs.py`: `--runs-dir`, `--db`, `--force`, `--query`.
 
-`scripts/weekly_workflow.py`: `--top`, `--use-screener-run`, `--chain`,
-`--chain-top`, `--chain-runner`, `--dry-run`.
+`scripts/weekly_workflow.py`: `--top`, `--target-date`, `--use-screener-run`,
+`--chain`, `--chain-top`, `--chain-runner` (default `run_copilot_matrix.py`),
+`--chain-max-parallel`, `--dry-run`, plus universe-shaping pass-throughs:
+`--min-mcap` (default 2B), `--max-mcap` (default 10B = mid-cap focus),
+`--min-dollar-adv` (default 50M), `--min-price` (default 5.0),
+`--universe-limit`, `--min-request-interval`.
 
 ---
 
