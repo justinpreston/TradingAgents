@@ -183,6 +183,21 @@ def _load_earnings_calendar(screener: dict | None,
     return None
 
 
+def _load_macro_snapshot(path: str | None) -> dict | None:
+    """Load a macro_<DATE>.json snapshot. Returns ``None`` if missing/malformed."""
+    if not path:
+        return None
+    p = Path(path)
+    if not p.exists():
+        print(f"  ⚠ macro snapshot not found: {p}")
+        return None
+    try:
+        return json.loads(p.read_text())
+    except json.JSONDecodeError as exc:
+        print(f"  ⚠ macro snapshot malformed at {p}: {exc}")
+        return None
+
+
 def _exposure_key(pos: dict) -> str | None:
     """Return the equity ticker key for matching against matrix verdicts.
 
@@ -1263,6 +1278,12 @@ details.vetoed[open] summary { margin-bottom: 16px; padding-bottom: 12px; border
 .chip-earn-mid { background: rgba(234, 179, 8, 0.15); color: var(--yellow); border: 1px solid rgba(234, 179, 8, 0.30); }
 .chip-earn-far { background: rgba(148, 163, 184, 0.12); color: var(--muted); border: 1px solid rgba(148, 163, 184, 0.25); }
 
+/* Vol-context chips for the options table */
+.vol-chip { display: inline-block; font-size: 12px; padding: 1px 6px; border-radius: 6px; cursor: help; }
+.vol-favorable { background: rgba(34, 197, 94, 0.15); border: 1px solid rgba(34, 197, 94, 0.30); }
+.vol-mixed { background: rgba(234, 179, 8, 0.12); border: 1px solid rgba(234, 179, 8, 0.25); }
+.vol-unfavorable { background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.30); }
+
 /* ── Realized P/L ───────────────────────────────────────────────── */
 .realized-summary {
   display: grid;
@@ -2105,12 +2126,62 @@ def _render_skipped(skipped: list[str] | None) -> str:
     )
 
 
+def _render_macro_banner(snapshot: dict | None) -> str:
+    if not snapshot:
+        return ""
+    regime = snapshot.get("regime", "normal")
+    sig = snapshot.get("signals") or {}
+    triggers = snapshot.get("triggers") or []
+    bg = {
+        "normal": "rgba(34, 197, 94, 0.08)",
+        "defensive": "rgba(234, 179, 8, 0.10)",
+        "halt": "rgba(239, 68, 68, 0.12)",
+    }.get(regime, "rgba(148, 163, 184, 0.08)")
+    border = {
+        "normal": "rgba(34, 197, 94, 0.25)",
+        "defensive": "rgba(234, 179, 8, 0.35)",
+        "halt": "rgba(239, 68, 68, 0.40)",
+    }.get(regime, "rgba(148, 163, 184, 0.25)")
+    accent = {
+        "normal": "var(--green)",
+        "defensive": "var(--yellow)",
+        "halt": "var(--red)",
+    }.get(regime, "var(--muted)")
+    bits = []
+    if sig.get("vix") is not None:
+        bits.append(f"VIX <strong>{sig['vix']:.1f}</strong>")
+    if sig.get("spx_5d_return_pct") is not None:
+        v = sig["spx_5d_return_pct"]
+        bits.append(f"SPX 5d <strong>{v:+.1f}%</strong>")
+    if sig.get("yield_curve_10y_3m_bps") is not None:
+        bits.append(f"10y/3m <strong>{sig['yield_curve_10y_3m_bps']:+.0f}bps</strong>")
+    body = " · ".join(bits) if bits else "no signals"
+    triggers_html = ""
+    if triggers:
+        items = "".join(f"<li>{html.escape(t)}</li>" for t in triggers)
+        triggers_html = f'<ul style="margin: 6px 0 0 20px; padding: 0; font-size: 11px;">{items}</ul>'
+    rec = snapshot.get("recommended_action", "proceed")
+    return (
+        f'<div style="background: {bg}; border: 1px solid {border}; '
+        f'border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; '
+        f'color: var(--text); font-size: 12px;">'
+        f'<span style="color: {accent}; font-weight: 700;">'
+        f'Macro · {regime.upper()}</span>'
+        f' &nbsp;·&nbsp; {body}'
+        f' &nbsp;·&nbsp; <span class="muted">recommended: {html.escape(rec)}'
+        f' (as of {html.escape(snapshot.get("as_of_date", "—"))})</span>'
+        f'{triggers_html}'
+        f'</div>'
+    )
+
+
 def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
            options_map: dict | None = None,
            portfolio: dict | None = None,
            screener: dict | None = None,
            news_enrichment: dict[str, dict] | None = None,
            earnings_calendar: dict[str, dict] | None = None,
+           macro_snapshot: dict | None = None,
            skipped_runs: list[str] | None = None) -> str:
     options_map = options_map or {}
     picks = [r for r in rows if r["classification"] == "PICK"]
@@ -2185,6 +2256,9 @@ def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
 
     # Private banner (only if portfolio supplied)
     parts.append(_render_private_banner(portfolio))
+
+    # Macro regime banner (only if snapshot supplied)
+    parts.append(_render_macro_banner(macro_snapshot))
 
     # Skipped runs warning
     parts.append(_render_skipped(skipped_runs))
@@ -2288,7 +2362,7 @@ def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
         if all_ovls:
             parts.append('<h3 style="margin-top:32px">All picks · options snapshot</h3>')
             parts.append('<div class="table-wrap"><table>')
-            parts.append('<thead><tr><th>Ticker</th><th>Run</th><th>Tier</th><th>Strategy</th><th>Exp</th><th class="num">DTE</th><th class="num">Long K</th><th class="num">Short K</th><th class="num">Net Debit</th><th class="num">Max Profit</th><th class="num">Breakeven</th><th class="num">R/R</th><th>Liq</th></tr></thead>')
+            parts.append('<thead><tr><th>Ticker</th><th>Run</th><th>Tier</th><th>Strategy</th><th>Exp</th><th class="num">DTE</th><th class="num">Long K</th><th class="num">Short K</th><th class="num">Net Debit</th><th class="num">Max Profit</th><th class="num">Breakeven</th><th class="num">R/R</th><th>Vol</th><th>Liq</th></tr></thead>')
             parts.append('<tbody>')
             for r, ovl in all_ovls:
                 legs = ovl.get("legs") or []
@@ -2301,6 +2375,26 @@ def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
                 max_p = ovl.get("max_profit_per_contract")
                 max_p_str = f"${max_p/100:,.2f}" if max_p is not None else "—"
                 liq = "⚠" if ovl.get("liquidity_warnings") else "✓"
+                vc = ovl.get("vol_context") or {}
+                backdrop = vc.get("long_call_backdrop")
+                vol_chip = ""
+                if backdrop in ("favorable", "mixed", "unfavorable"):
+                    vol_label = {
+                        "favorable": "🟢",
+                        "mixed": "🟡",
+                        "unfavorable": "🔴",
+                    }[backdrop]
+                    hv_rank = vc.get("hv_rank_252d")
+                    iv_rv = vc.get("iv_rv_ratio")
+                    title_bits = [f"Long-call backdrop: {backdrop}"]
+                    if hv_rank is not None:
+                        title_bits.append(f"HV rank {hv_rank:.0f}")
+                    if iv_rv is not None:
+                        title_bits.append(f"IV/RV {iv_rv:.2f}×")
+                    title_attr = html.escape(" · ".join(title_bits))
+                    vol_chip = f'<span class="vol-chip vol-{backdrop}" title="{title_attr}">{vol_label}</span>'
+                else:
+                    vol_chip = '<span class="muted">—</span>'
                 parts.append(
                     f'<tr>'
                     f'<td class="tkr">{html.escape(r["ticker"])}</td>'
@@ -2315,6 +2409,7 @@ def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
                     f'<td class="num green-text">{max_p_str}</td>'
                     f'<td class="num">{_fmt_price(ovl.get("breakeven_underlying"))}</td>'
                     f'<td class="num">{rr_str}</td>'
+                    f'<td>{vol_chip}</td>'
                     f'<td>{liq}</td>'
                     f'</tr>'
                 )
@@ -2518,6 +2613,9 @@ def main():
                    help="Path to portfolio_export.json (versioned positions + trades)")
     p.add_argument("--screener-run", default=None,
                    help="Path to a screener_* run dir to render as a watchlist")
+    p.add_argument("--macro", default=None,
+                   help="Path to a macro_<DATE>.json snapshot. When supplied, "
+                        "renders a regime banner at the top of the report.")
     p.add_argument("--allow-missing-runs", action="store_true", default=True,
                    help="Skip runs whose verdict_ledger.json is missing (matrix may be in flight). Default true.")
     p.add_argument("--strict-runs", action="store_true",
@@ -2535,6 +2633,7 @@ def main():
         path_str, _, _ = spec.partition(":")
         extra_dirs.append(Path(path_str))
     earnings_calendar = _load_earnings_calendar(screener, extra_dirs=extra_dirs)
+    macro_snapshot = _load_macro_snapshot(args.macro)
 
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2542,6 +2641,7 @@ def main():
                        options_map=options_map, portfolio=portfolio,
                        screener=screener, news_enrichment=news_enrichment,
                        earnings_calendar=earnings_calendar,
+                       macro_snapshot=macro_snapshot,
                        skipped_runs=skipped)
     out_path.write_text(html_text)
 
@@ -2559,6 +2659,8 @@ def main():
         print(f"     news_enrichment: {len(news_enrichment)} tickers tagged")
     if earnings_calendar:
         print(f"     earnings_calendar: {len(earnings_calendar)} tickers with next-earnings dates")
+    if macro_snapshot:
+        print(f"     macro_snapshot: regime={macro_snapshot.get('regime', '—')} status={macro_snapshot.get('status', '—')}")
     if skipped:
         print(f"     ⚠ skipped {len(skipped)} run(s):")
         for s in skipped:

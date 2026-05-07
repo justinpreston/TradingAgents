@@ -268,6 +268,70 @@ def phase_enrich_earnings(screener_run: Path, ticker_limit: int | None,
               file=sys.stderr)
 
 
+def phase_macro(args: argparse.Namespace) -> tuple[dict | None, Path | None]:
+    """Optional Phase 0 — write runs/macro_<DATE>.json and surface a banner.
+
+    Advisory by default. ``--macro-gate halt`` can hard-block when the
+    snapshot reports ``regime == "halt"``. ``--macro-gate defensive``
+    halves chain-max-parallel when ``regime`` is ``defensive`` or
+    ``halt`` (the user's --chain-max-parallel value, if explicitly set,
+    is preserved with a warning).
+
+    Returns ``(snapshot, path)``. Both are ``None`` when --enrich-macro
+    is off.
+    """
+    if not getattr(args, "enrich_macro", False):
+        return (None, None)
+    _hr("Phase 0 · MACRO REGIME")
+    today_iso = datetime.now().date().isoformat()
+    out_path = REPO_ROOT / "runs" / f"macro_{today_iso}.json"
+    cmd = [
+        ".venv/bin/python", "scripts/build_macro_snapshot.py",
+        "--output", str(out_path),
+        "--quiet",
+        "--vix-defensive", str(args.vix_defensive),
+        "--vix-halt", str(args.vix_halt),
+        "--spx-defensive-pct", str(args.spx_defensive_pct),
+        "--spx-halt-pct", str(args.spx_halt_pct),
+    ]
+    rc = _run(cmd, args.dry_run)
+    if rc != 0 or args.dry_run:
+        print(f"  ⚠ Macro snapshot exited {rc}; continuing in advisory mode",
+              file=sys.stderr)
+        return (None, out_path if out_path.exists() else None)
+    if not out_path.exists():
+        print("  ⚠ Macro snapshot produced no artifact; continuing",
+              file=sys.stderr)
+        return (None, None)
+    try:
+        snap = json.loads(out_path.read_text())
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ⚠ Failed to read macro snapshot: {exc}", file=sys.stderr)
+        return (None, out_path)
+
+    from tradingagents.dataflows.macro_snapshot import render_banner_text
+    print(f"  {render_banner_text(snap)}")
+    print(f"  artifact: {out_path}")
+    regime = snap.get("regime", "normal")
+    gate = getattr(args, "macro_gate", "advisory")
+    if regime == "halt" and gate == "halt":
+        triggers = "; ".join(snap.get("triggers") or ["no triggers"])
+        print(f"  ⛔ HALT regime + --macro-gate halt → exiting non-zero. "
+              f"Triggers: {triggers}", file=sys.stderr)
+        raise SystemExit(2)
+    if regime in ("defensive", "halt") and gate in ("defensive", "halt"):
+        if args.chain_max_parallel > 1:
+            new_max = max(1, args.chain_max_parallel // 2)
+            print(f"  ⚠ {regime.upper()} regime + --macro-gate {gate}: "
+                  f"halving chain-max-parallel {args.chain_max_parallel} → "
+                  f"{new_max}", file=sys.stderr)
+            args.chain_max_parallel = new_max
+    elif regime != "normal":
+        print(f"  ⚠ {regime.upper()} regime detected (--macro-gate "
+              f"{gate}); cadence proceeding unmodified.", file=sys.stderr)
+    return (snap, out_path)
+
+
 def _read_top_tickers(screener_run: Path, top_n: int) -> list[str]:
     """Read top-N tickers from a screener run."""
     top_path = screener_run / "top_tickers.txt"
@@ -582,6 +646,27 @@ def main() -> int:
     p.add_argument("--earnings-history-quarters", type=int, default=8,
                    help="How many past quarters of EPS surprises to capture "
                         "for beat-rate calculation (default 8)")
+    # Optional Phase 0 — macro regime snapshot
+    p.add_argument("--enrich-macro", action="store_true",
+                   help="Run Phase 0 to write runs/macro_<DATE>.json with "
+                        "VIX, SPX 5d return, and 10y/3m yield curve. "
+                        "Advisory by default; see --macro-gate to enforce.")
+    p.add_argument("--macro-gate",
+                   choices=["advisory", "defensive", "halt"],
+                   default="advisory",
+                   help="Action mode for --enrich-macro. 'advisory' (default) "
+                        "only logs and writes the file. 'defensive' halves "
+                        "--chain-max-parallel when regime is defensive/halt. "
+                        "'halt' additionally exits non-zero on halt regime "
+                        "(forces manual review).")
+    p.add_argument("--vix-defensive", type=float, default=25.0,
+                   help="VIX threshold for defensive regime (default 25).")
+    p.add_argument("--vix-halt", type=float, default=35.0,
+                   help="VIX threshold for halt regime (default 35).")
+    p.add_argument("--spx-defensive-pct", type=float, default=-5.0,
+                   help="SPX 5d return %% for defensive regime (default -5).")
+    p.add_argument("--spx-halt-pct", type=float, default=-8.0,
+                   help="SPX 5d return %% for halt regime (default -8).")
     args = p.parse_args()
 
     # Apply tier preset BEFORE running phases — only for flags the user did
@@ -598,6 +683,8 @@ def main() -> int:
     if args.tier:
         print(f"  tier preset → mcap=${args.min_mcap/1e9:.1f}B-${args.max_mcap/1e9:.1f}B "
               f"· ADV ≥ ${args.min_dollar_adv/1e6:.0f}M · price ≥ ${args.min_price:.0f}")
+
+    macro_snap, macro_path = phase_macro(args)
 
     screener_run = phase_screen(args)
     phase_index(args.dry_run)

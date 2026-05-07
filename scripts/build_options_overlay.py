@@ -62,6 +62,10 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(REPO_ROOT / ".env")
 
 from tradingagents.dataflows.polygon_common import _make_request  # noqa: E402
+from tradingagents.dataflows.volatility_context import (  # noqa: E402
+    compute_vol_context,
+    render_vol_advisory,
+)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -501,6 +505,16 @@ def _build_strategy(row: dict, contracts: list[dict], today: date,
             "approx_gain_at_cons_pt_per_contract": round(gain_cons, 2) if gain_cons is not None else None,
         }
 
+    earnings_window_warning = bool(
+        earnings_note and "no later" in earnings_note
+    )
+    vol_context = compute_vol_context(
+        row["ticker"],
+        today=today,
+        current_iv=legs[0].get("iv") or None,
+        earnings_window_warning=earnings_window_warning,
+    )
+
     return {
         "tier": tier,
         "strategy": strategy,
@@ -520,6 +534,7 @@ def _build_strategy(row: dict, contracts: list[dict], today: date,
         "upside_to_short_strike_pct": round(upside_to_short_strike, 2) if upside_to_short_strike is not None else None,
         "liquidity_warnings": liquidity_warnings or None,
         "earnings_note": earnings_note,
+        "vol_context": vol_context,
         **long_call_extras,
     }
 
@@ -680,19 +695,26 @@ def _render_md(run_id: str, overlays: list[dict], today: date,
 
     if strategy_mode == "long-call":
         lines += [
-            "| Tkr | Tier | Exp | DTE | Strike | Δ | M/ness | Net Debit | Breakeven | Gain @ Aggr PT | Gain @ Cons PT | Liq |",
-            "|---|:--:|---|--:|--:|--:|:--:|--:|--:|--:|--:|:--:|",
+            "| Tkr | Tier | Exp | DTE | Strike | Δ | M/ness | Net Debit | Breakeven | Gain @ Aggr PT | Gain @ Cons PT | Vol | Liq |",
+            "|---|:--:|---|--:|--:|--:|:--:|--:|--:|--:|--:|:--:|:--:|",
         ]
     else:
         lines += [
-            "| Tkr | Tier | Strategy | Exp | DTE | Long K | Short K | Net Debit | Max Profit | Breakeven | RR | Upside to short K | Liq |",
-            "|---|:--:|---|---|--:|--:|--:|--:|--:|--:|--:|--:|:--:|",
+            "| Tkr | Tier | Strategy | Exp | DTE | Long K | Short K | Net Debit | Max Profit | Breakeven | RR | Upside to short K | Vol | Liq |",
+            "|---|:--:|---|---|--:|--:|--:|--:|--:|--:|--:|--:|:--:|:--:|",
         ]
     for o in valid_sorted:
         legs = o.get("legs") or []
         long_k = legs[0]["strike"] if legs else None
         short_k = legs[1]["strike"] if len(legs) > 1 else None
         liq = "⚠" if o.get("liquidity_warnings") else "✓"
+        vol = o.get("vol_context") or {}
+        backdrop = vol.get("long_call_backdrop")
+        vol_cell = {
+            "favorable": "🟢",
+            "mixed": "🟡",
+            "unfavorable": "🔴",
+        }.get(backdrop or "", "—")
         if strategy_mode == "long-call":
             d = o.get("long_call_delta")
             d_str = f"{d:.2f}" if d is not None else "—"
@@ -705,7 +727,7 @@ def _render_md(run_id: str, overlays: list[dict], today: date,
                 f"| **{o['ticker']}** | {o['tier']} | {o['expiration']} | {o['dte']} | "
                 f"{_fmt_money(long_k)} | {d_str} | {m} | "
                 f"{_fmt_money(o['net_debit_per_share'])} | {_fmt_money(o['breakeven_underlying'])} | "
-                f"{gain_a_str} | {gain_c_str} | {liq} |"
+                f"{gain_a_str} | {gain_c_str} | {vol_cell} | {liq} |"
             )
         else:
             rr = o.get("risk_reward")
@@ -716,7 +738,7 @@ def _render_md(run_id: str, overlays: list[dict], today: date,
                 f"{_fmt_money(o['net_debit_per_share'])} | "
                 f"{_fmt_money((o['max_profit_per_contract'] / 100) if o.get('max_profit_per_contract') else None)} | "
                 f"{_fmt_money(o['breakeven_underlying'])} | {rr_str} | "
-                f"{_fmt_pct(o.get('upside_to_short_strike_pct'))} | {liq} |"
+                f"{_fmt_pct(o.get('upside_to_short_strike_pct'))} | {vol_cell} | {liq} |"
             )
 
     lines += ["", "## Per-pick details", ""]
@@ -791,6 +813,14 @@ def _render_md(run_id: str, overlays: list[dict], today: date,
             for w in warns:
                 lines.append(f"- {w}")
             lines.append("")
+
+        vol = o.get("vol_context") or {}
+        advisory = render_vol_advisory(vol) if vol else None
+        if advisory:
+            lines += [f"_Vol context_: {advisory}", ""]
+        en = o.get("earnings_note")
+        if en:
+            lines += [f"_Earnings_: {en}", ""]
 
     if skipped:
         lines += ["## Skipped picks", ""]
