@@ -311,7 +311,8 @@ def _pick_strike_by_delta(contracts_at_exp: list[dict], spot: float,
 def _build_strategy(row: dict, contracts: list[dict], today: date,
                     risk_free: float, min_oi: int,
                     strategy_mode: str = "tier-driven",
-                    long_call_delta: float = 0.55) -> dict | None:
+                    long_call_delta: float = 0.55,
+                    earnings_info: dict | None = None) -> dict | None:
     tier = _tier(row)
     S = row.get("current_price_usd")
     aggr_pt = row.get("aggressive_pt")
@@ -353,6 +354,36 @@ def _build_strategy(row: dict, contracts: list[dict], today: date,
     else:
         exp = min(candidate_exps.keys(), key=lambda e: abs(candidate_exps[e] - target_dte))
         liquidity_note = f"No expiration has a liquid long leg (OI ≥ {min_oi} within ±10% of spot); using closest-to-target exp anyway."
+
+    earnings_note: str | None = None
+    if earnings_info and earnings_info.get("date") and target_dte >= 90:
+        try:
+            earn_date = datetime.strptime(earnings_info["date"], "%Y-%m-%d").date()
+        except (KeyError, ValueError, TypeError):
+            earn_date = None
+        if earn_date:
+            exp_date = datetime.strptime(exp, "%Y-%m-%d").date()
+            gap_days = (exp_date - earn_date).days
+            if -7 <= gap_days <= 7:
+                pool = liquid_exps if liquid_exps else candidate_exps
+                pushed = {
+                    e: dte for e, dte in pool.items()
+                    if (datetime.strptime(e, "%Y-%m-%d").date() - earn_date).days > 7
+                }
+                if pushed:
+                    new_exp = min(pushed.keys(), key=lambda e: abs(pushed[e] - target_dte))
+                    earnings_note = (
+                        f"Original expiry {exp} was within ±7d of earnings "
+                        f"({earnings_info['date']}); pushed to {new_exp} to "
+                        f"avoid IV-crush risk on a {target_dte}-DTE horizon."
+                    )
+                    exp = new_exp
+                else:
+                    earnings_note = (
+                        f"Expiry {exp} sits within ±7d of earnings "
+                        f"({earnings_info['date']}); no later liquid expiry "
+                        f"available to push out — IV crush is a real risk."
+                    )
 
     same_exp_all = _contracts_at_exp(contracts, exp)
     if not same_exp_all:
@@ -488,6 +519,7 @@ def _build_strategy(row: dict, contracts: list[dict], today: date,
         "risk_reward": round(rr, 2) if rr else None,
         "upside_to_short_strike_pct": round(upside_to_short_strike, 2) if upside_to_short_strike is not None else None,
         "liquidity_warnings": liquidity_warnings or None,
+        "earnings_note": earnings_note,
         **long_call_extras,
     }
 
@@ -499,7 +531,8 @@ def _build_strategy(row: dict, contracts: list[dict], today: date,
 def _build_per_ticker_overlay(row: dict, today: date, risk_free: float,
                               min_oi: int,
                               strategy_mode: str = "tier-driven",
-                              long_call_delta: float = 0.55) -> dict:
+                              long_call_delta: float = 0.55,
+                              earnings_info: dict | None = None) -> dict:
     t = row["ticker"]
     S = row.get("current_price_usd")
     aggr_pt = row.get("aggressive_pt")
@@ -536,7 +569,8 @@ def _build_per_ticker_overlay(row: dict, today: date, risk_free: float,
 
     strat = _build_strategy(row, chain, today, risk_free, min_oi,
                             strategy_mode=strategy_mode,
-                            long_call_delta=long_call_delta)
+                            long_call_delta=long_call_delta,
+                            earnings_info=earnings_info)
     return {
         "ticker": t,
         "name": row.get("name"),
@@ -810,6 +844,11 @@ def main():
                    help="Target delta for long-call mode strike selection (default 0.55, slightly ITM)")
     p.add_argument("--snapshot-date", default=None,
                    help="Override 'today' for DTE calc (YYYY-MM-DD); defaults to system date")
+    p.add_argument("--earnings-calendar", default=None,
+                   help="Path to earnings_calendar.json. When set, expiry "
+                        "dates within ±7 days of a ticker's next earnings "
+                        "AND on a horizon ≥ 90 days are pushed past the "
+                        "earnings date to avoid IV crush.")
     args = p.parse_args()
 
     matrix_run = Path(args.matrix_run)
@@ -828,6 +867,24 @@ def main():
           f"mode: {args.strategy_mode}"
           + (f" (target Δ {args.long_call_delta})" if args.strategy_mode == "long-call" else ""))
 
+    earnings_by_ticker: dict[str, dict] = {}
+    earnings_path: Path | None = None
+    if args.earnings_calendar:
+        earnings_path = Path(args.earnings_calendar)
+    else:
+        sibling = matrix_run / "earnings_calendar.json"
+        if sibling.exists():
+            earnings_path = sibling
+    if earnings_path and earnings_path.exists():
+        try:
+            ec = json.loads(earnings_path.read_text())
+            for row in ec.get("tickers", []):
+                if row.get("ticker") and row.get("next_earnings"):
+                    earnings_by_ticker[row["ticker"].upper()] = row["next_earnings"]
+            print(f"[options] earnings calendar: {len(earnings_by_ticker)} tickers with next earnings ({earnings_path.name})")
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"[options] ⚠ failed to read {earnings_path}: {exc} (continuing without)")
+
     overlays = []
     for i, row in enumerate(picks, 1):
         t = row["ticker"]
@@ -836,6 +893,7 @@ def main():
             row, today, args.risk_free, args.min_oi,
             strategy_mode=args.strategy_mode,
             long_call_delta=args.long_call_delta,
+            earnings_info=earnings_by_ticker.get(t.upper()),
         )
         if "skipped" in ovl:
             print(f"skipped ({ovl['skipped']})")

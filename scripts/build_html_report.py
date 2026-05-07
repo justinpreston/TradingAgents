@@ -151,6 +151,38 @@ def _load_news_enrichment(screener: dict | None) -> dict[str, dict] | None:
     return {row["ticker"]: row for row in data.get("tickers", [])}
 
 
+def _load_earnings_calendar(screener: dict | None,
+                            extra_dirs: list[Path] | None = None
+                            ) -> dict[str, dict] | None:
+    """Load earnings_calendar.json from screener dir or matrix run dirs.
+
+    Search order:
+    1. ``screener_<id>/earnings_calendar.json`` (next to screener.json)
+    2. each path in ``extra_dirs`` (typically the supplied --runs dirs)
+
+    First hit wins. Returns ``{ticker: row}`` mapping. Silently returns
+    ``None`` when nothing is found.
+    """
+    candidates: list[Path] = []
+    if screener:
+        base = screener.get("_screener_path")
+        if base:
+            candidates.append(Path(base) / "earnings_calendar.json")
+    for d in extra_dirs or []:
+        candidates.append(Path(d) / "earnings_calendar.json")
+    for cand in candidates:
+        if not cand.exists():
+            continue
+        try:
+            data = json.loads(cand.read_text())
+        except json.JSONDecodeError as exc:
+            print(f"  ⚠ earnings_calendar.json malformed at {cand}: {exc}")
+            continue
+        return {row["ticker"]: row for row in data.get("tickers", [])
+                if row.get("ticker")}
+    return None
+
+
 def _exposure_key(pos: dict) -> str | None:
     """Return the equity ticker key for matching against matrix verdicts.
 
@@ -1226,6 +1258,10 @@ details.vetoed[open] summary { margin-bottom: 16px; padding-bottom: 12px; border
 .chip-sent-neu { background: rgba(148, 163, 184, 0.12); color: var(--muted); border: 1px solid rgba(148, 163, 184, 0.25); }
 .chip-theme { display: inline-block; font-size: 10px; padding: 1px 5px; border-radius: 6px; margin-right: 3px; background: rgba(56, 189, 248, 0.10); color: var(--accent); border: 1px solid rgba(56, 189, 248, 0.20); }
 .chip-theme-gov { background: rgba(168, 85, 247, 0.15); color: #c084fc; border-color: rgba(168, 85, 247, 0.30); }
+.chip-earn { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 6px; margin-right: 3px; font-weight: 600; }
+.chip-earn-near { background: rgba(239, 68, 68, 0.18); color: var(--red); border: 1px solid rgba(239, 68, 68, 0.35); }
+.chip-earn-mid { background: rgba(234, 179, 8, 0.15); color: var(--yellow); border: 1px solid rgba(234, 179, 8, 0.30); }
+.chip-earn-far { background: rgba(148, 163, 184, 0.12); color: var(--muted); border: 1px solid rgba(148, 163, 184, 0.25); }
 
 /* ── Realized P/L ───────────────────────────────────────────────── */
 .realized-summary {
@@ -1839,49 +1875,81 @@ def _render_reconciliation(reconciliation: dict, portfolio: dict) -> str:
     return "".join(parts)
 
 
-def _render_news_chips(enrichment_row: dict | None) -> str:
-    """Render a compact sentiment + theme chip cluster for a screener row.
+def _render_news_chips(enrichment_row: dict | None,
+                       earnings_row: dict | None = None) -> str:
+    """Render a compact catalyst chip cluster for a screener row.
 
-    Sentiment shows polarity in [-1, 1] color-coded by sign. Themes show
-    the top 2 by confidence; ``government_action`` gets a distinct purple
-    chip (INTC-style thesis tagging).
+    Combines (when available):
+    - sentiment polarity in [-1, 1] color-coded by sign
+    - top 2 themes by confidence (purple chip for ``government_action``)
+    - next earnings date with days-away color coding (red <7d / yellow
+      7-30d / gray >30d)
     """
-    if not enrichment_row:
-        return '<span class="muted" style="font-size:11px">—</span>'
     parts = []
-    sent = (enrichment_row.get("sentiment") or {})
-    chosen = sent.get("finbert") or sent.get("keyword")
-    if chosen and chosen.get("n_headlines", 0) > 0:
-        agg = chosen.get("aggregate", 0.0) or 0.0
-        cls = (
-            "chip-sent-pos" if agg > 0.05
-            else "chip-sent-neg" if agg < -0.05
-            else "chip-sent-neu"
-        )
-        scorer = chosen.get("scorer", "?")
-        n = chosen.get("n_headlines", 0)
-        title_attr = (
-            f"{scorer} sentiment from n={n} headlines (range [-1, 1])"
-        )
+    if enrichment_row:
+        sent = (enrichment_row.get("sentiment") or {})
+        chosen = sent.get("finbert") or sent.get("keyword")
+        if chosen and chosen.get("n_headlines", 0) > 0:
+            agg = chosen.get("aggregate", 0.0) or 0.0
+            cls = (
+                "chip-sent-pos" if agg > 0.05
+                else "chip-sent-neg" if agg < -0.05
+                else "chip-sent-neu"
+            )
+            scorer = chosen.get("scorer", "?")
+            n = chosen.get("n_headlines", 0)
+            title_attr = (
+                f"{scorer} sentiment from n={n} headlines (range [-1, 1])"
+            )
+            parts.append(
+                f'<span class="chip-sent {cls}" title="{html.escape(title_attr)}">'
+                f'{agg:+.2f}</span>'
+            )
+        themes = enrichment_row.get("themes") or []
+        for t in themes[:2]:
+            label = t.get("label", "")
+            conf = t.get("confidence", 0.0) or 0.0
+            cls = "chip-theme chip-theme-gov" if label == "government_action" else "chip-theme"
+            title_attr = f"{label}: {conf:.0%} of headlines matched"
+            parts.append(
+                f'<span class="{cls}" title="{html.escape(title_attr)}">'
+                f'{html.escape(label.replace("_", " "))}</span>'
+            )
+
+    if earnings_row and earnings_row.get("next_earnings"):
+        ne = earnings_row["next_earnings"]
+        days = ne.get("days_away")
+        date_str = ne.get("date") or "?"
+        if days is None:
+            cls = "chip-earn-far"
+            label = f"📅 {date_str}"
+        elif days < 7:
+            cls = "chip-earn-near"
+            label = f"📅 {days}d"
+        elif days <= 30:
+            cls = "chip-earn-mid"
+            label = f"📅 {days}d"
+        else:
+            cls = "chip-earn-far"
+            label = f"📅 {days}d"
+        beat = earnings_row.get("beat_rate_pct")
+        title_bits = [f"Next earnings: {date_str}"]
+        if days is not None:
+            title_bits.append(f"in {days} days")
+        if beat is not None:
+            title_bits.append(f"8Q beat rate {beat:.0f}%")
+        title_attr = " · ".join(title_bits)
         parts.append(
-            f'<span class="chip-sent {cls}" title="{html.escape(title_attr)}">'
-            f'{agg:+.2f}</span>'
+            f'<span class="chip-earn {cls}" title="{html.escape(title_attr)}">'
+            f'{html.escape(label)}</span>'
         )
-    themes = enrichment_row.get("themes") or []
-    for t in themes[:2]:
-        label = t.get("label", "")
-        conf = t.get("confidence", 0.0) or 0.0
-        cls = "chip-theme chip-theme-gov" if label == "government_action" else "chip-theme"
-        title_attr = f"{label}: {conf:.0%} of headlines matched"
-        parts.append(
-            f'<span class="{cls}" title="{html.escape(title_attr)}">'
-            f'{html.escape(label.replace("_", " "))}</span>'
-        )
+
     return "".join(parts) if parts else '<span class="muted" style="font-size:11px">—</span>'
 
 
 def _render_screener_watchlist(screener: dict, matrix_index: dict, held_keys: set,
                                enrichment: dict[str, dict] | None = None,
+                               earnings: dict[str, dict] | None = None,
                                top_n: int = 25) -> str:
     candidates = screener.get("candidates", [])[:top_n]
     if not candidates:
@@ -1897,7 +1965,7 @@ def _render_screener_watchlist(screener: dict, matrix_index: dict, held_keys: se
         parts.append(f'<div class="warn-banner">⚠ Partial screener result — rate limited on: <code>{html.escape(rate_limited)}</code>. Top-N may be missing legitimate names.</div>')
 
     parts.append('<div class="screener-table-wrap table-wrap"><table>')
-    parts.append('<thead><tr><th>#</th><th>Ticker</th><th>Name</th><th class="num">Score</th><th class="num">Mcap</th><th>Sector</th><th>News</th><th>Matrix</th><th>Ownership</th><th>Summary</th></tr></thead><tbody>')
+    parts.append('<thead><tr><th>#</th><th>Ticker</th><th>Name</th><th class="num">Score</th><th class="num">Mcap</th><th>Sector</th><th>Catalysts</th><th>Matrix</th><th>Ownership</th><th>Summary</th></tr></thead><tbody>')
     for c in candidates:
         tkr = c["ticker"]
         # Matrix status
@@ -1920,7 +1988,10 @@ def _render_screener_watchlist(screener: dict, matrix_index: dict, held_keys: se
         if sector and len(sector) > 28:
             sector = sector[:28] + "…"
         summary = c.get("summary", "")[:80]
-        news_cell = _render_news_chips(enrichment.get(tkr) if enrichment else None)
+        news_cell = _render_news_chips(
+            enrichment.get(tkr) if enrichment else None,
+            earnings.get(tkr) if earnings else None,
+        )
         parts.append(
             f'<tr class="scr-row">'
             f'<td>{c.get("rank","—")}</td>'
@@ -2039,6 +2110,7 @@ def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
            portfolio: dict | None = None,
            screener: dict | None = None,
            news_enrichment: dict[str, dict] | None = None,
+           earnings_calendar: dict[str, dict] | None = None,
            skipped_runs: list[str] | None = None) -> str:
     options_map = options_map or {}
     picks = [r for r in rows if r["classification"] == "PICK"]
@@ -2397,6 +2469,7 @@ def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
         parts.append(_render_screener_watchlist(
             screener, matrix_index, held_keys,
             enrichment=news_enrichment,
+            earnings=earnings_calendar,
         ))
 
     # ── Realized P/L (only if portfolio provided)
@@ -2457,11 +2530,18 @@ def main():
     screener = _load_screener(args.screener_run)
     news_enrichment = _load_news_enrichment(screener)
 
+    extra_dirs = []
+    for spec in args.runs:
+        path_str, _, _ = spec.partition(":")
+        extra_dirs.append(Path(path_str))
+    earnings_calendar = _load_earnings_calendar(screener, extra_dirs=extra_dirs)
+
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     html_text = render(rows, metadata, args.title, args.subtitle,
                        options_map=options_map, portfolio=portfolio,
                        screener=screener, news_enrichment=news_enrichment,
+                       earnings_calendar=earnings_calendar,
                        skipped_runs=skipped)
     out_path.write_text(html_text)
 
@@ -2477,6 +2557,8 @@ def main():
         print(f"     screener: {len(screener.get('candidates', []))} candidates from {screener.get('_screener_dir', '—')}")
     if news_enrichment:
         print(f"     news_enrichment: {len(news_enrichment)} tickers tagged")
+    if earnings_calendar:
+        print(f"     earnings_calendar: {len(earnings_calendar)} tickers with next-earnings dates")
     if skipped:
         print(f"     ⚠ skipped {len(skipped)} run(s):")
         for s in skipped:

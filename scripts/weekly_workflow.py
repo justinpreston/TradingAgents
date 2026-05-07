@@ -243,6 +243,31 @@ def phase_enrich_news(screener_run: Path, scorer: str, lookback_days: int,
               file=sys.stderr)
 
 
+def phase_enrich_earnings(screener_run: Path, ticker_limit: int | None,
+                          max_history_quarters: int, dry_run: bool) -> None:
+    """Optional Phase 2.6 — write earnings_calendar.json next to the screener.
+
+    yfinance-backed (free, fail-soft). The artifact is consumed by:
+    - build_options_overlay.py (push expiry past earnings when horizon
+      is long, to avoid IV crush)
+    - build_html_report.py (📅 chip on screener watchlist)
+    - news_enrichment_loader.py (extra "Next earnings in N days" line
+      in the news analyst's pre-computed prefix)
+    """
+    _hr("Phase 2.6 · EARNINGS CALENDAR")
+    cmd = [
+        ".venv/bin/python", "scripts/build_earnings_calendar.py",
+        "--screener-run", str(screener_run),
+        "--max-history-quarters", str(max_history_quarters),
+    ]
+    if ticker_limit:
+        cmd += ["--ticker-limit", str(ticker_limit)]
+    rc = _run(cmd, dry_run)
+    if rc != 0:
+        print(f"  ⚠ Earnings calendar exited {rc}; continuing without it",
+              file=sys.stderr)
+
+
 def _read_top_tickers(screener_run: Path, top_n: int) -> list[str]:
     """Read top-N tickers from a screener run."""
     top_path = screener_run / "top_tickers.txt"
@@ -408,6 +433,17 @@ def phase_chain(screener_run: Path, args: argparse.Namespace, diff: dict) -> Non
             cmd += ["--news-enrichment", str(ne_path.relative_to(REPO_ROOT))]
             print(f"  📰 News enrichment will be injected into matrix cells: {ne_path.name}")
 
+    # Auto-pass earnings calendar when Phase 2.6 produced one. Same plumbing
+    # path as news enrichment: matrix runner accepts --earnings-calendar and
+    # threads it via TRADINGAGENTS_EARNINGS_CALENDAR_PATH; the options
+    # overlay step (auto-run by run_copilot_matrix.py post-run) will pick
+    # up the file from the matrix-run dir directly.
+    if args.enrich_earnings:
+        ec_path = screener_run / "earnings_calendar.json"
+        if ec_path.exists() and is_matrix_runner:
+            cmd += ["--earnings-calendar", str(ec_path.relative_to(REPO_ROOT))]
+            print(f"  📅 Earnings calendar will be injected into matrix cells: {ec_path.name}")
+
     rc = _run(cmd, args.dry_run)
     if rc == 0 and not args.dry_run:
         print(f"  ✅ Matrix complete. Re-index with: .venv/bin/python scripts/index_runs.py")
@@ -535,6 +571,17 @@ def main() -> int:
                         "forces zero-dep mode. 'both' runs them side-by-side.")
     p.add_argument("--news-lookback-days", type=int, default=30,
                    help="How far back to pull headlines for --enrich-news (default 30)")
+    # Optional Phase 2.6 — earnings calendar artifact
+    p.add_argument("--enrich-earnings", action="store_true",
+                   help="Run Phase 2.6 to write earnings_calendar.json next to "
+                        "the screener run. yfinance-backed (free, fail-soft). "
+                        "Used by the options overlay to push expiry past "
+                        "earnings when horizon is long, by build_html_report.py "
+                        "for the 📅 chip, and as a one-line prefix to the news "
+                        "analyst's pre-computed context.")
+    p.add_argument("--earnings-history-quarters", type=int, default=8,
+                   help="How many past quarters of EPS surprises to capture "
+                        "for beat-rate calculation (default 8)")
     args = p.parse_args()
 
     # Apply tier preset BEFORE running phases — only for flags the user did
@@ -560,6 +607,13 @@ def main() -> int:
             scorer=args.news_scorer,
             lookback_days=args.news_lookback_days,
             ticker_limit=args.top,
+            dry_run=args.dry_run,
+        )
+    if args.enrich_earnings:
+        phase_enrich_earnings(
+            screener_run,
+            ticker_limit=args.top,
+            max_history_quarters=args.earnings_history_quarters,
             dry_run=args.dry_run,
         )
     diff = phase_diff(screener_run, args.top, args.dry_run, tier=args.tier)

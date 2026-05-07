@@ -585,6 +585,14 @@ def _parse_args() -> argparse.Namespace:
              "news analyst prepends pre-computed FinBERT polarity + theme "
              "tags to its system message.",
     )
+    p.add_argument(
+        "--earnings-calendar", default=None,
+        help="Path to an earnings_calendar.json file. When set, every cell "
+             "subprocess inherits TRADINGAGENTS_EARNINGS_CALENDAR_PATH so the "
+             "news analyst gets a 'Next earnings in N days' line; the "
+             "auto-built options overlay also picks it up to push expiry "
+             "past earnings on long horizons.",
+    )
     return p.parse_args()
 
 
@@ -740,6 +748,25 @@ def main() -> int:
         else:
             env["TRADINGAGENTS_NEWS_ENRICHMENT_PATH"] = str(ne_path)
             sys.stdout.write(f"📰 News enrichment active: {ne_path}\n")
+    earnings_cal_path: Optional[Path] = None
+    if args.earnings_calendar:
+        ec_path = Path(args.earnings_calendar).resolve()
+        if not ec_path.exists():
+            sys.stdout.write(f"⚠ --earnings-calendar path not found: {ec_path} (continuing without)\n")
+        else:
+            env["TRADINGAGENTS_EARNINGS_CALENDAR_PATH"] = str(ec_path)
+            earnings_cal_path = ec_path
+            sys.stdout.write(f"📅 Earnings calendar active: {ec_path}\n")
+
+    # Mirror the calendar into the matrix run dir so the auto-options-overlay
+    # step (and any later one-off rebuilds) finds it without an extra flag.
+    if earnings_cal_path is not None:
+        try:
+            target = matrix_dir / "earnings_calendar.json"
+            if earnings_cal_path.resolve() != target.resolve():
+                target.write_bytes(earnings_cal_path.read_bytes())
+        except OSError as exc:
+            sys.stdout.write(f"  ⚠ failed to mirror earnings calendar into matrix dir: {exc}\n")
 
     sys.stdout.write(f"\n╭─ Matrix run · {run_id}\n")
     sys.stdout.write(f"│ Trade date  : {trade_date}  ({date_label})\n")

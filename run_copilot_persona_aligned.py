@@ -199,6 +199,13 @@ def _parse_args() -> argparse.Namespace:
              "to its system message via the "
              "TRADINGAGENTS_NEWS_ENRICHMENT_PATH env var.",
     )
+    p.add_argument(
+        "--earnings-calendar",
+        default=None,
+        help="Path to an earnings_calendar.json file. When set, the news "
+             "analyst gets a 'Next earnings in N days' line via the "
+             "TRADINGAGENTS_EARNINGS_CALENDAR_PATH env var.",
+    )
     return p.parse_args()
 
 
@@ -220,6 +227,12 @@ def main() -> int:
             sys.stderr.write(f"⚠ --news-enrichment path not found: {enrichment_path} (continuing without)\n")
         else:
             os.environ["TRADINGAGENTS_NEWS_ENRICHMENT_PATH"] = str(enrichment_path)
+    if args.earnings_calendar:
+        ec_path = Path(args.earnings_calendar).resolve()
+        if not ec_path.exists():
+            sys.stderr.write(f"⚠ --earnings-calendar path not found: {ec_path} (continuing without)\n")
+        else:
+            os.environ["TRADINGAGENTS_EARNINGS_CALENDAR_PATH"] = str(ec_path)
     config = _build_config(risk_profile=args.risk_profile)
 
     runs_dir = Path("runs") / run_id
