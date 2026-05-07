@@ -53,14 +53,22 @@ def _score(row: dict, cross_band_set: set[str]) -> float:
     return s
 
 
-def _load_runs(run_specs: list[str]) -> tuple[list[dict], dict, dict]:
+def _load_runs(run_specs: list[str], allow_missing: bool = True) -> tuple[list[dict], dict, dict, list[str]]:
     rows = []
     metadata = {}
     options_by_ticker_run: dict[tuple[str, str], dict] = {}
+    skipped: list[str] = []
     for spec in run_specs:
         path_str, label = spec.split(":", 1)
         run_dir = Path(path_str)
-        ledger = json.loads((run_dir / "verdict_ledger.json").read_text())
+        ledger_path = run_dir / "verdict_ledger.json"
+        if not ledger_path.exists():
+            msg = f"{run_dir.name} (label={label}): verdict_ledger.json not found — matrix may still be in-flight or accounting not built"
+            if allow_missing:
+                skipped.append(msg)
+                continue
+            raise FileNotFoundError(msg)
+        ledger = json.loads(ledger_path.read_text())
         metadata[label] = {
             "run_id": ledger.get("run_id"),
             "matrix_run": ledger.get("matrix_run"),
@@ -84,7 +92,227 @@ def _load_runs(run_specs: list[str]) -> tuple[list[dict], dict, dict]:
             for o in ovl.get("overlays", []):
                 if "strategy" in o and "error" not in o:
                     options_by_ticker_run[(o["ticker"], label)] = o
-    return rows, metadata, options_by_ticker_run
+    return rows, metadata, options_by_ticker_run, skipped
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Portfolio / Screener / Reconciliation
+# ──────────────────────────────────────────────────────────────────────
+
+def _load_portfolio(path: str | None) -> dict | None:
+    """Load a versioned portfolio_export.json. Returns None if path is None."""
+    if not path:
+        return None
+    p = Path(path)
+    if not p.exists():
+        print(f"  ⚠ portfolio export not found: {path}")
+        return None
+    data = json.loads(p.read_text())
+    if data.get("schema_version") != 1:
+        print(f"  ⚠ portfolio schema_version={data.get('schema_version')} (expected 1) — rendering best-effort")
+    return data
+
+
+def _load_screener(path: str | None) -> dict | None:
+    """Load a screener.json from a runs/screener_* dir."""
+    if not path:
+        return None
+    p = Path(path)
+    sjson = p / "screener.json" if p.is_dir() else p
+    if not sjson.exists():
+        print(f"  ⚠ screener output not found: {sjson}")
+        return None
+    data = json.loads(sjson.read_text())
+    data["_screener_dir"] = p.name if p.is_dir() else p.parent.name
+    data["_screener_path"] = str(p if p.is_dir() else p.parent)
+    return data
+
+
+def _load_news_enrichment(screener: dict | None) -> dict[str, dict] | None:
+    """Load news_enrichment.json (if present) into a ticker → row dict.
+
+    Looks for ``news_enrichment.json`` next to the screener.json. Silently
+    returns ``None`` when missing — enrichment is opt-in, the dashboard
+    must render fine without it.
+    """
+    if not screener:
+        return None
+    base = screener.get("_screener_path")
+    if not base:
+        return None
+    nef = Path(base) / "news_enrichment.json"
+    if not nef.exists():
+        return None
+    try:
+        data = json.loads(nef.read_text())
+    except json.JSONDecodeError as exc:
+        print(f"  ⚠ news_enrichment.json malformed: {exc}")
+        return None
+    return {row["ticker"]: row for row in data.get("tickers", [])}
+
+
+def _exposure_key(pos: dict) -> str | None:
+    """Return the equity ticker key for matching against matrix verdicts.
+
+    Stocks → symbol. Options → underlying. Mutual funds / passive ETFs → None
+    (they aggregate too many names to attribute to a single matrix verdict).
+    """
+    at = pos.get("asset_type")
+    if at == "stock":
+        return pos.get("symbol")
+    if at == "option":
+        return pos.get("underlying")
+    return None
+
+
+def _build_matrix_index(rows: list[dict], metadata: dict) -> dict[str, dict]:
+    """Map ticker → {row, run_label, snapshot_date, all_runs}.
+
+    Picks the LATEST matrix verdict by snapshot_date when a ticker appears
+    in multiple runs — per rubber-duck guidance, freshness wins over
+    historical "best".
+    """
+    by_tkr: dict[str, list[dict]] = {}
+    for r in rows:
+        by_tkr.setdefault(r["ticker"], []).append(r)
+
+    index: dict[str, dict] = {}
+    for tkr, lst in by_tkr.items():
+        # Sort by run snapshot_date desc; ties broken by run label
+        def _snap(r):
+            return metadata.get(r["_run"], {}).get("snapshot_date") or ""
+        lst_sorted = sorted(lst, key=_snap, reverse=True)
+        latest = lst_sorted[0]
+        index[tkr] = {
+            "row": latest,
+            "run_label": latest["_run"],
+            "snapshot_date": _snap(latest),
+            "all_runs": [(r["_run"], _snap(r), r["classification"]) for r in lst_sorted],
+        }
+    return index
+
+
+def _classify_friction(pos: dict, matrix_entry: dict | None) -> tuple[str, str]:
+    """Return (bucket, color) for the position vs latest matrix verdict.
+
+    Buckets:
+      held_pick      — held + matrix says PICK (alignment, possibly add)
+      held_vetoed    — held + matrix VETOED (friction; reduce/exit review)
+      held_no_cover  — held + ticker absent from any matrix run (uncovered)
+      passive        — passive fund / ETF (not subject to matrix verdict)
+    """
+    if _exposure_key(pos) is None:
+        return ("passive", "muted")
+    if matrix_entry is None:
+        return ("held_no_cover", "yellow")
+    cls = matrix_entry["row"].get("classification")
+    if cls == "PICK":
+        return ("held_pick", "green")
+    if cls == "VETOED":
+        return ("held_vetoed", "red")
+    return ("held_no_cover", "yellow")
+
+
+def _build_reconciliation(portfolio: dict | None, matrix_index: dict[str, dict]) -> dict:
+    """Reconcile holdings against the latest matrix verdicts.
+
+    Returns dict with buckets:
+      held_pick:      [(position, matrix_entry), ...]
+      held_vetoed:    [(position, matrix_entry), ...]  # FRICTION
+      held_no_cover:  [(position, None), ...]          # FRICTION (uncoverage)
+      passive:        [(position, None), ...]
+      pick_not_held:  [matrix_entry, ...]              # OPPORTUNITY
+      held_keys:      set of normalized exposure keys
+    """
+    out = {"held_pick": [], "held_vetoed": [], "held_no_cover": [],
+           "passive": [], "pick_not_held": [], "held_keys": set()}
+    if not portfolio:
+        return out
+
+    held_keys: set[str] = set()
+    for pos in portfolio.get("positions", []):
+        key = _exposure_key(pos)
+        entry = matrix_index.get(key) if key else None
+        bucket, _ = _classify_friction(pos, entry)
+        if bucket == "passive":
+            out["passive"].append((pos, None))
+        elif bucket == "held_pick":
+            out["held_pick"].append((pos, entry))
+            held_keys.add(key)
+        elif bucket == "held_vetoed":
+            out["held_vetoed"].append((pos, entry))
+            held_keys.add(key)
+        else:  # held_no_cover
+            out["held_no_cover"].append((pos, entry))
+            if key:
+                held_keys.add(key)
+
+    # PICK but not held — opportunity
+    for tkr, entry in matrix_index.items():
+        if entry["row"].get("classification") == "PICK" and tkr not in held_keys:
+            out["pick_not_held"].append(entry)
+    out["held_keys"] = held_keys
+    return out
+
+
+def _summarize_realized(trades: list[dict]) -> dict:
+    """Roll up realized P/L from trades that have realized_pl populated."""
+    closes = [t for t in trades if t.get("realized_pl") is not None]
+    by_underlying: dict[str, dict] = {}
+    for t in closes:
+        u = t.get("underlying") or t.get("symbol")
+        bucket = by_underlying.setdefault(u, {"pl": 0, "trades": []})
+        bucket["pl"] += t["realized_pl"]
+        bucket["trades"].append(t)
+    return {
+        "n_closes": len(closes),
+        "total_pl": sum(t["realized_pl"] for t in closes),
+        "by_underlying": by_underlying,
+        "closes": sorted(closes, key=lambda t: (t["trade_date"], t.get("symbol", "")), reverse=True),
+    }
+
+
+# Coarse SIC-prefix → sector rollup. Replaces the ticker-by-ticker dict.
+_SIC_SECTORS = [
+    ("01", "Agriculture"), ("10", "Mining / Metals"), ("12", "Coal Mining"),
+    ("13", "Energy / Oil & Gas"), ("14", "Mining"), ("15", "Construction"),
+    ("16", "Heavy Construction"), ("17", "Construction Specialty"),
+    ("20", "Food & Beverage"), ("22", "Textiles"), ("23", "Apparel"),
+    ("24", "Wood / Lumber"), ("25", "Furniture"), ("26", "Paper / Pulp"),
+    ("27", "Printing / Publishing"), ("28", "Chemicals / Pharma"),
+    ("29", "Petroleum Refining"), ("30", "Rubber / Plastics"),
+    ("32", "Glass / Cement"), ("33", "Primary Metals / Steel"),
+    ("34", "Fabricated Metals"), ("35", "Industrial Machinery"),
+    ("36", "Electronics / Semiconductors"), ("37", "Transportation Equipment"),
+    ("38", "Instruments / Measurement"), ("39", "Misc Manufacturing"),
+    ("40", "Railroads"), ("41", "Local Transit"), ("42", "Trucking"),
+    ("44", "Water Transportation"), ("45", "Air Transportation"),
+    ("47", "Transportation Services"), ("48", "Telecommunications"),
+    ("49", "Utilities"), ("50", "Wholesale Durable"), ("51", "Wholesale Nondurable"),
+    ("52", "Retail / Building"), ("53", "Retail / General"),
+    ("54", "Retail / Food"), ("55", "Retail / Auto"),
+    ("56", "Retail / Apparel"), ("57", "Retail / Furniture"),
+    ("58", "Retail / Restaurants"), ("59", "Retail / Misc"),
+    ("60", "Banks"), ("61", "Credit Institutions"), ("62", "Securities / Brokers"),
+    ("63", "Insurance Carriers"), ("64", "Insurance Agents"),
+    ("65", "Real Estate / REIT"), ("67", "Holding / Investment"),
+    ("70", "Hotels / Lodging"), ("72", "Personal Services"),
+    ("73", "Business Services / Software"), ("75", "Auto Services"),
+    ("78", "Motion Pictures"), ("79", "Recreation Services"),
+    ("80", "Health Services"), ("82", "Educational Services"),
+    ("83", "Social Services"), ("87", "Engineering / Accounting"),
+    ("99", "Nonclassifiable"),
+]
+
+
+def _sector_from_sic(sic: str | None) -> str:
+    if not sic:
+        return "Unknown"
+    s = str(sic)
+    for prefix, name in _SIC_SECTORS:
+        if s.startswith(prefix):
+            return name
+    return "Unknown"
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -790,6 +1018,300 @@ details.vetoed[open] summary { margin-bottom: 16px; padding-bottom: 12px; border
   .report-header .subtitle { font-size: 15px; }
   th, td { padding: 8px 10px; font-size: 12px; }
 }
+
+/* ── Private banner ──────────────────────────────────────────────── */
+.private-banner {
+  background: linear-gradient(135deg, rgba(234, 179, 8, 0.12) 0%, rgba(239, 68, 68, 0.08) 100%);
+  border: 1px solid rgba(234, 179, 8, 0.35);
+  border-radius: var(--radius);
+  padding: 14px 20px;
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: #fde68a;
+}
+.private-banner .icon { font-size: 18px; }
+.private-banner strong { color: #fef3c7; }
+
+/* ── Portfolio dashboard ─────────────────────────────────────────── */
+.pf-snapshot {
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.holdings-table-wrap { margin-top: 16px; }
+.pos-row {
+  border-left: 3px solid transparent;
+}
+.pos-row.status-open-watch { border-left-color: var(--yellow); }
+.pos-row.status-open-hold { border-left-color: var(--accent); }
+.pos-row.status-open { border-left-color: var(--green); }
+.pos-row td.tkr {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pos-row .opt-meta {
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  display: block;
+  margin-top: 2px;
+  font-weight: 500;
+}
+.pos-row td.notes {
+  font-size: 11px;
+  color: var(--text-muted);
+  max-width: 280px;
+  line-height: 1.4;
+}
+.status-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.status-badge.open { background: rgba(34, 197, 94, 0.15); color: var(--green); }
+.status-badge.watch { background: rgba(234, 179, 8, 0.15); color: var(--yellow); }
+.status-badge.hold { background: rgba(56, 189, 248, 0.15); color: var(--accent); }
+.status-badge.closed { background: rgba(148, 163, 184, 0.15); color: var(--text-dim); }
+
+/* ── Reconciliation / friction cards ─────────────────────────────── */
+.reconcile-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+.recon-card {
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  border-left: 4px solid var(--text-dim);
+}
+.recon-card.bucket-friction { border-left-color: var(--red); }
+.recon-card.bucket-uncovered { border-left-color: var(--yellow); }
+.recon-card.bucket-aligned { border-left-color: var(--green); }
+.recon-card.bucket-opportunity { border-left-color: var(--accent); }
+.recon-card .header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.recon-card .title {
+  font-size: 15px;
+  font-weight: 700;
+}
+.recon-card .count {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.recon-card .desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+.recon-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 14px;
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.recon-pair:last-child { margin-bottom: 0; }
+@media (max-width: 720px) {
+  .recon-pair { grid-template-columns: 1fr; }
+}
+.recon-pair .col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.recon-pair .col .label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.recon-pair .col .ticker {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.recon-pair .col .meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.recon-pair .col .pl {
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.recon-pair .col .pl.green { color: var(--green); }
+.recon-pair .col .pl.red { color: var(--red); }
+.recon-pair .col .verdict {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+/* ── Action matrix ──────────────────────────────────────────────── */
+.action-matrix {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin: 16px 0 24px 0;
+}
+.action-bucket {
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  border-top: 3px solid var(--text-dim);
+}
+.action-bucket.green { border-top-color: var(--green); }
+.action-bucket.red { border-top-color: var(--red); }
+.action-bucket.yellow { border-top-color: var(--yellow); }
+.action-bucket.blue { border-top-color: var(--accent); }
+.action-bucket .label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.action-bucket .count {
+  font-size: 24px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.action-bucket .names {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Screener watchlist ─────────────────────────────────────────── */
+.screener-table-wrap { margin: 16px 0; }
+.scr-row td.score {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.badge-screener-pick { background: rgba(34, 197, 94, 0.18); color: var(--green); border: 1px solid rgba(34, 197, 94, 0.3); }
+.badge-screener-vetoed { background: rgba(239, 68, 68, 0.15); color: var(--red); border: 1px solid rgba(239, 68, 68, 0.3); }
+.badge-screener-pending { background: rgba(234, 179, 8, 0.15); color: var(--yellow); border: 1px solid rgba(234, 179, 8, 0.3); }
+.badge-held { background: rgba(56, 189, 248, 0.15); color: var(--accent); border: 1px solid rgba(56, 189, 248, 0.3); }
+/* News enrichment chips: sentiment polarity + theme tags */
+.chip-sent { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 8px; margin-right: 4px; font-weight: 600; }
+.chip-sent-pos { background: rgba(34, 197, 94, 0.15); color: var(--green); border: 1px solid rgba(34, 197, 94, 0.25); }
+.chip-sent-neg { background: rgba(239, 68, 68, 0.15); color: var(--red); border: 1px solid rgba(239, 68, 68, 0.25); }
+.chip-sent-neu { background: rgba(148, 163, 184, 0.12); color: var(--muted); border: 1px solid rgba(148, 163, 184, 0.25); }
+.chip-theme { display: inline-block; font-size: 10px; padding: 1px 5px; border-radius: 6px; margin-right: 3px; background: rgba(56, 189, 248, 0.10); color: var(--accent); border: 1px solid rgba(56, 189, 248, 0.20); }
+.chip-theme-gov { background: rgba(168, 85, 247, 0.15); color: #c084fc; border-color: rgba(168, 85, 247, 0.30); }
+
+/* ── Realized P/L ───────────────────────────────────────────────── */
+.realized-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+.real-card {
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  border-left: 3px solid var(--text-dim);
+}
+.real-card.green { border-left-color: var(--green); }
+.real-card.red { border-left-color: var(--red); }
+.real-card .ticker {
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.real-card .pl {
+  font-size: 18px;
+  font-weight: 700;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.real-card .pl.green { color: var(--green); }
+.real-card .pl.red { color: var(--red); }
+.real-card .meta {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.warn-banner {
+  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid rgba(234, 179, 8, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 12px;
+  color: var(--yellow);
+}
+.warn-banner code {
+  background: var(--bg-elev-2);
+  padding: 2px 5px;
+  border-radius: 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.status-badge.green { background: rgba(34, 197, 94, 0.15); color: var(--green); }
+.status-badge.red { background: rgba(239, 68, 68, 0.15); color: var(--red); }
+.status-badge.muted { background: rgba(148, 163, 184, 0.15); color: var(--text-dim); }
+
+.badge-screener-pick {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--green);
+}
+.badge-screener-vetoed {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--red);
+}
+.badge-screener-pending {
+  background: rgba(148, 163, 184, 0.15);
+  color: var(--text-dim);
+}
+.badge-held {
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.skipped-banner {
+  background: rgba(56, 189, 248, 0.05);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.skipped-banner ul { margin: 6px 0 0 20px; padding: 0; }
+.skipped-banner li { margin: 2px 0; }
 """
 
 
@@ -982,8 +1504,542 @@ def _opt_card(row: dict, ovl: dict | None) -> str:
     )
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Portfolio / reconciliation / screener / realized rendering
+# ──────────────────────────────────────────────────────────────────────
+
+def _fmt_money(v, sign: bool = False) -> str:
+    if v is None:
+        return "—"
+    s = f"${abs(v):,.2f}"
+    if v < 0:
+        return f"-{s}"
+    return f"+{s}" if sign else s
+
+
+def _status_badge(status: str | None) -> str:
+    if not status:
+        return ""
+    s = status.lower()
+    if "watch" in s:
+        return '<span class="status-badge watch">watch</span>'
+    if "hold" in s and s != "open":
+        return '<span class="status-badge hold">hold</span>'
+    if s == "closed":
+        return '<span class="status-badge closed">closed</span>'
+    return '<span class="status-badge open">open</span>'
+
+
+def _option_dte(expiration: str | None, today: str | None) -> int | None:
+    if not expiration:
+        return None
+    try:
+        exp = datetime.strptime(expiration, "%Y-%m-%d")
+        ref = datetime.strptime(today, "%Y-%m-%dT%H:%M-04:00") if today else datetime.now()
+        return (exp - ref).days
+    except (ValueError, TypeError):
+        return None
+
+
+def _render_portfolio_dashboard(portfolio: dict) -> str:
+    if not portfolio:
+        return ""
+    acct = portfolio.get("account", {})
+    positions = portfolio.get("positions", [])
+    snap = acct.get("snapshot_at", "—")
+    pos_value = acct.get("positions_value") or 0
+    today = acct.get("today_change_dollars") or 0
+    today_pct = (today / pos_value * 100) if pos_value else 0
+    unreal = acct.get("total_unrealized_dollars") or 0
+    cost = acct.get("total_cost_basis") or 0
+    unreal_pct = (unreal / cost * 100) if cost else 0
+    realized = acct.get("realized_pl_window_dollars") or 0
+    n_closes = acct.get("realized_pl_window_n_closes") or 0
+    rstart = acct.get("realized_pl_window_start") or "—"
+    rend = acct.get("realized_pl_window_end") or "—"
+
+    parts = []
+    parts.append('<section class="section">')
+    parts.append('<h2>💼 Portfolio · Live Account State</h2>')
+    parts.append(f'<p class="lede">Real positions and trades from the connected Fidelity brokerage account. All numbers below are <strong>your actual exposure</strong>, not recommendations. Snapshot: <code>{html.escape(snap)}</code>.</p>')
+
+    # Stat strip
+    today_klass = "green" if today >= 0 else "red"
+    unreal_klass = "green" if unreal >= 0 else "red"
+    realized_klass = "green" if realized >= 0 else "red"
+    parts.append(f"""
+<div class="stats">
+  <div class="stat-card">
+    <div class="label">Positions Subtotal</div>
+    <div class="value">${pos_value:,.0f}</div>
+    <div class="sub">{len(positions)} positions · cash not included</div>
+  </div>
+  <div class="stat-card {today_klass}">
+    <div class="label">Today's Change</div>
+    <div class="value">{_fmt_money(today, sign=True)}</div>
+    <div class="sub">{today_pct:+.2f}% intraday</div>
+  </div>
+  <div class="stat-card {unreal_klass}">
+    <div class="label">Unrealized P/L</div>
+    <div class="value">{_fmt_money(unreal, sign=True)}</div>
+    <div class="sub">{unreal_pct:+.1f}% on ${cost:,.0f} cost basis</div>
+  </div>
+  <div class="stat-card {realized_klass}">
+    <div class="label">Realized P/L (window)</div>
+    <div class="value">{_fmt_money(realized, sign=True)}</div>
+    <div class="sub">{n_closes} closes · {rstart} → {rend}</div>
+  </div>
+</div>
+""")
+
+    # Cash note if applicable
+    cash_note = acct.get("cash_note")
+    if cash_note:
+        parts.append(f'<div class="warn-banner">⚠ {html.escape(cash_note)}</div>')
+
+    # Active management table (stocks + options, NON-passive)
+    active = [p for p in positions if p.get("asset_type") in ("stock", "option")]
+    passive = [p for p in positions if p.get("asset_type") in ("etf", "mutual_fund")]
+    active_value = sum(p.get("current_value", 0) for p in active)
+    passive_value = sum(p.get("current_value", 0) for p in passive)
+
+    parts.append(f'<h3>Active management · {len(active)} positions · ${active_value:,.0f} ({active_value/pos_value*100:.1f}% of subtotal)</h3>')
+    parts.append('<div class="holdings-table-wrap table-wrap"><table>')
+    parts.append('<thead><tr><th>Position</th><th>Status</th><th class="num">Qty</th><th class="num">Cost</th><th class="num">Last</th><th class="num">Value</th><th class="num">Unrealized</th><th class="num">Today</th><th>Notes</th></tr></thead><tbody>')
+    for p in sorted(active, key=lambda x: -x.get("current_value", 0)):
+        is_opt = p.get("asset_type") == "option"
+        ticker_disp = html.escape(p.get("underlying") or p.get("symbol"))
+        opt_meta = ""
+        if is_opt:
+            dte = _option_dte(p.get("expiration"), snap)
+            dte_str = f" · {dte}d" if dte is not None else ""
+            opt_meta = f'<span class="opt-meta">${p.get("strike",0):.0f} {p.get("option_type","").upper()} {p.get("expiration","")}{dte_str} · ×{p.get("contracts",0)}</span>'
+        status = (p.get("status") or "open").lower()
+        gain = p.get("total_gain_dollars") or 0
+        gain_pct = p.get("total_gain_pct") or 0
+        today_g = p.get("today_gain_dollars") or 0
+        today_pct = p.get("today_gain_pct") or 0
+        gain_cls = "green-text" if gain >= 0 else "red-text"
+        today_cls = "green-text" if today_g >= 0 else "red-text"
+        notes_text = p.get("notes") or p.get("thesis") or ""
+        parts.append(
+            f'<tr class="pos-row status-{html.escape(status)}">'
+            f'<td class="tkr">{ticker_disp}{opt_meta}</td>'
+            f'<td>{_status_badge(status)}</td>'
+            f'<td class="num">{p.get("quantity",0):g}</td>'
+            f'<td class="num">${p.get("avg_cost",0):,.2f}</td>'
+            f'<td class="num">${p.get("last_price",0):,.2f}</td>'
+            f'<td class="num">${p.get("current_value",0):,.0f}</td>'
+            f'<td class="num {gain_cls}">{_fmt_money(gain, sign=True)}<br><span style="font-size:10px;font-weight:500">{gain_pct:+.1f}%</span></td>'
+            f'<td class="num {today_cls}">{_fmt_money(today_g, sign=True)}<br><span style="font-size:10px;font-weight:500">{today_pct:+.1f}%</span></td>'
+            f'<td class="notes">{html.escape(notes_text)}</td>'
+            f'</tr>'
+        )
+    parts.append('</tbody></table></div>')
+
+    # Passive index (collapsed)
+    if passive:
+        parts.append(f'<details style="margin-top:16px"><summary style="cursor:pointer;color:var(--text-muted);font-size:13px"><strong>Passive index · {len(passive)} positions · ${passive_value:,.0f} ({passive_value/pos_value*100:.1f}% of subtotal)</strong> — click to expand</summary>')
+        parts.append('<div class="holdings-table-wrap table-wrap"><table>')
+        parts.append('<thead><tr><th>Symbol</th><th>Description</th><th class="num">Qty</th><th class="num">Last</th><th class="num">Value</th><th class="num">Unrealized</th></tr></thead><tbody>')
+        for p in sorted(passive, key=lambda x: -x.get("current_value", 0)):
+            gain = p.get("total_gain_dollars") or 0
+            gain_cls = "green-text" if gain >= 0 else "red-text"
+            parts.append(
+                f'<tr>'
+                f'<td class="tkr">{html.escape(p.get("symbol",""))}</td>'
+                f'<td class="muted">{html.escape(p.get("description",""))}</td>'
+                f'<td class="num">{p.get("quantity",0):g}</td>'
+                f'<td class="num">${p.get("last_price",0):,.2f}</td>'
+                f'<td class="num">${p.get("current_value",0):,.0f}</td>'
+                f'<td class="num {gain_cls}">{_fmt_money(gain, sign=True)} ({(p.get("total_gain_pct") or 0):+.1f}%)</td>'
+                f'</tr>'
+            )
+        parts.append('</tbody></table></div>')
+        parts.append('</details>')
+
+    parts.append('</section>')
+    return "".join(parts)
+
+
+def _render_action_matrix(reconciliation: dict) -> str:
+    h_pick = reconciliation["held_pick"]
+    h_veto = reconciliation["held_vetoed"]
+    h_uncov = reconciliation["held_no_cover"]
+    pick_nh = reconciliation["pick_not_held"]
+
+    def names(seq, get):
+        return ", ".join(sorted({get(x) for x in seq if get(x)}))
+
+    pick_held_names = names(h_pick, lambda x: x[0].get("underlying") or x[0].get("symbol"))
+    veto_held_names = names(h_veto, lambda x: x[0].get("underlying") or x[0].get("symbol"))
+    uncov_names = names([(p, e) for p, e in h_uncov if _exposure_key(p)], lambda x: x[0].get("underlying") or x[0].get("symbol"))
+    opp_names = ", ".join(sorted(e["row"]["ticker"] for e in pick_nh))
+
+    return (
+        '<div class="action-matrix">'
+        f'<div class="action-bucket green">'
+        f'<div class="label">✓ Aligned</div>'
+        f'<div class="count">{len(h_pick)}</div>'
+        f'<div class="names">{html.escape(pick_held_names) or "—"}</div>'
+        f'</div>'
+        f'<div class="action-bucket red">'
+        f'<div class="label">⚠ Friction · Held + Vetoed</div>'
+        f'<div class="count">{len(h_veto)}</div>'
+        f'<div class="names">{html.escape(veto_held_names) or "—"}</div>'
+        f'</div>'
+        f'<div class="action-bucket yellow">'
+        f'<div class="label">? Uncovered</div>'
+        f'<div class="count">{len(h_uncov)}</div>'
+        f'<div class="names">{html.escape(uncov_names) or "—"}</div>'
+        f'</div>'
+        f'<div class="action-bucket blue">'
+        f'<div class="label">⚡ PICK + Not Held</div>'
+        f'<div class="count">{len(pick_nh)}</div>'
+        f'<div class="names">{html.escape(opp_names) or "—"}</div>'
+        f'</div>'
+        '</div>'
+    )
+
+
+def _recon_pair_position(pos: dict, snap: str | None) -> str:
+    """Render the LEFT side: a held position summary."""
+    is_opt = pos.get("asset_type") == "option"
+    ticker = pos.get("underlying") or pos.get("symbol")
+    gain = pos.get("total_gain_dollars") or 0
+    gain_pct = pos.get("total_gain_pct") or 0
+    pl_cls = "green" if gain >= 0 else "red"
+    detail = ""
+    if is_opt:
+        dte = _option_dte(pos.get("expiration"), snap)
+        dte_str = f" · {dte}d to expiry" if dte is not None else ""
+        moneyness = ""
+        if pos.get("last_price") and pos.get("strike"):
+            # For long-call: ITM if underlying > strike. We don't have underlying spot here,
+            # so just show structure.
+            moneyness = ""
+        detail = f'<span class="meta">${pos.get("strike",0):.0f} {pos.get("option_type","").upper()} {pos.get("expiration","")}{dte_str} · ×{pos.get("contracts",0)} · cost ${pos.get("avg_cost",0):.2f}</span>'
+    else:
+        detail = f'<span class="meta">{pos.get("quantity",0):g} sh · cost ${pos.get("avg_cost",0):,.2f} · last ${pos.get("last_price",0):,.2f}</span>'
+    notes = pos.get("notes") or pos.get("thesis") or ""
+    return (
+        '<div class="col">'
+        '<span class="label">Held</span>'
+        f'<span class="ticker">{html.escape(ticker)} {_status_badge(pos.get("status"))}</span>'
+        f'{detail}'
+        f'<span class="meta">value: <strong>${pos.get("current_value",0):,.0f}</strong> · {pos.get("pct_of_account",0):.1f}% of acct</span>'
+        f'<span class="pl {pl_cls}">{_fmt_money(gain, sign=True)} ({gain_pct:+.1f}%)</span>'
+        f'<span class="meta" style="margin-top:4px">{html.escape(notes)}</span>'
+        '</div>'
+    )
+
+
+def _recon_pair_verdict(matrix_entry: dict | None) -> str:
+    """Render the RIGHT side: matrix verdict on the same name."""
+    if not matrix_entry:
+        return (
+            '<div class="col">'
+            '<span class="label">Matrix verdict</span>'
+            '<span class="ticker" style="color:var(--text-dim)">—</span>'
+            '<span class="meta">No matrix coverage in supplied runs.</span>'
+            '<span class="verdict">Run the matrix on this name before adding or sizing up.</span>'
+            '</div>'
+        )
+    row = matrix_entry["row"]
+    cls = row.get("classification") or "—"
+    cls_color = "green" if cls == "PICK" else "red" if cls == "VETOED" else "muted"
+    tier = _tier(row)
+    cur = row.get("current_price_usd")
+    aggr = row.get("aggressive_pt")
+    cons = row.get("conservative_pt")
+    upside = row.get("aggressive_upside_pct")
+    summary = row.get("aggressive_executive_summary") or ""
+    summary_short = summary[:280] + ("…" if len(summary) > 280 else "")
+    snap = matrix_entry.get("snapshot_date") or "—"
+    targets = []
+    if cur is not None:
+        targets.append(f"current ${cur:,.2f}")
+    if aggr is not None:
+        targets.append(f"agg PT ${aggr:,.2f}")
+    if cons is not None:
+        targets.append(f"cons PT ${cons:,.2f}")
+    targets_str = " · ".join(targets) if targets else "—"
+    upside_str = f"{upside:+.1f}% to agg PT" if upside is not None else ""
+    return (
+        '<div class="col">'
+        '<span class="label">Matrix verdict</span>'
+        f'<span class="ticker">{html.escape(row.get("ticker"))} '
+        f'<span class="status-badge {cls_color}">{html.escape(cls)}</span> '
+        f'{(_badge("Tier " + tier, "badge-tier-" + tier.lower()) if tier in {"A","B","C"} else "")}</span>'
+        f'<span class="meta">{html.escape(targets_str)} · {html.escape(upside_str)}</span>'
+        f'<span class="meta">snapshot: <code>{html.escape(snap)}</code> · run: <code>{html.escape(matrix_entry["run_label"])}</code></span>'
+        f'<span class="verdict">{html.escape(summary_short)}</span>'
+        '</div>'
+    )
+
+
+def _render_reconciliation(reconciliation: dict, portfolio: dict) -> str:
+    snap = portfolio.get("account", {}).get("snapshot_at") if portfolio else None
+    parts = []
+    parts.append('<section class="section">')
+    parts.append('<h2>🔀 Recommendations vs Reality</h2>')
+    parts.append('<p class="lede">For each held name, what does the latest matrix verdict say? <strong>Friction cases first</strong> (held + vetoed, held + uncovered), then opportunities (PICK + not held), then aligned positions. Latest verdict by snapshot date wins when a ticker appears in multiple runs.</p>')
+
+    parts.append(_render_action_matrix(reconciliation))
+
+    bucket_specs = [
+        ("held_vetoed", "bucket-friction", "⚠ Friction · Held but Matrix VETOED",
+         "Conservative frame failed these in the latest run. Either reduce/exit, or document explicitly why you're overriding the model."),
+        ("held_no_cover", "bucket-uncovered", "? Uncovered · Held but Not Matrix-Run",
+         "These names aren't in any supplied matrix run. Run the matrix before adding; consider whether to keep them at all."),
+        ("pick_not_held", "bucket-opportunity", "⚡ Opportunity · Matrix PICK · Not Held",
+         "These names cleared the matrix but aren't in the portfolio. Highest-priority review candidates — validate options chain + sizing before entry."),
+        ("held_pick", "bucket-aligned", "✓ Aligned · Held + Matrix PICK",
+         "Latest matrix confirms the thesis. Hold; consider adding only if conviction increases and current sizing is below target."),
+    ]
+
+    parts.append('<div class="reconcile-grid">')
+    for bucket_key, bucket_class, title, desc in bucket_specs:
+        items = reconciliation.get(bucket_key, [])
+        if not items:
+            continue
+        parts.append(f'<div class="recon-card {bucket_class}">')
+        parts.append(f'<div class="header"><span class="title">{html.escape(title)}</span><span class="count">{len(items)} {"name" if len(items)==1 else "names"}</span></div>')
+        parts.append(f'<div class="desc">{html.escape(desc)}</div>')
+        if bucket_key == "pick_not_held":
+            for entry in items:
+                parts.append('<div class="recon-pair">')
+                # LEFT: empty/placeholder
+                parts.append(
+                    '<div class="col">'
+                    '<span class="label">Current exposure</span>'
+                    '<span class="ticker" style="color:var(--text-dim)">—</span>'
+                    '<span class="meta">Not in portfolio.</span>'
+                    '<span class="meta">Consider entry sizing before adding.</span>'
+                    '</div>'
+                )
+                # RIGHT: matrix verdict
+                parts.append(_recon_pair_verdict(entry))
+                parts.append('</div>')
+        else:
+            for pos, entry in items:
+                parts.append('<div class="recon-pair">')
+                parts.append(_recon_pair_position(pos, snap))
+                parts.append(_recon_pair_verdict(entry))
+                parts.append('</div>')
+        parts.append('</div>')
+    parts.append('</div>')
+
+    # Passive separately - acknowledged but not reconciled
+    if reconciliation.get("passive"):
+        n = len(reconciliation["passive"])
+        parts.append(f'<p class="lede" style="margin-top:24px;font-size:13px"><em>Plus {n} passive holdings (ETFs/mutual funds) — not subject to per-ticker matrix verdicts.</em></p>')
+
+    parts.append('</section>')
+    return "".join(parts)
+
+
+def _render_news_chips(enrichment_row: dict | None) -> str:
+    """Render a compact sentiment + theme chip cluster for a screener row.
+
+    Sentiment shows polarity in [-1, 1] color-coded by sign. Themes show
+    the top 2 by confidence; ``government_action`` gets a distinct purple
+    chip (INTC-style thesis tagging).
+    """
+    if not enrichment_row:
+        return '<span class="muted" style="font-size:11px">—</span>'
+    parts = []
+    sent = (enrichment_row.get("sentiment") or {})
+    chosen = sent.get("finbert") or sent.get("keyword")
+    if chosen and chosen.get("n_headlines", 0) > 0:
+        agg = chosen.get("aggregate", 0.0) or 0.0
+        cls = (
+            "chip-sent-pos" if agg > 0.05
+            else "chip-sent-neg" if agg < -0.05
+            else "chip-sent-neu"
+        )
+        scorer = chosen.get("scorer", "?")
+        n = chosen.get("n_headlines", 0)
+        title_attr = (
+            f"{scorer} sentiment from n={n} headlines (range [-1, 1])"
+        )
+        parts.append(
+            f'<span class="chip-sent {cls}" title="{html.escape(title_attr)}">'
+            f'{agg:+.2f}</span>'
+        )
+    themes = enrichment_row.get("themes") or []
+    for t in themes[:2]:
+        label = t.get("label", "")
+        conf = t.get("confidence", 0.0) or 0.0
+        cls = "chip-theme chip-theme-gov" if label == "government_action" else "chip-theme"
+        title_attr = f"{label}: {conf:.0%} of headlines matched"
+        parts.append(
+            f'<span class="{cls}" title="{html.escape(title_attr)}">'
+            f'{html.escape(label.replace("_", " "))}</span>'
+        )
+    return "".join(parts) if parts else '<span class="muted" style="font-size:11px">—</span>'
+
+
+def _render_screener_watchlist(screener: dict, matrix_index: dict, held_keys: set,
+                               enrichment: dict[str, dict] | None = None,
+                               top_n: int = 25) -> str:
+    candidates = screener.get("candidates", [])[:top_n]
+    if not candidates:
+        return ""
+    snap = screener.get("trading_date", "—")
+    parts = []
+    parts.append('<section class="section">')
+    parts.append(f'<h2>🔭 Screener Watchlist · Top {len(candidates)} Candidates</h2>')
+    parts.append(f'<p class="lede">Pre-matrix candidates from the latest screener run. <strong>High screener score is a funnel, not a buy signal</strong> — these need matrix validation + same-day options chain before any entry. Snapshot: <code>{html.escape(snap)}</code>. Universe size: {screener.get("universe_size", "—")}.</p>')
+
+    if screener.get("is_partial"):
+        rate_limited = ", ".join(screener.get("rate_limited_failures", []))
+        parts.append(f'<div class="warn-banner">⚠ Partial screener result — rate limited on: <code>{html.escape(rate_limited)}</code>. Top-N may be missing legitimate names.</div>')
+
+    parts.append('<div class="screener-table-wrap table-wrap"><table>')
+    parts.append('<thead><tr><th>#</th><th>Ticker</th><th>Name</th><th class="num">Score</th><th class="num">Mcap</th><th>Sector</th><th>News</th><th>Matrix</th><th>Ownership</th><th>Summary</th></tr></thead><tbody>')
+    for c in candidates:
+        tkr = c["ticker"]
+        # Matrix status
+        m_entry = matrix_index.get(tkr)
+        if m_entry is None:
+            matrix_badge = '<span class="badge badge-screener-pending">Needs matrix</span>'
+        else:
+            cls = m_entry["row"].get("classification")
+            if cls == "PICK":
+                matrix_badge = '<span class="badge badge-screener-pick">PICK</span>'
+            elif cls == "VETOED":
+                matrix_badge = '<span class="badge badge-screener-vetoed">VETOED</span>'
+            else:
+                matrix_badge = '<span class="badge badge-screener-pending">—</span>'
+        # Ownership status
+        owned_badge = '<span class="badge badge-held">HELD</span>' if tkr in held_keys else '<span class="muted" style="font-size:11px">—</span>'
+        mcap = c.get("market_cap", 0)
+        mcap_str = f"${mcap/1e9:.0f}B" if mcap else "—"
+        sector = c.get("sector_desc", "—")
+        if sector and len(sector) > 28:
+            sector = sector[:28] + "…"
+        summary = c.get("summary", "")[:80]
+        news_cell = _render_news_chips(enrichment.get(tkr) if enrichment else None)
+        parts.append(
+            f'<tr class="scr-row">'
+            f'<td>{c.get("rank","—")}</td>'
+            f'<td class="tkr">{html.escape(tkr)}</td>'
+            f'<td class="muted" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{html.escape(c.get("name","—"))}</td>'
+            f'<td class="num score">{c.get("composite_score",0):.1f}</td>'
+            f'<td class="num">{mcap_str}</td>'
+            f'<td class="muted" style="font-size:11px">{html.escape(sector)}</td>'
+            f'<td>{news_cell}</td>'
+            f'<td>{matrix_badge}</td>'
+            f'<td>{owned_badge}</td>'
+            f'<td class="muted" style="font-size:11px;max-width:280px">{html.escape(summary)}</td>'
+            f'</tr>'
+        )
+    parts.append('</tbody></table></div>')
+    parts.append('</section>')
+    return "".join(parts)
+
+
+def _render_realized_pl(portfolio: dict) -> str:
+    if not portfolio:
+        return ""
+    trades = portfolio.get("trades", [])
+    summary = _summarize_realized(trades)
+    if summary["n_closes"] == 0:
+        return ""
+
+    parts = []
+    parts.append('<section class="section">')
+    parts.append(f'<h2>💰 Realized P/L · {summary["n_closes"]} Closes</h2>')
+    parts.append(f'<p class="lede">Closed positions with computed realized P/L. Net: <strong>{_fmt_money(summary["total_pl"], sign=True)}</strong> across {len(summary["by_underlying"])} underlyings. Equity sells without cost basis are listed below as proceeds-only.</p>')
+
+    parts.append('<div class="realized-summary">')
+    for u, bucket in sorted(summary["by_underlying"].items(), key=lambda kv: -kv[1]["pl"]):
+        cls = "green" if bucket["pl"] >= 0 else "red"
+        n = len(bucket["trades"])
+        parts.append(
+            f'<div class="real-card {cls}">'
+            f'<div class="ticker">{html.escape(u)}</div>'
+            f'<div class="pl {cls}">{_fmt_money(bucket["pl"], sign=True)}</div>'
+            f'<div class="meta">{n} close{"s" if n!=1 else ""}</div>'
+            f'</div>'
+        )
+    parts.append('</div>')
+
+    parts.append('<h3>Trade ledger · all closes (newest first)</h3>')
+    parts.append('<div class="table-wrap"><table>')
+    parts.append('<thead><tr><th>Date</th><th>Action</th><th>Symbol</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Proceeds</th><th class="num">Realized P/L</th><th>Rationale</th></tr></thead><tbody>')
+    for t in summary["closes"]:
+        pl = t.get("realized_pl") or 0
+        pl_cls = "green-text" if pl >= 0 else "red-text"
+        sym = t.get("symbol") or t.get("underlying") or "—"
+        parts.append(
+            f'<tr>'
+            f'<td class="muted">{html.escape(t.get("trade_date","—"))}</td>'
+            f'<td><span class="status-badge {"open" if t.get("action") in ("STC","SELL") else "closed"}">{html.escape(t.get("action","—"))}</span></td>'
+            f'<td class="tkr">{html.escape(sym)}</td>'
+            f'<td class="num">{t.get("quantity",0):g}</td>'
+            f'<td class="num">${t.get("price",0):,.2f}</td>'
+            f'<td class="num">{_fmt_money(t.get("proceeds"), sign=True)}</td>'
+            f'<td class="num {pl_cls}">{_fmt_money(pl, sign=True)}</td>'
+            f'<td class="muted" style="font-size:11px">{html.escape(t.get("rationale") or "")}</td>'
+            f'</tr>'
+        )
+    parts.append('</tbody></table></div>')
+
+    # Equity sells without cost basis
+    other_sells = [t for t in trades if t.get("realized_pl") is None and t.get("action") in ("SELL",)]
+    if other_sells:
+        parts.append('<details style="margin-top:16px"><summary style="cursor:pointer;color:var(--text-muted);font-size:13px"><strong>Equity sells without cost basis</strong> · {n} trades — proceeds only</summary>'.format(n=len(other_sells)))
+        parts.append('<div class="table-wrap"><table>')
+        parts.append('<thead><tr><th>Date</th><th>Symbol</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Proceeds</th><th>Notes</th></tr></thead><tbody>')
+        for t in sorted(other_sells, key=lambda x: x.get("trade_date",""), reverse=True):
+            parts.append(
+                f'<tr>'
+                f'<td class="muted">{html.escape(t.get("trade_date","—"))}</td>'
+                f'<td class="tkr">{html.escape(t.get("symbol","—"))}</td>'
+                f'<td class="num">{t.get("quantity",0):g}</td>'
+                f'<td class="num">${t.get("price",0):,.2f}</td>'
+                f'<td class="num green-text">{_fmt_money(t.get("proceeds"), sign=True)}</td>'
+                f'<td class="muted" style="font-size:11px">{html.escape(t.get("rationale") or t.get("notes") or "")}</td>'
+                f'</tr>'
+            )
+        parts.append('</tbody></table></div></details>')
+
+    parts.append('</section>')
+    return "".join(parts)
+
+
+def _render_private_banner(portfolio: dict | None) -> str:
+    if not portfolio:
+        return ""
+    return (
+        '<div class="private-banner">'
+        '<span class="icon">🔒</span>'
+        '<span><strong>Private — contains live brokerage data.</strong> Real positions, real cost basis, real P/L. '
+        'Do not share, screenshot, or commit. This file lives outside <code>runs/</code> for a reason.</span>'
+        '</div>'
+    )
+
+
+def _render_skipped(skipped: list[str] | None) -> str:
+    if not skipped:
+        return ""
+    items = "".join(f"<li>{html.escape(s)}</li>" for s in skipped)
+    return (
+        '<div class="skipped-banner">'
+        '<strong>ℹ Some runs were skipped (not yet ready):</strong>'
+        f'<ul>{items}</ul>'
+        '</div>'
+    )
+
+
 def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
-           options_map: dict | None = None) -> str:
+           options_map: dict | None = None,
+           portfolio: dict | None = None,
+           screener: dict | None = None,
+           news_enrichment: dict[str, dict] | None = None,
+           skipped_runs: list[str] | None = None) -> str:
     options_map = options_map or {}
     picks = [r for r in rows if r["classification"] == "PICK"]
     vetoed = [r for r in rows if r["classification"] == "VETOED"]
@@ -1018,36 +2074,16 @@ def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
     tier_b = [r for r in best.values() if _tier(r) == "B"]
     tier_c = [r for r in best.values() if _tier(r) == "C"]
 
-    # Sector mapping (manual based on the picks present)
-    sector_map = {
-        "VNOM": "Energy / Royalties", "AROC": "Energy / Infrastructure",
-        "TRGP": "Energy / Midstream",
-        "ADI": "Semiconductors", "APH": "Electronic Components",
-        "CRUS": "Semiconductors", "DIOD": "Semiconductors",
-        "SYNA": "Semiconductors", "MXL": "Semiconductors",
-        "COHU": "Semiconductors", "ALGM": "Semiconductors",
-        "VSH": "Semiconductors", "KLIC": "Semis Equipment",
-        "APD": "Industrial Gases", "STLD": "Steel",
-        "KALU": "Aluminum", "EQIX": "Data Centers / REIT",
-        "CTRE": "Healthcare REIT", "TJX": "Off-Price Retail",
-        "ARMK": "Food Services", "DAR": "Food / Renewables",
-        "VFC": "Apparel", "DAVE": "Fintech",
-        "VIRT": "Capital Markets", "KEY": "Regional Banking",
-        "FHB": "Regional Banking", "IDA": "Utility / Electric",
-        "GVA": "Construction", "PRIM": "Construction Services",
-        "MYRG": "Construction Services", "PWR": "Construction Services",
-        "ROK": "Industrial Automation", "LGND": "Pharma / Royalties",
-        "TVTX": "Pharma", "SNDK": "Storage / Memory",
-        "AAOI": "Optical Networking", "LITE": "Optical Networking",
-        "VICR": "Power Conversion", "ABNB": "Travel / Marketplace",
-        "GSAT": "Satellite", "AMPX": "Energy Storage",
-        "AGX": "Engineering / Construction", "SXI": "Industrial Conglomerate",
-        "BNTX": "Biotech",
-    }
+    # Sector grouping driven by SIC prefix on each row.
     sector_groups: dict[str, list[str]] = {}
     for r in best.values():
-        sec = sector_map.get(r["ticker"], "Other")
+        sec = _sector_from_sic(r.get("sector_sic"))
         sector_groups.setdefault(sec, []).append(r["ticker"])
+
+    # Reconciliation against portfolio (if provided)
+    matrix_index = _build_matrix_index(rows, metadata)
+    reconciliation = _build_reconciliation(portfolio, matrix_index) if portfolio else None
+    held_keys = reconciliation["held_keys"] if reconciliation else set()
 
     # ── HTML
     parts = []
@@ -1075,14 +2111,35 @@ def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
 </header>
 """)
 
+    # Private banner (only if portfolio supplied)
+    parts.append(_render_private_banner(portfolio))
+
+    # Skipped runs warning
+    parts.append(_render_skipped(skipped_runs))
+
+    # Portfolio dashboard (only if portfolio supplied)
+    if portfolio:
+        parts.append(_render_portfolio_dashboard(portfolio))
+
+    # Reconciliation: held-vs-matrix
+    if reconciliation:
+        parts.append(_render_reconciliation(reconciliation, portfolio))
+
     # ── Stat strip
     parts.append('<section class="section">')
+    parts.append('<h2>📊 Matrix Coverage Across Supplied Runs</h2>')
+    n_top5_a = sum(1 for r in top5 if _tier(r) == "A")
+    n_top5_b = sum(1 for r in top5 if _tier(r) == "B")
+    n_top5_c = sum(1 for r in top5 if _tier(r) == "C")
+    top5_breakdown = " · ".join(
+        f"{n} Tier {letter}" for letter, n in [("A", n_top5_a), ("B", n_top5_b), ("C", n_top5_c)] if n
+    ) or "no picks"
     parts.append(f"""
 <div class="stats">
   <div class="stat-card green">
     <div class="label">High Conviction</div>
     <div class="value">{len(top5)}</div>
-    <div class="sub">Top-5 trades · all Tier A</div>
+    <div class="sub">Top-{len(top5)} trades · {top5_breakdown}</div>
   </div>
   <div class="stat-card">
     <div class="label">Total Picks</div>
@@ -1103,33 +2160,34 @@ def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
 </section>""")
 
     # ── Top 5 hero
-    why_map = {
-        "VNOM": "Conservative is more bullish than aggressive — rarest signal of either run. Vetoed at large-cap; true mid-cap conviction.",
-        "ADI":  "Same negative-compression signal at large-cap scale. Cons PT $420 > aggr $408. Caveat: aggr PT only +1.4% above current — wait for pullback.",
-        "AROC": "Only name picked in BOTH bands. Tier A in large-cap, Tier B in mid-cap. Aggressive Buy rating. Cons PT $40.50 is first profit-taking zone.",
-        "CTRE": "Both frames model exact same PT — unique signal. Healthcare REIT. Cleanest dual-frame agreement of either run.",
-        "IDA":  "Defensive utility. Both frames within 1% of each other. Portfolio counterweight to energy + semis names in the top-5.",
-        "TRGP": "At first PT zone already. Lower remaining upside.",
-        "APD":  "Clean dual-frame agreement. +10% aggressive upside but slightly wider compression.",
-        "VIRT": "Tier C in large-cap, Tier B in mid-cap. Strengthens at smaller frame; cons engaged with PT in mid-cap but not large-cap.",
-        "FHB":  "Tightest tier-B compression in mid-cap (5.0%). Regional banking — interest-rate sensitive.",
-        "ARMK": "Cons PT only +2.9% above current despite passing veto filter. Margin still exists but compressed.",
-    }
     parts.append('<section class="section">')
     parts.append('<h2>🏆 Top 5 Trades · Cross-Run</h2>')
-    parts.append('<p class="lede">Composite ranking across both runs by tier × compression × cross-band confirmation × aggressive upside. Every name in this list is <strong>Tier A</strong> — both frames set explicit price targets within 5% of each other (or the conservative target is <em>higher</em>, the rarest signal).</p>')
+    if n_top5_a == len(top5) and len(top5) > 0:
+        lede_extra = "Every name in this list is <strong>Tier A</strong> — both frames set explicit price targets within 5% of each other (or the conservative target is <em>higher</em>, the rarest signal)."
+    elif n_top5_a:
+        lede_extra = f"<strong>{n_top5_a} of {len(top5)} are Tier A</strong> (tight dual-frame agreement); the rest are Tier B/C — see per-pick caveats."
+    else:
+        lede_extra = "No Tier A names in the top-5 — these are all Tier B/C picks where conservative either set a wider PT or declined to model. Size accordingly."
+    parts.append(f'<p class="lede">Composite ranking across all supplied runs by tier × compression × cross-band confirmation × aggressive upside. {lede_extra}</p>')
     parts.append('<div class="hero">')
     for i, r in enumerate(top5, 1):
-        parts.append(_hero_card(i, r, why_map.get(r["ticker"], ""), cross_band))
+        # Use the agent's own executive summary, truncated, instead of curated copy
+        summary = (r.get("aggressive_executive_summary") or "").strip()
+        # Take first 2 sentences max, and cap at ~280 chars
+        first = summary.split(". ")
+        why = ". ".join(first[:2]).rstrip(".") + ("." if first[:2] else "")
+        if len(why) > 280:
+            why = why[:280].rstrip() + "…"
+        parts.append(_hero_card(i, r, why, cross_band))
     parts.append('</div>')
 
     # Sector mix of top-5
     parts.append('<h3>Sector composition of the top-5</h3>')
-    parts.append('<p class="lede" style="margin-bottom:12px">Diversified across cyclicality regimes — not a thematic concentration trade. The fundamentals screen surfaced five different stories.</p>')
+    parts.append('<p class="lede" style="margin-bottom:12px">SIC-derived sector mapping. Diversified composition is a good sign that the screener isn\'t over-fitting a single thematic pocket.</p>')
     parts.append('<div class="sector-grid">')
     top5_sectors: dict[str, list[str]] = {}
     for r in top5:
-        sec = sector_map.get(r["ticker"], "Other")
+        sec = _sector_from_sic(r.get("sector_sic"))
         top5_sectors.setdefault(sec, []).append(r["ticker"])
     for sec, tickers in sorted(top5_sectors.items()):
         parts.append(
@@ -1265,8 +2323,9 @@ def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
 
     # ── Full picks table
     parts.append('<section class="section">')
-    parts.append('<h2>📋 Full Picks Ledger · Both Runs</h2>')
-    parts.append('<p class="lede">All 21 picks across both runs, sorted by composite score. Star indicates negative compression (cons PT > aggr PT) or perfect agreement.</p>')
+    parts.append('<h2>📋 Full Picks Ledger · All Supplied Runs</h2>')
+    n_run_word = "run" if len(metadata) == 1 else f"{len(metadata)} runs"
+    parts.append(f'<p class="lede">All {len(ranked)} picks across the supplied {n_run_word}, sorted by composite score. Star indicates negative compression (cons PT > aggr PT) or perfect agreement.</p>')
     parts.append('<div class="table-wrap"><table>')
     parts.append('<thead><tr><th>#</th><th>Ticker</th><th>Run</th><th>Tier</th><th class="num">Current</th><th class="num">Aggr PT</th><th class="num">Aggr Up%</th><th class="num">Cons PT</th><th class="num">Comp</th><th>Aggr</th><th>Horizon</th></tr></thead>')
     parts.append('<tbody>')
@@ -1333,15 +2392,37 @@ def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
     parts.append('</details>')
     parts.append('</section>')
 
+    # ── Screener watchlist (only if screener provided)
+    if screener:
+        parts.append(_render_screener_watchlist(
+            screener, matrix_index, held_keys,
+            enrichment=news_enrichment,
+        ))
+
+    # ── Realized P/L (only if portfolio provided)
+    if portfolio:
+        parts.append(_render_realized_pl(portfolio))
+
     # ── Footer
     parts.append('<footer class="footer">')
     parts.append('<p><strong>Source pipeline</strong>:</p>')
     for label, meta in metadata.items():
-        parts.append(f'<p>· <code>{label}-cap</code>: matrix <code>{html.escape(meta["matrix_run"] or "—")}</code> ← screener <code>{html.escape(meta["screener_run"] or "—")}</code> · {meta["n_total"]} tickers ({meta["n_picks"]} picks, {meta["n_vetoed"]} vetoed)</p>')
+        parts.append(f'<p>· <code>{label}</code>: matrix <code>{html.escape(meta["matrix_run"] or "—")}</code> ← screener <code>{html.escape(meta["screener_run"] or "—")}</code> · {meta["n_total"]} tickers ({meta["n_picks"]} picks, {meta["n_vetoed"]} vetoed)</p>')
+    if screener:
+        parts.append(f'<p>· screener watchlist: <code>{html.escape(screener.get("_screener_dir","—"))}</code> · {screener.get("trading_date","—")} · {len(screener.get("candidates", []))} candidates from {screener.get("universe_size","—")}-name universe</p>')
+    if portfolio:
+        n_pos = len(portfolio.get("positions", []))
+        n_trd = len(portfolio.get("trades", []))
+        snap = portfolio.get("account", {}).get("snapshot_at", "—")
+        parts.append(f'<p>· portfolio: {n_pos} positions · {n_trd} trades · snapshot <code>{html.escape(snap)}</code></p>')
+    if skipped_runs:
+        parts.append(f'<p>· skipped {len(skipped_runs)} run(s) (matrix not yet ready) — re-run when available</p>')
     parts.append('<p>&nbsp;</p>')
     parts.append('<p><strong>Methodology</strong>: Each ticker run through TradingAgents twice (aggressive + conservative profile), full multi-agent debate. Filter: aggressive ∈ Overweight/Buy AND conservative ∉ Underweight/Sell. Composite score = tier base × compression bonus × cross-band confirmation × bounded aggressive upside.</p>')
-    parts.append('<p><strong>Reproduce</strong>: <code>python scripts/build_run_accounting.py --matrix-run &lt;dir&gt; --screener-run &lt;dir&gt;</code> · this report: <code>python scripts/build_html_report.py --runs &lt;run&gt;:&lt;label&gt; ... --output report.html</code></p>')
+    parts.append('<p><strong>Reproduce</strong>: <code>python scripts/build_run_accounting.py --matrix-run &lt;dir&gt; --screener-run &lt;dir&gt;</code> · this report: <code>python scripts/build_html_report.py --runs &lt;run&gt;:&lt;label&gt; ... --output report.html [--portfolio &lt;json&gt;] [--screener-run &lt;dir&gt;]</code></p>')
     parts.append('<p>&nbsp;</p>')
+    if portfolio:
+        parts.append('<p style="color: var(--yellow); font-size: 11px;"><strong>🔒 Reminder:</strong> This report contains live brokerage data. Treat as private — do not share, screenshot, or commit.</p>')
     parts.append('<p style="color: var(--text-dim); font-size: 11px;">Generated by TradingAgents accounting pipeline · self-contained HTML, no external dependencies</p>')
     parts.append('</footer>')
 
@@ -1360,18 +2441,46 @@ def main():
     p.add_argument("--output", required=True, help="Output HTML path")
     p.add_argument("--title", default="TradingAgents · Cross-Run Synthesis")
     p.add_argument("--subtitle", default="Cross-run dual-frame matrix analysis")
+    p.add_argument("--portfolio", default=None,
+                   help="Path to portfolio_export.json (versioned positions + trades)")
+    p.add_argument("--screener-run", default=None,
+                   help="Path to a screener_* run dir to render as a watchlist")
+    p.add_argument("--allow-missing-runs", action="store_true", default=True,
+                   help="Skip runs whose verdict_ledger.json is missing (matrix may be in flight). Default true.")
+    p.add_argument("--strict-runs", action="store_true",
+                   help="Fail if any run is missing its verdict_ledger.json. Overrides --allow-missing-runs.")
     args = p.parse_args()
 
-    rows, metadata, options_map = _load_runs(args.runs)
+    allow_missing = not args.strict_runs
+    rows, metadata, options_map, skipped = _load_runs(args.runs, allow_missing=allow_missing)
+    portfolio = _load_portfolio(args.portfolio)
+    screener = _load_screener(args.screener_run)
+    news_enrichment = _load_news_enrichment(screener)
+
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    html_text = render(rows, metadata, args.title, args.subtitle, options_map)
+    html_text = render(rows, metadata, args.title, args.subtitle,
+                       options_map=options_map, portfolio=portfolio,
+                       screener=screener, news_enrichment=news_enrichment,
+                       skipped_runs=skipped)
     out_path.write_text(html_text)
 
     n_picks = sum(1 for r in rows if r["classification"] == "PICK")
     n_vetoed = sum(1 for r in rows if r["classification"] == "VETOED")
     print(f"  ✅ {out_path}")
     print(f"     {len(rows)} tickers · {n_picks} picks · {n_vetoed} vetoed")
+    if portfolio:
+        n_pos = len(portfolio.get("positions", []))
+        n_trd = len(portfolio.get("trades", []))
+        print(f"     portfolio: {n_pos} positions · {n_trd} trades")
+    if screener:
+        print(f"     screener: {len(screener.get('candidates', []))} candidates from {screener.get('_screener_dir', '—')}")
+    if news_enrichment:
+        print(f"     news_enrichment: {len(news_enrichment)} tickers tagged")
+    if skipped:
+        print(f"     ⚠ skipped {len(skipped)} run(s):")
+        for s in skipped:
+            print(f"        · {s}")
     print(f"     {len(html_text):,} bytes")
 
 

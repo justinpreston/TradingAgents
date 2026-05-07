@@ -191,6 +191,14 @@ def _parse_args() -> argparse.Namespace:
         help="Inject a Portfolio Manager prompt addendum reflecting the "
              "investor's risk tolerance. Default: no addendum (neutral synthesis).",
     )
+    p.add_argument(
+        "--news-enrichment",
+        default=None,
+        help="Path to a news_enrichment.json file. When set, the news "
+             "analyst prepends pre-computed FinBERT polarity + theme tags "
+             "to its system message via the "
+             "TRADINGAGENTS_NEWS_ENRICHMENT_PATH env var.",
+    )
     return p.parse_args()
 
 
@@ -206,6 +214,12 @@ def main() -> int:
     run_id = args.run_id or f"persona_aligned_{trade_date}"
 
     os.environ["GITHUB_TOKEN"] = _resolve_github_token()
+    if args.news_enrichment:
+        enrichment_path = Path(args.news_enrichment).resolve()
+        if not enrichment_path.exists():
+            sys.stderr.write(f"⚠ --news-enrichment path not found: {enrichment_path} (continuing without)\n")
+        else:
+            os.environ["TRADINGAGENTS_NEWS_ENRICHMENT_PATH"] = str(enrichment_path)
     config = _build_config(risk_profile=args.risk_profile)
 
     runs_dir = Path("runs") / run_id

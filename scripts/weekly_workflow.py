@@ -398,6 +398,16 @@ def phase_chain(screener_run: Path, args: argparse.Namespace, diff: dict) -> Non
     if args.target_date:
         cmd += ["--date", args.target_date]
 
+    # Auto-pass news enrichment when this run produced one earlier in Phase 2.5.
+    # Both matrix and persona-aligned runners accept --news-enrichment; the
+    # matrix runner sets the env var on every cell subprocess, while the
+    # persona-aligned runner sets it for its own process.
+    if args.enrich_news:
+        ne_path = screener_run / "news_enrichment.json"
+        if ne_path.exists():
+            cmd += ["--news-enrichment", str(ne_path.relative_to(REPO_ROOT))]
+            print(f"  📰 News enrichment will be injected into matrix cells: {ne_path.name}")
+
     rc = _run(cmd, args.dry_run)
     if rc == 0 and not args.dry_run:
         print(f"  ✅ Matrix complete. Re-index with: .venv/bin/python scripts/index_runs.py")

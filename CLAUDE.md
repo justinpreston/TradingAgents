@@ -203,6 +203,31 @@ screener or matrix run with two derived signals per ticker:
 .venv/bin/python scripts/weekly_workflow.py --tier mega --enrich-news --news-scorer both
 ```
 
+**Three downstream consumers** (all opt-in, no behavioral change without flags):
+
+1. **HTML report chips** — `scripts/build_html_report.py` auto-detects
+   `news_enrichment.json` next to the supplied `--screener-run` and renders
+   a `News` column on the screener watchlist with sentiment polarity and
+   the top-2 themes per ticker (purple chip for `government_action` to
+   tag INTC-style theses).
+
+2. **Screener re-rank** — `scripts/build_news_enrichment.py --rerank-screener
+   --rerank-alpha 0.10` writes `screener_sentiment_reranked.json` and
+   `top_tickers_sentiment_reranked.txt` next to the original screener (which
+   is **never** modified). Each candidate's score is multiplied by
+   `clamp(1 + alpha * polarity, 0.5, 1.5)`. Default alpha 0.10 is gentle —
+   on the 2026-05-06 mega-cap watchlist it preserves the top-5 order while
+   tilting scores by ±1-3% per ticker.
+
+3. **Matrix cell injection** — `run_copilot_matrix.py --news-enrichment
+   <path>` (auto-passed by `weekly_workflow.py --chain --enrich-news`) sets
+   `TRADINGAGENTS_NEWS_ENRICHMENT_PATH` for every cell subprocess. The
+   `news_analyst` then prepends a compact "Pre-computed news context for
+   <T>: …" prefix to its system message before tool calls. **No
+   `AgentState` schema change** — the env-var route keeps the langgraph
+   checkpointer schema stable. `run_copilot_persona_aligned.py
+   --news-enrichment <path>` does the same for one-off runs.
+
 **Insider transactions** are now bound to `fundamentals_analyst.py`
 (Form-4 signals via the yfinance → alpha_vantage vendor fallback chain).
 Polygon free-tier doesn't expose insider transactions; the vendor router

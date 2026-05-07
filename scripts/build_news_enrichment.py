@@ -210,6 +210,79 @@ def _resolve_tickers(args: argparse.Namespace) -> tuple[list[str], Path | None]:
     raise SystemExit("Pass exactly one of --screener-run, --matrix-run, or --tickers")
 
 
+def _sentiment_polarity_for(row: dict[str, Any]) -> float:
+    """Pick FinBERT polarity if present, else keyword. Returns 0 on missing.
+
+    Used by --rerank-screener so the re-rank prefers the more
+    discriminating signal (FinBERT) when both are available.
+    """
+    sent = row.get("sentiment") or {}
+    chosen = sent.get("finbert") or sent.get("keyword") or {}
+    if not chosen.get("n_headlines"):
+        return 0.0
+    return float(chosen.get("aggregate") or 0.0)
+
+
+def _rerank_screener(run_dir: Path, enriched: list[dict[str, Any]],
+                     alpha: float) -> Path | None:
+    """Re-rank screener candidates by sentiment-tilted multiplier.
+
+    Reads screener.json, multiplies each candidate's composite_score by
+    ``clamp(1 + alpha * polarity, 0.5, 1.5)``, sorts descending, writes
+    new ``screener_sentiment_reranked.json`` and
+    ``top_tickers_sentiment_reranked.txt`` next to the original.
+    Original files are immutable — this is purely additive.
+
+    Returns the path to the reranked JSON, or None if the original
+    screener.json is missing.
+    """
+    src = run_dir / "screener.json"
+    if not src.exists():
+        print(f"⚠ Cannot rerank — {src} missing", file=sys.stderr)
+        return None
+
+    data = json.loads(src.read_text())
+    candidates = data.get("candidates") or []
+    polarity_by_ticker = {
+        row["ticker"].upper(): _sentiment_polarity_for(row) for row in enriched
+    }
+
+    rescored = []
+    for c in candidates:
+        polarity = polarity_by_ticker.get(c["ticker"].upper(), 0.0)
+        multiplier = max(0.5, min(1.5, 1.0 + alpha * polarity))
+        new_score = (c.get("composite_score") or 0.0) * multiplier
+        rescored.append({
+            **c,
+            "original_composite_score": c.get("composite_score"),
+            "sentiment_polarity": round(polarity, 4),
+            "sentiment_multiplier": round(multiplier, 4),
+            "composite_score": round(new_score, 4),
+        })
+
+    rescored.sort(key=lambda r: r.get("composite_score") or 0.0, reverse=True)
+    for rank, r in enumerate(rescored, 1):
+        r["rank"] = rank
+
+    out_data = {
+        **data,
+        "candidates": rescored,
+        "rerank_metadata": {
+            "alpha": alpha,
+            "applied_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "n_with_sentiment": sum(1 for r in rescored if r["sentiment_polarity"] != 0.0),
+        },
+    }
+
+    out_json = run_dir / "screener_sentiment_reranked.json"
+    out_json.write_text(json.dumps(out_data, indent=2))
+
+    out_txt = run_dir / "top_tickers_sentiment_reranked.txt"
+    out_txt.write_text("\n".join(r["ticker"] for r in rescored) + "\n")
+
+    return out_json
+
+
 def main() -> int:
     p = argparse.ArgumentParser(
         description=__doc__,
@@ -244,6 +317,22 @@ def main() -> int:
     p.add_argument(
         "--ticker-limit", type=int, default=None,
         help="Cap on tickers processed (useful for smoke tests).",
+    )
+    p.add_argument(
+        "--rerank-screener", action="store_true",
+        help="After enrichment, re-rank the screener candidates by applying "
+             "a sentiment-tilted multiplier to each composite_score, and "
+             "write screener_sentiment_reranked.json + "
+             "top_tickers_sentiment_reranked.txt next to the original "
+             "screener.json. Original files are NEVER modified. Requires "
+             "--screener-run.",
+    )
+    p.add_argument(
+        "--rerank-alpha", type=float, default=0.10,
+        help="Sentiment penalty/boost magnitude for --rerank-screener. "
+             "Each candidate's score is multiplied by (1 + alpha * "
+             "sentiment_polarity), clamped to [0.5, 1.5]. Default 0.10 "
+             "(±10%% effect at sentiment ±1.0).",
     )
     args = p.parse_args()
 
@@ -322,6 +411,17 @@ def main() -> int:
             print(f"  ratio (finbert range / keyword range) = "
                   f"{(fb_var / kw_var) if kw_var > 0 else float('inf'):.2f}× "
                   f"(higher = finbert more discriminating)")
+
+    if args.rerank_screener:
+        if not args.screener_run or run_dir is None:
+            print("Error: --rerank-screener requires --screener-run",
+                  file=sys.stderr)
+            return 2
+        rerank_path = _rerank_screener(run_dir, enriched, args.rerank_alpha)
+        if rerank_path is not None:
+            print(f"\nRe-ranked screener written to {rerank_path}", flush=True)
+            print(f"  alpha={args.rerank_alpha} · multiplier ∈ [0.5, 1.5]")
+            print(f"  top_tickers_sentiment_reranked.txt also updated.")
 
     return 0
 

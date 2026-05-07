@@ -1,21 +1,29 @@
 #!/usr/bin/env python3
 """Build a complete accounting package for a matrix run.
 
-Given a matrix run directory and the screener it sourced from, produces:
-  - verdict_ledger.csv / verdict_ledger.json (flat 25-row ledger)
+Given a matrix run directory (and optionally the screener it sourced from),
+produces:
+  - verdict_ledger.csv / verdict_ledger.json (flat ledger, one row per ticker)
   - per_ticker/<T>.md (full thesis + actions per ticker)
   - trade_synthesis.md (master synthesis, sorted by aggressive upside)
   - README.md (folder index + reproduce recipes)
   - current_prices.json (Polygon snapshot for all tickers)
 
 Usage:
+    # Standard: matrix sourced from a screener
     python scripts/build_run_accounting.py \\
         --matrix-run runs/matrix_2026-04-30_1839_top25 \\
         --screener-run runs/screener_2026-04-30_0955
 
-Re-running is safe: ledger and per_ticker/ are regenerated from current
-state.json files; current_prices.json is reused if already present and
---refresh-prices is not specified.
+    # Ad-hoc: matrix run with explicit ticker list (no screener)
+    python scripts/build_run_accounting.py \\
+        --matrix-run runs/matrix_portfolio_2026-05-05
+
+When --screener-run is omitted, ledger fields like rank/name/sector/composite_score
+will be missing for tickers (the matrix-run state files still drive ratings, PTs,
+horizons, and classifications). Re-running is safe: ledger and per_ticker/ are
+regenerated from current state.json files; current_prices.json is reused if
+already present and --refresh-prices is not specified.
 """
 from __future__ import annotations
 
@@ -163,12 +171,17 @@ def _per_ticker_md(t: str, cand: dict, cur: Optional[float], aggr: Optional[dict
     return "\n".join(lines)
 
 
-def _trade_synthesis_md(run_id: str, screener_run: str, ledger: list[dict],
+def _trade_synthesis_md(run_id: str, screener_run: Optional[str], ledger: list[dict],
                          picks: list[dict], vetoed: list[dict], snapshot_date: str) -> str:
+    source_pipeline_line = (
+        f"**Source pipeline**: `runs/{screener_run}/` → top-25 candidates → dual-frame matrix (aggressive ∧ conservative)."
+        if screener_run
+        else "**Source pipeline**: ad-hoc matrix (no screener lineage) → dual-frame matrix (aggressive ∧ conservative)."
+    )
     lines = [
         f"# Trade Synthesis · {run_id}",
         "",
-        f"**Source pipeline**: `runs/{screener_run}/` → top-25 candidates → dual-frame matrix (aggressive ∧ conservative).",
+        source_pipeline_line,
         "",
         f"**Snapshot date**: {snapshot_date}.  **Picks**: {len(picks)} of {len(ledger)}.  **Vetoed**: {len(vetoed)}.",
         "",
@@ -275,13 +288,18 @@ def _trade_synthesis_md(run_id: str, screener_run: str, ledger: list[dict],
             f"{r['aggressive_rating']} | {_fmt_price(r['aggressive_pt'])} | "
             f"**{r['conservative_rating']}** | {_fmt_price(r['conservative_pt'])} |"
         )
+    accounting_repro = (
+        f"- **This accounting**: `python scripts/build_run_accounting.py --matrix-run <run_dir> --screener-run runs/{screener_run}`."
+        if screener_run
+        else "- **This accounting**: `python scripts/build_run_accounting.py --matrix-run <run_dir>` (no screener lineage; pass `--screener-run runs/<screener_dir>` to attribute one)."
+    )
     lines += [
         "",
         "## Methodology / re-run",
         "",
         "- **Screener**: `.venv/bin/python run_screener.py --top 25` (with optional `--min-mcap`/`--max-mcap` for cap-band targeting).",
         "- **Matrix orchestrator**: `.venv/bin/python run_copilot_matrix.py --tickers <list> --parallel 5 --stop-on-overweight 0`.",
-        "- **This accounting**: `python scripts/build_run_accounting.py --matrix-run <run_dir> --screener-run <screener_dir>`.",
+        accounting_repro,
         "- **Resume**: re-running matrix with the same `--run-id` skips cells with valid `<T>.state.json`.",
         "- **Single-cell retry**: `rm -rf <run>/cells/<profile>/<T>/` then re-launch the subrunner with the same `--run-id`.",
         "",
@@ -289,15 +307,33 @@ def _trade_synthesis_md(run_id: str, screener_run: str, ledger: list[dict],
     return "\n".join(lines)
 
 
-def _readme_md(run_id: str, screener_run: str, picks: list[dict], vetoed: list[dict],
+def _readme_md(run_id: str, screener_run: Optional[str], picks: list[dict], vetoed: list[dict],
                snapshot_date: str, n_total: int) -> str:
     pick_tickers = " · ".join(r["ticker"] for r in picks)
     vetoed_tickers = " · ".join(r["ticker"] for r in vetoed)
     sells = [r["ticker"] for r in vetoed if r["conservative_rating"] == "Sell" or r["aggressive_rating"] == "Sell"]
     sells_note = f"\n- **Outright Sell**: {', '.join(sells)}" if sells else ""
+    source_blurb = (
+        f"Two-stage (aggressive ∧ conservative) verdict matrix on the top-{n_total} candidates from `runs/{screener_run}/`."
+        if screener_run
+        else f"Two-stage (aggressive ∧ conservative) verdict matrix on a {n_total}-ticker ad-hoc list (no screener lineage)."
+    )
+    candidate_set_row = (
+        f'| "What\'s in the source candidate set?" | `runs/{screener_run}/screener.json` |'
+        if screener_run
+        else '| "What\'s in the source candidate set?" | (none — ad-hoc matrix) |'
+    )
+    rebuild_block = (
+        f"# Re-build this accounting package\npython scripts/build_run_accounting.py \\\n"
+        f"  --matrix-run runs/{run_id} \\\n"
+        f"  --screener-run runs/{screener_run}"
+        if screener_run
+        else f"# Re-build this accounting package\npython scripts/build_run_accounting.py \\\n"
+             f"  --matrix-run runs/{run_id}"
+    )
     return f"""# {run_id} — Run Index
 
-Two-stage (aggressive ∧ conservative) verdict matrix on the top-{n_total} candidates from `runs/{screener_run}/`.
+{source_blurb}
 
 ## TL;DR — read these first
 
@@ -337,7 +373,7 @@ Two-stage (aggressive ∧ conservative) verdict matrix on the top-{n_total} cand
 | "What was the full LLM transcript?" | `cells/<profile>/<T>/<T>.log` |
 | "What rating + PT did each frame return?" | `verdict_ledger.csv` |
 | "What's the current price for X?" | `current_prices.json` |
-| "What's in the source candidate set?" | `runs/{screener_run}/screener.json` |
+{candidate_set_row}
 
 ## Reproduce
 
@@ -355,10 +391,7 @@ rm -rf {run_id}/cells/conservative/<TICKER>
   --tickers <space-separated list> \\
   --parallel 5 --stop-on-overweight 0
 
-# Re-build this accounting package
-python scripts/build_run_accounting.py \\
-  --matrix-run runs/{run_id} \\
-  --screener-run runs/{screener_run}
+{rebuild_block}
 ```
 """
 
@@ -367,8 +400,13 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--matrix-run", required=True, type=pathlib.Path,
                    help="Path to matrix run directory (e.g., runs/matrix_2026-04-30_1839_top25)")
-    p.add_argument("--screener-run", required=True, type=pathlib.Path,
-                   help="Path to source screener directory (e.g., runs/screener_2026-04-30_0955)")
+    p.add_argument("--screener-run", required=False, default=None, type=pathlib.Path,
+                   help=(
+                       "Path to source screener directory (e.g., runs/screener_2026-04-30_0955). "
+                       "Optional: when omitted, the matrix run is treated as ad-hoc with no "
+                       "screener lineage; ledger fields like rank/name/sector/composite_score "
+                       "will be missing for tickers not in any screener."
+                   ))
     p.add_argument("--refresh-prices", action="store_true",
                    help="Re-fetch all current prices via Polygon (otherwise reuse current_prices.json if present)")
     p.add_argument("--snapshot-date", default=None,
@@ -376,24 +414,31 @@ def main() -> int:
     args = p.parse_args()
 
     matrix_run = args.matrix_run.resolve()
-    screener_run = args.screener_run.resolve()
+    screener_run: Optional[pathlib.Path] = (
+        args.screener_run.resolve() if args.screener_run is not None else None
+    )
     if not matrix_run.is_dir():
         print(f"ERROR: matrix run dir not found: {matrix_run}", file=sys.stderr)
         return 2
-    if not screener_run.is_dir():
+    if screener_run is not None and not screener_run.is_dir():
         print(f"ERROR: screener run dir not found: {screener_run}", file=sys.stderr)
         return 2
 
-    screener_json_path = screener_run / "screener.json"
-    screener_doc = json.loads(screener_json_path.read_text())
-    candidates = {c["ticker"]: c for c in screener_doc["candidates"]}
+    if screener_run is not None:
+        screener_json_path = screener_run / "screener.json"
+        screener_doc = json.loads(screener_json_path.read_text())
+        candidates = {c["ticker"]: c for c in screener_doc["candidates"]}
+        screener_label = screener_run.name
+    else:
+        candidates = {}
+        screener_label = None
 
     aggressive_dir = matrix_run / "cells" / "aggressive"
     if not aggressive_dir.is_dir():
         print(f"ERROR: no cells/aggressive/ in {matrix_run}", file=sys.stderr)
         return 2
     tickers = sorted(p.name for p in aggressive_dir.iterdir() if p.is_dir())
-    print(f"[accounting] matrix: {matrix_run.name} · screener: {screener_run.name} · tickers: {len(tickers)}")
+    print(f"[accounting] matrix: {matrix_run.name} · screener: {screener_label or '(none — ad-hoc matrix)'} · tickers: {len(tickers)}")
 
     # --- Prices ---
     prices_path = matrix_run / "current_prices.json"
@@ -456,7 +501,7 @@ def main() -> int:
         w.writerows([{k: r.get(k) for k in slim_keys} for r in ledger])
     (matrix_run / "verdict_ledger.json").write_text(json.dumps({
         "run_id": matrix_run.name,
-        "screener_run": screener_run.name,
+        "screener_run": screener_label,
         "generated_at": datetime.now().isoformat(),
         "snapshot_date": snapshot_date,
         "n_tickers": len(ledger),
@@ -473,10 +518,10 @@ def main() -> int:
                     key=lambda r: r["rank"] or 999)
 
     (matrix_run / "trade_synthesis.md").write_text(
-        _trade_synthesis_md(matrix_run.name, screener_run.name, ledger, picks, vetoed, snapshot_date)
+        _trade_synthesis_md(matrix_run.name, screener_label, ledger, picks, vetoed, snapshot_date)
     )
     (matrix_run / "README.md").write_text(
-        _readme_md(matrix_run.name, screener_run.name, picks, vetoed, snapshot_date, len(ledger))
+        _readme_md(matrix_run.name, screener_label, picks, vetoed, snapshot_date, len(ledger))
     )
 
     print()

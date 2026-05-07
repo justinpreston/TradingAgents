@@ -24,10 +24,16 @@ Strategy mapping by tier:
   - Tier C (cons did not set PT): long call at delta ~0.50 (ATM/slightly ITM).
 
 Tenor mapping from aggressive horizon:
-  - "3-6 months"   → next monthly expiration ≥ 90 days (target ~120d)
-  - "6-12 months"  → expiration ≥ 180 days (target ~210d)
-  - "6-18 months"  → expiration ≥ 270 days (target ~365d, LEAP if available)
-  - default        → ≥ 90 days
+  - "1-3 months"          → ≥ 30 days (target ~75d)
+  - "3-6 months"          → ≥ 90 days (target ~135d)
+  - "3-9 months"          → ≥ 90 days (target ~180d)
+  - "6-12 months"         → ≥ 180 days (target ~270d)
+  - "6-18 months"         → ≥ 180 days (target ~365d)
+  - "12-18", "12-24",
+    "12-36", "1-2 years",
+    "2-year", "multi-year",
+    "leap"                → ≥ 365 days (target ~547d ≈ 18mo LEAP)
+  - default / unknown     → ≥ 90 days (target ~120d)
 
 Pricing: uses Black-Scholes with Polygon's reported implied volatility
 per contract. Risk-free rate defaults to 4.5% (configurable via --risk-free).
@@ -83,10 +89,33 @@ def _target_dte(horizon: str | None) -> tuple[int, int]:
     `min_dte_floor` is the lower bound we'd ideally want; the actual fetch
     window is widened in `_build_per_ticker_overlay` to handle names without
     LEAPs. `target_dte` is the preferred expiration distance for ranking.
+
+    Recognized phrases (case-insensitive, substring match):
+
+    - "1-3 months"                                     → (30, 75)
+    - "3-6 months", "3 to 6 months"                    → (90, 135)
+    - "3-9 months", "3 to 9 months"                    → (90, 180)
+    - "6-12 months", "6 to 12 months"                  → (180, 270)
+    - "6-18 months", "6 to 18 months"                  → (180, 365)
+    - "12-18", "12-24", "12-36", "1-2 years",
+      "2-year", "multi-year", "leap", "leaps", "12+"   → (365, 547)
+    - missing / unrecognized                           → (90, 120)
+
+    The 365-DTE floor for the long-horizon bucket forces the chooser into LEAP
+    territory when the chain has them; if not, `_pick_expiration` falls back
+    to the longest available expiration with a tenor-mismatch note.
+
+    Order of checks matters: explicit ranges ("6-18", "6-12", etc.) are
+    matched FIRST so that strings like "6-18 months" don't accidentally
+    trip looser long-horizon markers ("18 months"). Long-horizon catch-alls
+    are evaluated last.
     """
     if not horizon:
         return (90, 120)
     h = horizon.lower()
+
+    # Explicit range markers — checked first so they win over loose
+    # long-horizon catch-alls below.
     if "6-18" in h or "6 to 18" in h:
         return (180, 365)
     if "6-12" in h or "6 to 12" in h:
@@ -97,6 +126,24 @@ def _target_dte(horizon: str | None) -> tuple[int, int]:
         return (90, 135)
     if "1-3" in h:
         return (30, 75)
+
+    # Long-horizon bucket — only reached when none of the explicit ranges
+    # above matched. These are unambiguous markers; we deliberately do NOT
+    # match bare "18 months" / "24 months" because the agent's range syntax
+    # (e.g. "6-18 months") would have been caught above.
+    long_horizon_markers = (
+        "12-18", "12 to 18",
+        "12-24", "12 to 24",
+        "12-36", "12 to 36",
+        "1-2 year", "1 to 2 year",
+        "2-year", "2 year",
+        "multi-year", "multi year",
+        "leap", "leaps",
+        "12+", "12 or more", "12 months or more",
+    )
+    if any(m in h for m in long_horizon_markers):
+        return (365, 547)
+
     return (90, 120)
 
 
@@ -579,7 +626,7 @@ def _render_md(run_id: str, overlays: list[dict], today: date,
         ]
 
     lines += [
-        "Tenor selection follows the aggressive horizon: `3-6m → ~120 DTE`, `6-12m → ~270 DTE`, `6-18m → ~365 DTE`. Longest available expiration is used when LEAPs are not listed.",
+        "Tenor selection follows the aggressive horizon: `3-6m → ~135 DTE`, `6-12m → ~270 DTE`, `6-18m → ~365 DTE`, `12-24m / multi-year / LEAP → ~547 DTE`. Longest available expiration is used when LEAPs are not listed.",
         "",
         "Pricing uses Polygon's reported implied volatility per contract via Black-Scholes when bid/ask is unavailable. **Always validate strikes, IV, and net debit on a real broker chain before trading** — Polygon snapshot data may lag intraday quotes.",
         "",

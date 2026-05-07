@@ -77,6 +77,8 @@ from tradingagents.dataflows.utils import resolve_trade_date
 load_dotenv()
 
 
+REPO_ROOT = Path(__file__).resolve().parent
+
 PROFILES_DEFAULT = ("aggressive", "conservative")
 SUB_RUNNER = "run_copilot_aggressive_aligned.py"
 
@@ -532,6 +534,15 @@ def _parse_args() -> argparse.Namespace:
         "--tickers-from-latest-screener", action="store_true",
         help="Pull tickers from the most-recent runs/screener_*/screener.json.",
     )
+    p.add_argument(
+        "--screener-run", default=None,
+        help=(
+            "Path to a screener run dir (e.g., runs/screener_2026-05-06_1027) to record "
+            "as lineage in the manifest. Auto-set when --tickers-from-latest-screener is "
+            "used; pass explicitly with --tickers to attribute an ad-hoc matrix to a "
+            "specific screener (used by auto-report's accounting step)."
+        ),
+    )
     p.add_argument("--top", type=int, default=25, help="Truncate ticker list to top N. Default: 25.")
     p.add_argument(
         "--profiles", nargs="+", default=list(PROFILES_DEFAULT),
@@ -556,13 +567,101 @@ def _parse_args() -> argparse.Namespace:
         "--no-dashboard", action="store_true",
         help="Disabled dashboards in sub-runners. Default: on (more legible logs).",
     )
+    p.add_argument(
+        "--no-auto-report", action="store_true",
+        help=(
+            "Skip auto-generation of accounting + options overlay + HTML report. "
+            "Default: ON — every matrix run produces a consumable HTML report."
+        ),
+    )
+    p.add_argument(
+        "--long-call-delta", type=float, default=0.55,
+        help="Target delta for the auto-built long-call overlay. Default 0.55 (slightly ITM).",
+    )
+    p.add_argument(
+        "--news-enrichment", default=None,
+        help="Path to a news_enrichment.json file. When set, every cell "
+             "subprocess inherits TRADINGAGENTS_NEWS_ENRICHMENT_PATH so the "
+             "news analyst prepends pre-computed FinBERT polarity + theme "
+             "tags to its system message.",
+    )
     return p.parse_args()
+
+
+def _run_auto_report(matrix_dir: Path, long_call_delta: float) -> None:
+    """Run accounting → options overlay → HTML report after a successful matrix.
+
+    Each step is best-effort: a failure logs a warning but does not abort the
+    others. The matrix run output itself is already on disk; these are
+    consumability layers on top of it.
+    """
+    sys.stdout.write("\n📦 Auto-report: building accounting + options overlay + HTML…\n")
+    matrix_rel = matrix_dir.relative_to(REPO_ROOT) if matrix_dir.is_absolute() else matrix_dir
+    py = sys.executable
+
+    screener_run: Optional[str] = None
+    try:
+        manifest = json.loads((matrix_dir / "manifest.json").read_text(encoding="utf-8"))
+        screener_run = manifest.get("screener_run")
+    except (OSError, json.JSONDecodeError):
+        screener_run = None
+
+    accounting_cmd = [py, "scripts/build_run_accounting.py", "--matrix-run", str(matrix_rel)]
+    if screener_run:
+        accounting_cmd += ["--screener-run", screener_run]
+    else:
+        sys.stdout.write("    (no screener_run recorded in manifest — accounting will run without lineage)\n")
+
+    steps = [
+        ("accounting", accounting_cmd),
+        (
+            "options-overlay (long-call)",
+            [
+                py, "scripts/build_options_overlay.py",
+                "--matrix-run", str(matrix_rel),
+                "--strategy-mode", "long-call",
+                "--long-call-delta", str(long_call_delta),
+            ],
+        ),
+        (
+            "index-runs",
+            [py, "scripts/index_runs.py"],
+        ),
+    ]
+    for label, cmd in steps:
+        sys.stdout.write(f"  → {label}…\n")
+        rc = subprocess.run(
+            cmd, cwd=str(REPO_ROOT), stdin=subprocess.DEVNULL
+        ).returncode
+        if rc != 0:
+            sys.stdout.write(f"    ⚠ {label} exited {rc} — continuing.\n")
+
+    # HTML report — always single-run for the matrix that just completed.
+    # Cross-run aggregation is a separate manual concern.
+    today = datetime.now().strftime("%Y-%m-%d")
+    html_dir = REPO_ROOT / "runs" / f"cross_run_{today}"
+    html_path = html_dir / "report.html"
+    label = matrix_dir.name.replace("matrix_", "").replace("_", "-") or "run"
+    sys.stdout.write(f"  → html-report → {html_path.relative_to(REPO_ROOT)}…\n")
+    rc = subprocess.run(
+        [
+            py, "scripts/build_html_report.py",
+            "--runs", f"{matrix_rel}:{label}",
+            "--output", str(html_path),
+        ],
+        cwd=str(REPO_ROOT), stdin=subprocess.DEVNULL,
+    ).returncode
+    if rc == 0:
+        sys.stdout.write(f"    ✅ HTML: {html_path}\n")
+    else:
+        sys.stdout.write(f"    ⚠ html-report exited {rc}\n")
 
 
 def main() -> int:
     args = _parse_args()
 
     # Resolve tickers
+    screener_dir: Optional[Path] = None
     if args.tickers_from_latest_screener:
         screener_dir = _latest_screener_dir()
         if not screener_dir:
@@ -575,6 +674,18 @@ def main() -> int:
     else:
         sys.stderr.write("❌ Provide either --tickers or --tickers-from-latest-screener\n")
         return 2
+
+    # Manual --screener-run takes precedence; only validated when actually set so
+    # ad-hoc matrix runs (like a single-ticker re-run) work without a screener.
+    if args.screener_run:
+        sr = Path(args.screener_run)
+        if not sr.is_dir():
+            sys.stderr.write(f"❌ --screener-run dir not found: {sr}\n")
+            return 2
+        if not (sr / "screener.json").is_file():
+            sys.stderr.write(f"❌ --screener-run dir missing screener.json: {sr}\n")
+            return 2
+        screener_dir = sr
 
     if not tickers:
         sys.stderr.write("❌ No tickers resolved.\n")
@@ -612,11 +723,23 @@ def main() -> int:
         "max_parallel": args.max_parallel,
         "stop_on_overweight": args.stop_on_overweight,
         "started_at": datetime.now().isoformat(timespec="seconds"),
+        "screener_run": (
+            str(screener_dir.relative_to(REPO_ROOT))
+            if screener_dir is not None and screener_dir.is_absolute() and REPO_ROOT in screener_dir.parents
+            else (str(screener_dir) if screener_dir is not None else None)
+        ),
     }
     (matrix_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     env = os.environ.copy()
     env["GITHUB_TOKEN"] = _resolve_github_token()
+    if args.news_enrichment:
+        ne_path = Path(args.news_enrichment).resolve()
+        if not ne_path.exists():
+            sys.stdout.write(f"⚠ --news-enrichment path not found: {ne_path} (continuing without)\n")
+        else:
+            env["TRADINGAGENTS_NEWS_ENRICHMENT_PATH"] = str(ne_path)
+            sys.stdout.write(f"📰 News enrichment active: {ne_path}\n")
 
     sys.stdout.write(f"\n╭─ Matrix run · {run_id}\n")
     sys.stdout.write(f"│ Trade date  : {trade_date}  ({date_label})\n")
@@ -689,6 +812,12 @@ def main() -> int:
         sys.stdout.write(f"      Picks: {', '.join(high_conv)}\n")
     else:
         sys.stdout.write(f"      No tickers passed the high-conviction filter.\n")
+
+    if not args.no_auto_report:
+        try:
+            _run_auto_report(matrix_dir, args.long_call_delta)
+        except Exception as exc:  # pragma: no cover — best-effort post-step
+            sys.stderr.write(f"⚠ auto-report raised: {exc}\n")
     return 0
 
 
