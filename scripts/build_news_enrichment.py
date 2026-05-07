@@ -111,13 +111,34 @@ def _build_scorers(choice: str) -> dict[str, SentimentScorer]:
 
     Returns a dict keyed by scorer name so output JSON shows which
     scorer produced which result. ``both`` resolves to keyword+finbert.
+    ``finbert`` falls back to ``keyword`` with a warning if torch+
+    transformers aren't installed (the default scorer should always
+    produce *some* signal rather than crashing).
     """
     if choice == "keyword":
         return {"keyword": KeywordScorer()}
     if choice == "finbert":
-        return {"finbert": FinBERTScorer()}
+        try:
+            return {"finbert": FinBERTScorer()}
+        except ImportError as exc:
+            print(
+                "Warning: FinBERT deps missing — falling back to keyword scorer.\n"
+                f"  ({exc})\n"
+                "  Run `pip install torch transformers` to enable FinBERT.",
+                file=sys.stderr,
+            )
+            return {"keyword": KeywordScorer()}
     if choice == "both":
-        return {"keyword": KeywordScorer(), "finbert": FinBERTScorer()}
+        scorers: dict[str, SentimentScorer] = {"keyword": KeywordScorer()}
+        try:
+            scorers["finbert"] = FinBERTScorer()
+        except ImportError as exc:
+            print(
+                "Warning: --scorer both requested but FinBERT deps are missing — "
+                f"running keyword only.\n  ({exc})",
+                file=sys.stderr,
+            )
+        return scorers
     raise ValueError(f"Unknown --scorer: {choice}")
 
 
@@ -203,10 +224,13 @@ def main() -> int:
                      help="Explicit ticker list (no run-dir context)")
 
     p.add_argument(
-        "--scorer", choices=["keyword", "finbert", "both"], default="keyword",
-        help="Sentiment scorer to apply. 'keyword' is the zero-dep default. "
-             "'finbert' requires `pip install torch transformers` (~1.5-2GB). "
-             "'both' runs them side-by-side for A/B comparison.",
+        "--scorer", choices=["keyword", "finbert", "both"], default="finbert",
+        help="Sentiment scorer to apply. 'finbert' (default, ~3× more "
+             "discriminating than keyword on real headlines) requires "
+             "`pip install torch transformers` — falls back to keyword "
+             "with a warning if those deps are missing. 'keyword' forces "
+             "the zero-dep regex scorer. 'both' runs them side-by-side "
+             "for A/B comparison.",
     )
     p.add_argument(
         "--lookback-days", type=int, default=30,

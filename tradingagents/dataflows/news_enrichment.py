@@ -437,5 +437,16 @@ def classify_themes(headlines: list[str]) -> list[ThemeMatch]:
 
 
 def get_default_scorer() -> SentimentScorer:
-    """Return the default sentiment scorer (no extra deps required)."""
-    return KeywordScorer()
+    """Return the default sentiment scorer.
+
+    Tries FinBERT first (requires torch + transformers); falls back to the
+    zero-dep ``KeywordScorer`` if those packages are not installed. This
+    auto-selection keeps the call-site one-liner: each environment gets
+    the best signal available without having to special-case install state.
+
+    To force a specific scorer, instantiate it directly instead.
+    """
+    try:
+        return FinBERTScorer()
+    except ImportError:
+        return KeywordScorer()

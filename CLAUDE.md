@@ -28,9 +28,14 @@
     --matrix-run runs/<matrix_id> --strategy-mode long-call
 
 # Optional: news enrichment (sentiment + theme tags) on the screener output
+# Default scorer is now FinBERT (~3× more discriminating than keyword on real
+# headlines). Auto-falls-back to keyword if torch+transformers not installed.
+.venv/bin/python scripts/build_news_enrichment.py \
+    --screener-run runs/<screener_id>
+# Force the zero-dep keyword scorer:
 .venv/bin/python scripts/build_news_enrichment.py \
     --screener-run runs/<screener_id> --scorer keyword
-# A/B test keyword vs FinBERT (FinBERT requires `pip install torch transformers`):
+# A/B test keyword vs FinBERT side-by-side:
 .venv/bin/python scripts/build_news_enrichment.py \
     --screener-run runs/<screener_id> --scorer both
 
@@ -179,15 +184,18 @@ screener or matrix run with two derived signals per ticker:
    litigation, product_launch, analyst_action, capital_action).
 
 **Two scorers, A/B-testable:**
-- `--scorer keyword` (default, zero deps): weighted regex over a curated
+- `--scorer finbert` (**default**, ~3× more discriminating on real headlines):
+  ProsusAI/finbert transformer. **Auto-falls-back to keyword with a warning**
+  if torch+transformers aren't installed — the default should always
+  produce some signal rather than crash. Install: `pip install torch transformers`
+  (~1.5-2GB + 440MB model on first call).
+- `--scorer keyword` (zero deps): weighted regex over a curated
   positive/negative term list. Fast, deterministic, fully auditable
-  (`trigger_terms` lists the rules that fired).
-- `--scorer finbert` (optional, **requires** `pip install torch transformers`,
-  ~1.5-2GB + 440MB ProsusAI/finbert model on first use): transformer-based
-  contextual sentiment.
+  (`trigger_terms` lists the rules that fired). Best as a cheap negative
+  prefilter (warn / miss / downgrade triggers).
 - `--scorer both`: runs both side-by-side, prints discrimination ratio
-  (`finbert range / keyword range` — higher means FinBERT is more
-  separating).
+  (`finbert range / keyword range`). On the 2026-05-06 mega-cap smoke
+  test (TXN/GS/KO/NVDA/AVGO), this came out to **3.03×**.
 
 **Wired into weekly_workflow.py** as opt-in Phase 2.5:
 ```bash

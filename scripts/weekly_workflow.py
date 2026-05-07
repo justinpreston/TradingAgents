@@ -517,11 +517,12 @@ def main() -> int:
                         "consumed by build_html_report.py for tag display when "
                         "the file exists.")
     p.add_argument("--news-scorer", choices=["keyword", "finbert", "both"],
-                   default="keyword",
-                   help="Sentiment scorer for --enrich-news. 'keyword' (default) "
-                        "is zero-dep. 'finbert' requires "
-                        "`pip install torch transformers`. 'both' runs them "
-                        "side-by-side for A/B comparison.")
+                   default="finbert",
+                   help="Sentiment scorer for --enrich-news. 'finbert' "
+                        "(default) is ~3× more discriminating; requires "
+                        "`pip install torch transformers` — auto-falls-back "
+                        "to keyword with a warning if missing. 'keyword' "
+                        "forces zero-dep mode. 'both' runs them side-by-side.")
     p.add_argument("--news-lookback-days", type=int, default=30,
                    help="How far back to pull headlines for --enrich-news (default 30)")
     args = p.parse_args()

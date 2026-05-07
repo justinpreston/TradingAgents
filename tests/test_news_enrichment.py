@@ -137,11 +137,26 @@ def test_noop_scorer_always_zero():
     assert r.scorer == "noop"
 
 
-def test_get_default_scorer_returns_keyword():
-    """The default scorer must require zero extra deps."""
+def test_get_default_scorer_returns_finbert_when_available():
+    """Default tries FinBERT first; falls back to KeywordScorer if torch missing.
+
+    On dev machines with torch+transformers installed this returns a
+    FinBERTScorer. On bare environments it returns a KeywordScorer with
+    no warning (the auto-fallback is intentional). Either is acceptable;
+    this test just pins the contract that the result is one of the two.
+    """
     s = get_default_scorer()
-    assert isinstance(s, KeywordScorer)
-    assert s.name == "keyword"
+    assert s.name in ("finbert", "keyword")
+    # If torch is importable, we expect finbert. Otherwise keyword.
+    try:
+        import torch  # noqa: F401
+        import transformers  # noqa: F401
+        assert s.name == "finbert", (
+            "torch+transformers are installed but get_default_scorer() "
+            "did not return FinBERTScorer"
+        )
+    except ImportError:
+        assert isinstance(s, KeywordScorer)
 
 
 # ---------------------------------------------------------------------------
