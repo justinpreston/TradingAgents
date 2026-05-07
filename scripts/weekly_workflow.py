@@ -71,6 +71,70 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 RUNS_DIR = REPO_ROOT / "runs"
 CATALOG_DB = RUNS_DIR / "index.db"
 
+# Tier presets — each preset defines a market-cap band, an ADV floor, and a
+# minimum price. The ADV floor scales with mcap so the liquidity quality bar
+# stays consistent across tiers (a $50M ADV is meaningful for a $5B mid-cap
+# but trivial for a $500B mega-cap).
+#
+# When --tier is set, these defaults are applied unless explicitly overridden
+# by the corresponding flag. When --tier is omitted, behavior is unchanged
+# from before (mid-cap defaults preserved on the CLI parser itself).
+TIER_PRESETS: dict[str, dict[str, float]] = {
+    "mid": {
+        "min_mcap": 2_000_000_000.0,
+        "max_mcap": 10_000_000_000.0,
+        "min_dollar_adv": 50_000_000.0,
+        "min_price": 5.0,
+    },
+    "large": {
+        "min_mcap": 10_000_000_000.0,
+        "max_mcap": 200_000_000_000.0,
+        "min_dollar_adv": 200_000_000.0,
+        "min_price": 10.0,
+    },
+    "mega": {
+        "min_mcap": 200_000_000_000.0,
+        "max_mcap": 5_000_000_000_000.0,
+        "min_dollar_adv": 500_000_000.0,
+        "min_price": 20.0,
+    },
+}
+
+
+def _apply_tier_preset(args: argparse.Namespace, *, tier: str | None,
+                       user_set: set[str]) -> None:
+    """Apply tier preset to ``args`` for any flag the user did NOT set.
+
+    ``user_set`` is the set of dest names the user passed on the CLI (used
+    to distinguish "I explicitly set this" from "argparse fed me the
+    default"). Tier presets only override unspecified flags so the user can
+    still tweak any individual knob (e.g. ``--tier mega --min-mcap 500B``).
+    """
+    if not tier:
+        return
+    preset = TIER_PRESETS.get(tier)
+    if preset is None:
+        raise ValueError(f"Unknown tier {tier!r}; expected one of {sorted(TIER_PRESETS)}")
+    for dest, value in preset.items():
+        if dest not in user_set:
+            setattr(args, dest, value)
+
+
+def _user_supplied_dests(argv: list[str]) -> set[str]:
+    """Return the set of argparse `dest` names the user passed on argv.
+
+    Used to honor user overrides through tier presets — if the user passed
+    ``--min-mcap 5e9 --tier mega`` we keep their 5e9 instead of clobbering
+    it with the mega preset's 200e9.
+    """
+    flag_to_dest = {
+        "--min-mcap": "min_mcap",
+        "--max-mcap": "max_mcap",
+        "--min-dollar-adv": "min_dollar_adv",
+        "--min-price": "min_price",
+    }
+    return {dest for flag, dest in flag_to_dest.items() if flag in argv}
+
 
 def _hr(label: str = "") -> None:
     width = 72
@@ -115,13 +179,28 @@ def phase_screen(args: argparse.Namespace) -> Path:
         cmd += ["--universe-limit", str(args.universe_limit)]
     if args.min_request_interval is not None:
         cmd += ["--min-request-interval", str(args.min_request_interval)]
+
+    # When --tier is explicit, force the screener's output dir to embed the
+    # tier label so that this run is traceable to the tier and so that
+    # downstream filters (phase_diff, cross-tier HTML) can pattern-match.
+    expected_screener_dir: Path | None = None
+    if args.tier:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
+        expected_screener_dir = RUNS_DIR / f"screener_{args.tier}_{timestamp}"
+        cmd += ["--output-dir", str(expected_screener_dir)]
+
     rc = _run(cmd, args.dry_run)
     if rc != 0:
         print(f"  ❌ Screener exited with code {rc}", file=sys.stderr)
         sys.exit(rc)
 
     if args.dry_run:
-        return RUNS_DIR / "<dry-run-screener>"
+        return expected_screener_dir or RUNS_DIR / "<dry-run-screener>"
+
+    # When tier-tagged, the screener wrote to the path we specified.
+    if expected_screener_dir is not None and expected_screener_dir.is_dir():
+        print(f"  → Screener output: {expected_screener_dir.relative_to(REPO_ROOT)}")
+        return expected_screener_dir
 
     # Find the screener run that was just created (newest screener_* dir)
     screener_runs = sorted(RUNS_DIR.glob("screener_*"), key=lambda p: p.stat().st_mtime)
@@ -156,10 +235,15 @@ def _read_top_tickers(screener_run: Path, top_n: int) -> list[str]:
     return []
 
 
-def phase_diff(screener_run: Path, top_n: int, dry_run: bool) -> dict[str, list[str]]:
+def phase_diff(screener_run: Path, top_n: int, dry_run: bool,
+               *, tier: str | None = None) -> dict[str, list[str]]:
     """Compare current top-N against tickers already matrix-ran in the catalog.
 
     Returns dict with NEW / REPEAT / DROPPED ticker lists.
+
+    When ``tier`` is set, the comparison is scoped to matrix runs whose
+    ``run_id`` contains the tier label (e.g. ``matrix_mid_*``). This keeps
+    a mid-cap diff from being polluted by yesterday's mega-cap matrix.
     """
     _hr("Phase 3 · DIFF (this week vs catalog)")
 
@@ -180,11 +264,25 @@ def phase_diff(screener_run: Path, top_n: int, dry_run: bool) -> dict[str, list[
             # Pick the most recent matrix run that actually produced PICKs.
             # An empty-pick run (e.g. a single-ticker smoke test) shouldn't
             # reset the cadence's view of the catalog.
-            cur = conn.execute(
-                """SELECT run_id FROM runs
-                   WHERE run_type='matrix' AND COALESCE(n_picks, 0) > 0
-                   ORDER BY snapshot_date DESC, run_id DESC LIMIT 1"""
-            )
+            #
+            # When tier is set, restrict to matrix runs whose run_id contains
+            # the tier label. Pattern: run_ids like ``matrix_mid_weekly_*``
+            # or ``matrix_<tier>_*`` are matched.
+            if tier:
+                cur = conn.execute(
+                    """SELECT run_id FROM runs
+                       WHERE run_type='matrix'
+                         AND COALESCE(n_picks, 0) > 0
+                         AND run_id LIKE ?
+                       ORDER BY snapshot_date DESC, run_id DESC LIMIT 1""",
+                    (f"matrix_{tier}_%",),
+                )
+            else:
+                cur = conn.execute(
+                    """SELECT run_id FROM runs
+                       WHERE run_type='matrix' AND COALESCE(n_picks, 0) > 0
+                       ORDER BY snapshot_date DESC, run_id DESC LIMIT 1"""
+                )
             row = cur.fetchone()
             if row:
                 last_run_id = row[0]
@@ -203,9 +301,12 @@ def phase_diff(screener_run: Path, top_n: int, dry_run: bool) -> dict[str, list[
     repeat = [t for t in top_now if t in last_matrix_picks]
     dropped = sorted(last_matrix_picks - top_set)
 
-    print(f"  This week's top-{top_n}: {len(top_now)} tickers")
+    print(f"  This week's top-{top_n}: {len(top_now)} tickers"
+          + (f" · tier={tier}" if tier else ""))
     if last_run_id:
         print(f"  Compared against: {last_run_id} ({len(last_matrix_picks)} prior PICKs)")
+    elif tier:
+        print(f"  No prior {tier}-tier matrix runs in catalog → all tickers are NEW")
     else:
         print("  No prior matrix runs in catalog → all tickers are NEW")
 
@@ -254,7 +355,8 @@ def phase_chain(screener_run: Path, args: argparse.Namespace, diff: dict) -> Non
         print(f"    run_copilot_matrix.py for cadence chaining.")
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
-    run_id = f"matrix_weekly_{timestamp}_chain"
+    tier_label = f"_{args.tier}" if args.tier else ""
+    run_id = f"matrix{tier_label}_weekly_{timestamp}_chain"
 
     print(f"  Matrix-running top-{chain_n} NEW tickers via {runner_path.name}:")
     print(f"    {', '.join(chain_tickers)}")
@@ -290,20 +392,21 @@ def phase_report(screener_run: Path, args: argparse.Namespace, diff: dict) -> No
     if new_tickers and not args.chain:
         target_list = " ".join(new_tickers[:chain_n])
         ts = datetime.now().strftime("%Y-%m-%d_%H%M")
+        tier_label = f"_{args.tier}" if args.tier else ""
         print(f"\n  🎯 MATRIX (run on {chain_n} NEW tickers — bypasses re-screening):")
         runner_name = Path(args.chain_runner).name
         if runner_name == "run_copilot_matrix.py":
             print(
                 f"     .venv/bin/python {args.chain_runner} \\\n"
                 f"         --tickers {target_list} \\\n"
-                f"         --run-id matrix_weekly_{ts}_chain \\\n"
+                f"         --run-id matrix{tier_label}_weekly_{ts}_chain \\\n"
                 f"         --stop-on-overweight 0 --max-parallel {args.chain_max_parallel}"
             )
         else:
             print(
                 f"     .venv/bin/python {args.chain_runner} \\\n"
                 f"         {target_list} \\\n"
-                f"         --run-id matrix_weekly_{ts}_chain"
+                f"         --run-id matrix{tier_label}_weekly_{ts}_chain"
             )
     elif new_tickers and args.chain:
         print("\n  🎯 MATRIX: launched in Phase 4 (above).")
@@ -311,15 +414,19 @@ def phase_report(screener_run: Path, args: argparse.Namespace, diff: dict) -> No
         print("\n  🎯 MATRIX: nothing new to run — last week's verdicts still apply.")
 
     print("\n  📈 OPTIONS REFRESH (same-day before entry, on whichever matrix run):")
+    print("     Note: run_copilot_matrix.py now auto-builds accounting + long-call")
+    print("           options overlay + HTML report after every matrix run.")
+    print("           Use these only to refresh on an existing run intraday:")
     print(
         "     .venv/bin/python scripts/build_options_overlay.py \\\n"
         "         --matrix-run runs/<matrix_id> --strategy-mode long-call"
     )
 
-    print("\n  📊 RE-INDEX after any new matrix or options overlay:")
+    print("\n  📊 RE-INDEX after any new matrix or options overlay (auto-run by matrix):")
     print("     .venv/bin/python scripts/index_runs.py --query")
 
-    print("\n  🌐 CROSS-RUN HTML (rebuild whenever the runs you're tracking change):")
+    print("\n  🌐 CROSS-RUN HTML (auto-built single-run report after each matrix; this is")
+    print("      the multi-run aggregation for tracking trends across runs):")
     print(
         "     .venv/bin/python scripts/build_html_report.py \\\n"
         "         --runs runs/<matrix_id_1>:large runs/<matrix_id_2>:mid \\\n"
@@ -337,6 +444,14 @@ def phase_report(screener_run: Path, args: argparse.Namespace, diff: dict) -> No
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--tier", type=str, default=None,
+                   choices=sorted(TIER_PRESETS.keys()),
+                   help="Apply a market-cap-tier preset (mid|large|mega) for "
+                        "mcap band, ADV floor, and min price. Tier-tagged runs "
+                        "produce screener_<tier>_<ts>/ and matrix_<tier>_*_chain "
+                        "run_ids; the diff phase is filtered to the same tier so "
+                        "mid/large/mega cycles stay independent. Individual flags "
+                        "(--min-mcap, --min-dollar-adv, etc.) override the preset.")
     p.add_argument("--top", type=int, default=25,
                    help="Top-N from screener to consider (default 25)")
     p.add_argument("--target-date", type=str, default=None,
@@ -373,14 +488,24 @@ def main() -> int:
                    help="Min seconds between Polygon REST calls (default: screener decides)")
     args = p.parse_args()
 
+    # Apply tier preset BEFORE running phases — only for flags the user did
+    # not explicitly set on the CLI.
+    user_set = _user_supplied_dests(sys.argv[1:])
+    _apply_tier_preset(args, tier=args.tier, user_set=user_set)
+
     started = datetime.now()
     print(f"╔══════════════════════════════════════════════════════════════════════╗")
-    print(f"║ Weekly TradingAgents cadence · {started.strftime('%Y-%m-%d %H:%M %a')}                       ║")
+    tier_suffix = f" · tier={args.tier}" if args.tier else ""
+    print(f"║ Weekly TradingAgents cadence · "
+          f"{started.strftime('%Y-%m-%d %H:%M %a')}{tier_suffix}".ljust(72) + "║")
     print(f"╚══════════════════════════════════════════════════════════════════════╝")
+    if args.tier:
+        print(f"  tier preset → mcap=${args.min_mcap/1e9:.1f}B-${args.max_mcap/1e9:.1f}B "
+              f"· ADV ≥ ${args.min_dollar_adv/1e6:.0f}M · price ≥ ${args.min_price:.0f}")
 
     screener_run = phase_screen(args)
     phase_index(args.dry_run)
-    diff = phase_diff(screener_run, args.top, args.dry_run)
+    diff = phase_diff(screener_run, args.top, args.dry_run, tier=args.tier)
     phase_chain(screener_run, args, diff)
     phase_report(screener_run, args, diff)
 
