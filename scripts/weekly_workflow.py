@@ -219,6 +219,30 @@ def phase_index(dry_run: bool) -> None:
         print(f"  ⚠ Indexer exited {rc}; continuing anyway", file=sys.stderr)
 
 
+def phase_enrich_news(screener_run: Path, scorer: str, lookback_days: int,
+                      ticker_limit: int | None, dry_run: bool) -> None:
+    """Optional Phase 2.5 — write news_enrichment.json next to the screener.
+
+    Default scorer is ``keyword`` (zero extra deps). ``finbert`` requires
+    torch+transformers (~1.5-2GB); ``both`` runs them side-by-side for A/B.
+    Output JSON is consumed by build_html_report.py for theme/sentiment
+    surface tags.
+    """
+    _hr("Phase 2.5 · NEWS ENRICHMENT")
+    cmd = [
+        ".venv/bin/python", "scripts/build_news_enrichment.py",
+        "--screener-run", str(screener_run),
+        "--scorer", scorer,
+        "--lookback-days", str(lookback_days),
+    ]
+    if ticker_limit:
+        cmd += ["--ticker-limit", str(ticker_limit)]
+    rc = _run(cmd, dry_run)
+    if rc != 0:
+        print(f"  ⚠ News enrichment exited {rc}; continuing without it",
+              file=sys.stderr)
+
+
 def _read_top_tickers(screener_run: Path, top_n: int) -> list[str]:
     """Read top-N tickers from a screener run."""
     top_path = screener_run / "top_tickers.txt"
@@ -486,6 +510,20 @@ def main() -> int:
                    help="Cap stage-2 enrichment for testing (default: no cap)")
     p.add_argument("--min-request-interval", type=float, default=None,
                    help="Min seconds between Polygon REST calls (default: screener decides)")
+    # Optional Phase 2.5 — news enrichment artifact
+    p.add_argument("--enrich-news", action="store_true",
+                   help="Run Phase 2.5 to write news_enrichment.json next to the "
+                        "screener run (sentiment + theme tags). Default off; "
+                        "consumed by build_html_report.py for tag display when "
+                        "the file exists.")
+    p.add_argument("--news-scorer", choices=["keyword", "finbert", "both"],
+                   default="keyword",
+                   help="Sentiment scorer for --enrich-news. 'keyword' (default) "
+                        "is zero-dep. 'finbert' requires "
+                        "`pip install torch transformers`. 'both' runs them "
+                        "side-by-side for A/B comparison.")
+    p.add_argument("--news-lookback-days", type=int, default=30,
+                   help="How far back to pull headlines for --enrich-news (default 30)")
     args = p.parse_args()
 
     # Apply tier preset BEFORE running phases — only for flags the user did
@@ -505,6 +543,14 @@ def main() -> int:
 
     screener_run = phase_screen(args)
     phase_index(args.dry_run)
+    if args.enrich_news:
+        phase_enrich_news(
+            screener_run,
+            scorer=args.news_scorer,
+            lookback_days=args.news_lookback_days,
+            ticker_limit=args.top,
+            dry_run=args.dry_run,
+        )
     diff = phase_diff(screener_run, args.top, args.dry_run, tier=args.tier)
     phase_chain(screener_run, args, diff)
     phase_report(screener_run, args, diff)

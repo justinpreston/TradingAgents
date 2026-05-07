@@ -27,7 +27,14 @@
 .venv/bin/python scripts/build_options_overlay.py \
     --matrix-run runs/<matrix_id> --strategy-mode long-call
 
-# Tests (baseline: 267 pass, 41 subtests)
+# Optional: news enrichment (sentiment + theme tags) on the screener output
+.venv/bin/python scripts/build_news_enrichment.py \
+    --screener-run runs/<screener_id> --scorer keyword
+# A/B test keyword vs FinBERT (FinBERT requires `pip install torch transformers`):
+.venv/bin/python scripts/build_news_enrichment.py \
+    --screener-run runs/<screener_id> --scorer both
+
+# Tests (baseline: 331 pass, 41 subtests)
 .venv/bin/python -m pytest tests/ -x -q
 ```
 
@@ -158,6 +165,40 @@ If the 5.0 threshold ever changes, both files must change together.
 | A | **−35%** | "Equity only" — 5–7% modeled upside doesn't clear long-call premium. |
 | B | **+108%** ⭐ | Cons engaged but skeptical → wider modeled aggressive PT, premium clears it. |
 | C | **+41%** | Aggressive-only thesis. Stay at starter size. |
+
+---
+
+## News enrichment (optional, off by default)
+
+`scripts/build_news_enrichment.py` writes `news_enrichment.json` next to a
+screener or matrix run with two derived signals per ticker:
+
+1. **Sentiment polarity** in [-1, 1] from a pluggable scorer.
+2. **Theme labels** (deterministic regex over 10 catalysts: m_and_a,
+   earnings, guidance, regulatory, government_action, leadership,
+   litigation, product_launch, analyst_action, capital_action).
+
+**Two scorers, A/B-testable:**
+- `--scorer keyword` (default, zero deps): weighted regex over a curated
+  positive/negative term list. Fast, deterministic, fully auditable
+  (`trigger_terms` lists the rules that fired).
+- `--scorer finbert` (optional, **requires** `pip install torch transformers`,
+  ~1.5-2GB + 440MB ProsusAI/finbert model on first use): transformer-based
+  contextual sentiment.
+- `--scorer both`: runs both side-by-side, prints discrimination ratio
+  (`finbert range / keyword range` — higher means FinBERT is more
+  separating).
+
+**Wired into weekly_workflow.py** as opt-in Phase 2.5:
+```bash
+.venv/bin/python scripts/weekly_workflow.py --tier mega --enrich-news
+.venv/bin/python scripts/weekly_workflow.py --tier mega --enrich-news --news-scorer both
+```
+
+**Insider transactions** are now bound to `fundamentals_analyst.py`
+(Form-4 signals via the yfinance → alpha_vantage vendor fallback chain).
+Polygon free-tier doesn't expose insider transactions; the vendor router
+in `default_config.py` falls through automatically.
 
 ---
 
