@@ -380,6 +380,13 @@ def _sector_from_sic(sic: str | None) -> str:
 
 CSS = r"""
 :root {
+  --accent: #38bdf8;
+  --accent-2: #818cf8;
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+
+:root, [data-theme="dark"] {
   --bg: #0a0e1a;
   --bg-elev-1: #111827;
   --bg-elev-2: #1f2937;
@@ -389,8 +396,6 @@ CSS = r"""
   --text: #e2e8f0;
   --text-muted: #94a3b8;
   --text-dim: #64748b;
-  --accent: #38bdf8;
-  --accent-2: #818cf8;
   --green: #22c55e;
   --green-dim: #14532d;
   --green-bg: rgba(34, 197, 94, 0.08);
@@ -405,9 +410,65 @@ CSS = r"""
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.5);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.6), 0 4px 6px -4px rgb(0 0 0 / 0.6);
-  --radius: 12px;
-  --radius-sm: 8px;
+  --h1-gradient: linear-gradient(135deg, #f1f5f9 0%, #94a3b8 100%);
 }
+
+[data-theme="light"] {
+  --bg: #f8fafc;
+  --bg-elev-1: #ffffff;
+  --bg-elev-2: #f1f5f9;
+  --bg-elev-3: #e2e8f0;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --text: #0f172a;
+  --text-muted: #475569;
+  --text-dim: #64748b;
+  --green: #16a34a;
+  --green-dim: #bbf7d0;
+  --green-bg: rgba(22, 163, 74, 0.08);
+  --red: #dc2626;
+  --red-dim: #fecaca;
+  --red-bg: rgba(220, 38, 38, 0.08);
+  --yellow: #ca8a04;
+  --yellow-bg: rgba(202, 138, 4, 0.10);
+  --tier-a: #16a34a;
+  --tier-b: #ca8a04;
+  --tier-c: #64748b;
+  --shadow-sm: 0 1px 2px 0 rgb(15 23 42 / 0.06);
+  --shadow-md: 0 4px 6px -1px rgb(15 23 42 / 0.10), 0 2px 4px -2px rgb(15 23 42 / 0.06);
+  --shadow-lg: 0 10px 15px -3px rgb(15 23 42 / 0.12), 0 4px 6px -4px rgb(15 23 42 / 0.10);
+  --h1-gradient: linear-gradient(135deg, #0f172a 0%, #475569 100%);
+}
+
+.theme-toggle {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 100;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.theme-toggle:hover { border-color: var(--accent); }
+.theme-toggle .icon { font-size: 14px; line-height: 1; }
+.theme-toggle .icon-sun { display: none; }
+.theme-toggle .icon-moon { display: inline; }
+[data-theme="light"] .theme-toggle .icon-sun { display: inline; }
+[data-theme="light"] .theme-toggle .icon-moon { display: none; }
+[data-theme="light"] .theme-toggle .label::after { content: "Dark"; }
+.theme-toggle .label::after { content: "Light"; }
+@media print { .theme-toggle { display: none; } }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
@@ -447,7 +508,7 @@ body {
   font-weight: 700;
   margin: 0;
   letter-spacing: -0.02em;
-  background: linear-gradient(135deg, #f1f5f9 0%, #94a3b8 100%);
+  background: var(--h1-gradient);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -2302,9 +2363,29 @@ def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{html.escape(title)}</title>
+<script>
+(function () {{
+  try {{
+    var saved = localStorage.getItem('tat_theme');
+  }} catch (e) {{ var saved = null; }}
+  var prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+  var theme = saved || (prefersLight ? 'light' : 'dark');
+  document.documentElement.setAttribute('data-theme', theme);
+}})();
+function tatToggleTheme() {{
+  var cur = document.documentElement.getAttribute('data-theme') || 'dark';
+  var next = cur === 'light' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', next);
+  try {{ localStorage.setItem('tat_theme', next); }} catch (e) {{}}
+}}
+</script>
 <style>{CSS}</style>
 </head>
 <body>
+<button type="button" class="theme-toggle" onclick="tatToggleTheme()" aria-label="Toggle light/dark theme" title="Toggle light/dark theme">
+  <span class="icon icon-moon">🌙</span><span class="icon icon-sun">☀️</span>
+  <span class="label"></span>
+</button>
 <div class="container">
 
 <header class="report-header">
