@@ -18,19 +18,31 @@ We pull ~270 trading days per ticker from
 ``/v2/aggs/ticker/{T}/range/1/day/...`` — one call per ticker, sequential.
 At Polygon's standard rate limits this runs ~5–10ms per call after warmup,
 so ~1500 tickers takes 5–10 minutes.
+
+Caching: by default :func:`compute_technical_signals` consults a disk
+cache keyed by ``(ticker, end_date)``. Because the end_date is part of
+the key, the cache is naturally self-invalidating — each weekly run uses
+a new end_date and refetches; mid-week re-runs against the same end_date
+are served instantly from cache. Pass ``use_cache=False`` to bypass.
 """
 
 from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import date, timedelta
 from typing import Sequence
 
+from tradingagents.dataflows._disk_cache import DiskCache
 from tradingagents.dataflows.polygon_common import _make_request
 
 log = logging.getLogger(__name__)
+
+# No TTL — the cache key includes end_date so entries are date-stamped and
+# never serve stale data. Old entries accumulate; clean up via DiskCache.clear()
+# if disk usage becomes a concern (~1 KB per ticker-day).
+_TECHNICALS_CACHE = DiskCache("technicals")
 
 
 @dataclass
@@ -118,20 +130,58 @@ def fetch_daily_bars(
     return payload.get("results") or []
 
 
+def _signals_from_dict(d: dict) -> "TechnicalSignals":
+    """Reconstruct :class:`TechnicalSignals` from a JSON-cached payload.
+
+    Tolerant of schema additions: unknown keys ignored, missing keys default.
+    """
+    valid = {f.name for f in fields(TechnicalSignals)}
+    return TechnicalSignals(**{k: v for k, v in d.items() if k in valid})
+
+
 def compute_technical_signals(
     ticker: str,
     *,
     end_date: date | None = None,
     bars: list[dict] | None = None,
+    use_cache: bool = True,
 ) -> TechnicalSignals:
     """Compute all technical signals + a composite score in [0, 100].
 
     Pass ``bars`` if you already have them (to avoid duplicate calls);
     otherwise this fetches ~380 calendar days of daily bars.
-    """
-    if bars is None:
-        bars = fetch_daily_bars(ticker, end_date=end_date)
 
+    By default a disk cache keyed by ``(ticker, end_date)`` is consulted.
+    Set ``use_cache=False`` to bypass. Caller-supplied ``bars=`` always
+    bypasses both fetch and cache so test/mock data can't poison the cache.
+    """
+    end_d = end_date or date.today()
+    persist_to_cache = use_cache and bars is None
+    cache_key = f"{ticker}_{end_d.isoformat()}"
+
+    if persist_to_cache:
+        cached = _TECHNICALS_CACHE.get(cache_key)
+        if cached is not None:
+            try:
+                return _signals_from_dict(cached)
+            except (TypeError, KeyError) as e:
+                log.debug("technicals cache: malformed entry for %s (%s) — refetching", cache_key, e)
+
+    if bars is None:
+        bars = fetch_daily_bars(ticker, end_date=end_d)
+
+    sig = _build_technical_signals(ticker, bars)
+
+    if persist_to_cache:
+        try:
+            _TECHNICALS_CACHE.set(cache_key, asdict(sig))
+        except Exception as e:  # noqa: BLE001
+            log.debug("technicals cache: failed to persist %s: %s", cache_key, e)
+    return sig
+
+
+def _build_technical_signals(ticker: str, bars: list[dict]) -> TechnicalSignals:
+    """Pure compute path — no I/O, no cache."""
     sig = TechnicalSignals(ticker=ticker, bars_count=len(bars))
     if len(bars) < 200:
         sig.flags.append("insufficient_history")
