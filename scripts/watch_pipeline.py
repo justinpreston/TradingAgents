@@ -303,7 +303,8 @@ def render_header(state: WatchState) -> Panel:
     now = datetime.now()
     if state.countdown_until and state.countdown_until > now:
         remaining = state.countdown_until - now
-        title = "[bold yellow]⏳ Waiting for 17:00 kickoff[/]"
+        target_hhmm = state.countdown_until.strftime("%H:%M")
+        title = f"[bold yellow]⏳ Waiting for {target_hhmm} kickoff[/]"
         body = Text.assemble(
             ("Time now: ", "dim"),
             (now.strftime("%H:%M:%S"), "white"),

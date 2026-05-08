@@ -24,11 +24,12 @@ echo "[$(date '+%Y-%m-%d %H:%M:%S')] Scheduled kickoff queued for ${TARGET_H}:${
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Log file: $LOG"
 
 while [[ "$(date +%H%M)" < "$TARGET" ]]; do
-    REMAINING=$(.venv/bin/python -c "
-from datetime import datetime
-t = datetime.now().replace(hour=${TARGET_H#0}, minute=${TARGET_M#0}, second=0, microsecond=0)
-print(int((t - datetime.now()).total_seconds()))
-")
+    # Pure-shell remaining-seconds math via macOS `date -j -f`. Avoids the
+    # Python 3.13 init_sys_streams crash that fires when running .venv/bin/python
+    # in a subshell of a nohup'd parent (bad stdin fd inheritance).
+    TARGET_EPOCH=$(date -j -f "%H:%M" "${TARGET_H}:${TARGET_M}" +%s 2>/dev/null || echo 0)
+    NOW_EPOCH=$(date +%s)
+    REMAINING=$((TARGET_EPOCH - NOW_EPOCH))
     echo "[$(date '+%H:%M:%S')] waiting... ${REMAINING}s remaining"
     sleep 60
 done
