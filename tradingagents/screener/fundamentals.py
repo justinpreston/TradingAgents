@@ -17,19 +17,31 @@ etc. We use ``timeframe=quarterly`` to get the last 4–8 quarters.
 For tickers with insufficient financial history (recent IPOs, ADRs that
 don't file 10-Q, etc.) we return an ``insufficient_data`` flag and zero
 score — those names can still pass on technicals alone if the user wants.
+
+Caching: by default :func:`compute_fundamental_signals` consults a
+disk cache keyed by ticker with a 7-day TTL — financials don't change
+daily, and the weekly Friday cadence means the cache absorbs every
+mid-week re-run. Pass ``use_cache=False`` to bypass.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 
+from tradingagents.dataflows._disk_cache import DiskCache
 from tradingagents.dataflows.polygon_common import (
     PolygonNotFoundError,
     paginated_results,
 )
 
 log = logging.getLogger(__name__)
+
+# 7 days matches the weekly Friday cadence: each weekly run repopulates the
+# cache; mid-week re-screens (e.g. VIX spike, override-trigger reruns) hit
+# cache for the prior week's tickers.
+_FUNDAMENTALS_CACHE_TTL_S = 7 * 24 * 3600
+_FUNDAMENTALS_CACHE = DiskCache("fundamentals", ttl_seconds=_FUNDAMENTALS_CACHE_TTL_S)
 
 
 @dataclass
@@ -90,15 +102,58 @@ def _income_value(report: dict, key: str) -> float:
         return 0.0
 
 
+def _signals_from_dict(d: dict) -> "FundamentalSignals":
+    """Reconstruct :class:`FundamentalSignals` from a JSON-cached payload.
+
+    Tolerant of schema additions: unknown keys are ignored, missing keys fall
+    back to dataclass defaults. This keeps a stale cache from poisoning a run
+    after we add a new field — old entries are silently treated as
+    incomplete-but-usable.
+    """
+    valid = {f.name for f in fields(FundamentalSignals)}
+    return FundamentalSignals(**{k: v for k, v in d.items() if k in valid})
+
+
 def compute_fundamental_signals(
     ticker: str,
     *,
     reports: list[dict] | None = None,
+    use_cache: bool = True,
 ) -> FundamentalSignals:
-    """Compute fundamental signals + composite score in [0, 100]."""
+    """Compute fundamental signals + composite score in [0, 100].
+
+    When ``reports`` is None and ``use_cache`` is True (default), result is
+    served from a 7-day disk cache keyed by ticker. Set ``use_cache=False``
+    to bypass the cache (used by tests and by callers that need fresh data
+    after an earnings beat).
+    """
+    # We persist to cache only when we did the fetch ourselves — caller-
+    # supplied reports may be mocked/custom and shouldn't poison the cache.
+    persist_to_cache = use_cache and reports is None
+
+    if persist_to_cache:
+        cached = _FUNDAMENTALS_CACHE.get(ticker)
+        if cached is not None:
+            try:
+                return _signals_from_dict(cached)
+            except (TypeError, KeyError) as e:
+                log.debug("fundamentals cache: malformed entry for %s (%s) — refetching", ticker, e)
+
     if reports is None:
         reports = fetch_quarterly_financials(ticker)
 
+    sig = _build_signals(ticker, reports)
+
+    if persist_to_cache:
+        try:
+            _FUNDAMENTALS_CACHE.set(ticker, asdict(sig))
+        except Exception as e:  # noqa: BLE001
+            log.debug("fundamentals cache: failed to persist %s: %s", ticker, e)
+    return sig
+
+
+def _build_signals(ticker: str, reports: list[dict]) -> "FundamentalSignals":
+    """Compute :class:`FundamentalSignals` from a report list (no I/O)."""
     sig = FundamentalSignals(ticker=ticker, quarters_available=len(reports))
 
     if len(reports) < 4:
