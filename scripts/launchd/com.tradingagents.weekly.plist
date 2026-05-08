@@ -73,35 +73,3 @@
     </dict>
 </dict>
 </plist>
-
-    <key>WorkingDirectory</key>
-    <string>/Users/jpp5q/Documents/GitHub/TradingAgents</string>
-
-    <!-- Friday at 17:00 local time -->
-    <key>StartCalendarInterval</key>
-    <dict>
-        <key>Weekday</key>
-        <integer>5</integer>
-        <key>Hour</key>
-        <integer>17</integer>
-        <key>Minute</key>
-        <integer>0</integer>
-    </dict>
-
-    <!-- Don't auto-restart on failure (one shot per scheduled fire) -->
-    <key>RunAtLoad</key>
-    <false/>
-
-    <key>StandardOutPath</key>
-    <string>/Users/jpp5q/Documents/GitHub/TradingAgents/runs/weekly_workflow.log</string>
-    <key>StandardErrorPath</key>
-    <string>/Users/jpp5q/Documents/GitHub/TradingAgents/runs/weekly_workflow.log</string>
-
-    <!-- Environment: ensure .env vars are loaded by the script's own load_dotenv() -->
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
-    </dict>
-</dict>
-</plist>
