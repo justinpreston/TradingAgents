@@ -67,9 +67,16 @@ RUNS_DIR = REPO_ROOT / "runs"
 # ---------------------------------------------------------------------------
 RE_WAIT = re.compile(r"\[(\d{2}:\d{2}:\d{2})\]\s+waiting\.\.\.\s+(\d+)s remaining")
 RE_KICKOFF = re.compile(r"🚀 LAUNCHING ")
-RE_TIER = re.compile(r"──\s*Tier\s+·\s+(\w+)\s+──")
+# Match either the legacy hr-rule banner from weekly_workflow.py
+# (── Tier · MID ──) or the boxed banner from run_weekly_all_tiers.py
+# (│ Tier · MID │).
+RE_TIER = re.compile(r"(?:──|│)\s*Tier\s+·\s+(\w+)\s")
 RE_PHASE = re.compile(r"──\s*Phase\s+([\d.]+)\s+·\s+([A-Z][A-Z0-9 _]*)")
 RE_SCREENER_CONFIG = re.compile(r"\[screener\]\s+config:\s+top=(\d+).*mcap=\$([\d.]+)B-\$([\d.]+)B")
+# `[screener] writing to runs/screener_mid_2026-05-08_1636` — captures the
+# tier from the output dir name. This is our fallback when the Phase banner
+# gets stuck in the inner subprocess's buffered stdout.
+RE_SCREENER_WRITING = re.compile(r"\[screener\]\s+writing\s+to\s+\S*screener_(\w+?)_\d")
 RE_SCREENER_STAGE = re.compile(r"\[(universe|scoring)\]\s+(\d+)\s+tickers")
 RE_SCREENER_PROGRESS = re.compile(r"\s*(universe|scoring)\s+(\d+)/(\d+)\s+\((\d+)%\)\s+—\s+last:\s+(\S+)")
 RE_SCREENER_DONE = re.compile(r"\[screener\]\s+done in ([\d.]+)m\s+—\s+top\s+(\d+)")
@@ -179,7 +186,7 @@ def process_line(line: str, state: WatchState) -> None:
         state.countdown_until = None
         return
 
-    # Tier transitions
+    # Tier transitions (banner from weekly_workflow.py or run_weekly_all_tiers.py)
     if m := RE_TIER.search(line):
         tier_name = m.group(1).lower()
         # Mark previous tier done
@@ -192,6 +199,27 @@ def process_line(line: str, state: WatchState) -> None:
         t = state.tier(tier_name)
         t.status = "running"
         t.started_at = now
+        return
+
+    # Fallback when Phase/Tier banners get stuck in the inner subprocess's
+    # buffered stdout: derive tier from the screener output path and assume
+    # Phase 1 SCREEN is active.
+    if m := RE_SCREENER_WRITING.search(line):
+        tier_name = m.group(1).lower()
+        if state.current_tier != tier_name:
+            if state.current_tier:
+                prev = state.tier(state.current_tier)
+                if prev.status == "running":
+                    prev.status = "done"
+                    prev.ended_at = now
+            state.current_tier = tier_name
+            t = state.tier(tier_name)
+            t.status = "running"
+            t.started_at = t.started_at or now
+        # Set phase if not already set by an actual banner
+        t = state.tier(state.current_tier)
+        if not t.current_phase:
+            t.current_phase = "Phase 1 · Screen"
         return
 
     if m := RE_PHASE.search(line):
@@ -211,6 +239,9 @@ def process_line(line: str, state: WatchState) -> None:
             t.screener_last_ticker = ""
             t.last_progress_at = now
             t.last_progress_count = 0
+            # Implicit phase if no banner has fired
+            if not t.current_phase:
+                t.current_phase = "Phase 1 · Screen"
         return
 
     # Screener progress: "  scoring 127/250 (51%) — last: NVDA"
