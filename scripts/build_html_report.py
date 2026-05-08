@@ -53,10 +53,11 @@ def _score(row: dict, cross_band_set: set[str]) -> float:
     return s
 
 
-def _load_runs(run_specs: list[str], allow_missing: bool = True) -> tuple[list[dict], dict, dict, list[str]]:
+def _load_runs(run_specs: list[str], allow_missing: bool = True) -> tuple[list[dict], dict, dict, dict, list[str]]:
     rows = []
     metadata = {}
     options_by_ticker_run: dict[tuple[str, str], dict] = {}
+    chronos_by_ticker_run: dict[tuple[str, str], dict] = {}
     skipped: list[str] = []
     for spec in run_specs:
         path_str, label = spec.split(":", 1)
@@ -92,7 +93,18 @@ def _load_runs(run_specs: list[str], allow_missing: bool = True) -> tuple[list[d
             for o in ovl.get("overlays", []):
                 if "strategy" in o and "error" not in o:
                     options_by_ticker_run[(o["ticker"], label)] = o
-    return rows, metadata, options_by_ticker_run, skipped
+
+        # Optional: chronos overlay (price-action-only forecast cross-check)
+        chronos_path = run_dir / "chronos_overlay.json"
+        if chronos_path.exists():
+            chronos = json.loads(chronos_path.read_text())
+            metadata[label]["chronos_snapshot"] = chronos.get("snapshot_date")
+            metadata[label]["chronos_model"] = chronos.get("model")
+            metadata[label]["chronos_horizon_days"] = chronos.get("prediction_length_days")
+            for c in chronos.get("overlays", []):
+                if "error" not in c:
+                    chronos_by_ticker_run[(c["ticker"], label)] = c
+    return rows, metadata, options_by_ticker_run, chronos_by_ticker_run, skipped
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1284,6 +1296,12 @@ details.vetoed[open] summary { margin-bottom: 16px; padding-bottom: 12px; border
 .vol-mixed { background: rgba(234, 179, 8, 0.12); border: 1px solid rgba(234, 179, 8, 0.25); }
 .vol-unfavorable { background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.30); }
 
+/* Chronos forecast chips — agents-vs-model agreement on the persona PT */
+.model-chip { display: inline-block; font-size: 12px; padding: 1px 6px; border-radius: 6px; cursor: help; }
+.model-agree    { background: rgba(34, 197, 94, 0.15); border: 1px solid rgba(34, 197, 94, 0.30); }
+.model-edge     { background: rgba(234, 179, 8, 0.12); border: 1px solid rgba(234, 179, 8, 0.25); }
+.model-disagree { background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.30); }
+
 /* ── Realized P/L ───────────────────────────────────────────────── */
 .realized-summary {
   display: grid;
@@ -1481,13 +1499,59 @@ def _dist_chart(title: str, entries: list[tuple[str, int, str]], total: int) -> 
     )
 
 
-def _opt_card(row: dict, ovl: dict | None) -> str:
-    """Render an options strategy card for one pick. ovl may be None."""
+def _chronos_chip(c: dict | None) -> str:
+    """Render a colored chip for the Chronos agent-PT-vs-model agreement.
+
+    Buckets:
+      🟢 inside        — agent PT lands in p25-p75 (model & personas agree)
+      🟡 high / low    — agent PT lands in p75-p90 / p10-p25 (one-edge inside cone)
+      🔴 above / below — agent PT outside the p10-p90 cone (notable disagreement)
+
+    Returns an empty string when ``c`` is None or has no model_view.
+    """
+    if not c or "error" in c:
+        return ""
+    view = c.get("model_view")
+    if not view:
+        return ""
+    if view == "inside":
+        klass, emoji = "model-agree", "🟢"
+    elif view in ("high", "low"):
+        klass, emoji = "model-edge", "🟡"
+    elif view in ("above cone", "below cone"):
+        klass, emoji = "model-disagree", "🔴"
+    else:
+        klass, emoji = "model-edge", "🟡"
+
+    quantile = c.get("agent_pt_quantile")
+    vs_median = c.get("agent_pt_vs_median_pct")
+    horizon = c.get("prediction_length_days")
+    p50 = (c.get("forecast_at_horizon") or {}).get("p50")
+    bits = [f"Chronos: agent PT {view}"]
+    if quantile is not None:
+        bits.append(f"@ p{int(round(quantile*100))}")
+    if vs_median is not None and p50 is not None:
+        bits.append(f"({vs_median:+.1f}% vs model p50 ${p50:,.0f})")
+    if horizon:
+        bits.append(f"horizon {horizon}d")
+    title_attr = html.escape(" · ".join(bits))
+    return f'<span class="model-chip {klass}" title="{title_attr}">{emoji}</span>'
+
+
+def _opt_card(row: dict, ovl: dict | None, chronos: dict | None = None) -> str:
+    """Render an options strategy card for one pick. ovl may be None.
+
+    If ``chronos`` (a chronos_overlay row dict) is provided, a small Chronos
+    agreement chip is appended to the head row so the reader can see at a
+    glance whether the persona PT is inside the model's forecast cone.
+    """
     tkr = row["ticker"]
+    chronos_chip = _chronos_chip(chronos)
+    chronos_inline = f' {chronos_chip}' if chronos_chip else ''
     if not ovl:
         return (
             f'<div class="opt-card">'
-            f'<div class="head"><span class="tkr">{html.escape(tkr)}</span>'
+            f'<div class="head"><span class="tkr">{html.escape(tkr)}{chronos_inline}</span>'
             f'<span class="strat" style="color:var(--text-dim)">No overlay</span></div>'
             f'<div style="color:var(--text-dim);font-size:13px">No options strategy generated for this run.</div>'
             f'</div>'
@@ -1551,7 +1615,7 @@ def _opt_card(row: dict, ovl: dict | None) -> str:
     return (
         f'<div class="opt-card">'
         f'<div class="head">'
-        f'<span class="tkr">{html.escape(tkr)} <span style="font-size:11px;color:var(--text-dim);font-weight:500">Tier {tier}</span></span>'
+        f'<span class="tkr">{html.escape(tkr)} <span style="font-size:11px;color:var(--text-dim);font-weight:500">Tier {tier}</span>{chronos_inline}</span>'
         f'<span class="strat">{html.escape(strat)} · {ovl.get("dte", "—")}d</span>'
         f'</div>'
         f'<div class="legs">{"".join(legs_html)}</div>'
@@ -2177,6 +2241,7 @@ def _render_macro_banner(snapshot: dict | None) -> str:
 
 def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
            options_map: dict | None = None,
+           chronos_map: dict | None = None,
            portfolio: dict | None = None,
            screener: dict | None = None,
            news_enrichment: dict[str, dict] | None = None,
@@ -2184,6 +2249,7 @@ def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
            macro_snapshot: dict | None = None,
            skipped_runs: list[str] | None = None) -> str:
     options_map = options_map or {}
+    chronos_map = chronos_map or {}
     picks = [r for r in rows if r["classification"] == "PICK"]
     vetoed = [r for r in rows if r["classification"] == "VETOED"]
 
@@ -2350,10 +2416,13 @@ def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
         parts.append('<section class="section">')
         parts.append('<h2>📈 Options Playbook · Top 5</h2>')
         parts.append('<p class="lede">Tier-driven options structures for each top-5 pick. <strong>Tier A/B</strong> → defined-risk bull call spreads with the upper strike anchored to the conservative PT (the "where do both frames agree" zone). <strong>Tier C</strong> → ATM long calls (no credible upper bound from cons → don\'t cap upside). Strikes round to listed contracts; pricing uses Polygon\'s reported IV via Black-Scholes when bid/ask is unavailable. <em>Validate on a live broker chain before trading.</em></p>')
+        if chronos_map:
+            parts.append('<p class="lede" style="margin-top:8px"><strong>Model agreement chip</strong> — 🟢 inside the Chronos p25-p75 cone (model & personas agree), 🟡 inside the cone but at one edge (p10-p25 low or p75-p90 high), 🔴 outside the p10-p90 cone (notable disagreement). Hover the chip for the model\'s p50 vs the persona PT.</p>')
         parts.append('<div class="options-grid">')
         for r in top5:
             ovl = options_map.get((r["ticker"], r["_run"]))
-            parts.append(_opt_card(r, ovl))
+            chronos = chronos_map.get((r["ticker"], r["_run"]))
+            parts.append(_opt_card(r, ovl, chronos))
         parts.append('</div>')
 
         # All-picks options summary table
@@ -2362,7 +2431,8 @@ def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
         if all_ovls:
             parts.append('<h3 style="margin-top:32px">All picks · options snapshot</h3>')
             parts.append('<div class="table-wrap"><table>')
-            parts.append('<thead><tr><th>Ticker</th><th>Run</th><th>Tier</th><th>Strategy</th><th>Exp</th><th class="num">DTE</th><th class="num">Long K</th><th class="num">Short K</th><th class="num">Net Debit</th><th class="num">Max Profit</th><th class="num">Breakeven</th><th class="num">R/R</th><th>Vol</th><th>Liq</th></tr></thead>')
+            model_header = '<th>Model</th>' if chronos_map else ''
+            parts.append(f'<thead><tr><th>Ticker</th><th>Run</th><th>Tier</th><th>Strategy</th><th>Exp</th><th class="num">DTE</th><th class="num">Long K</th><th class="num">Short K</th><th class="num">Net Debit</th><th class="num">Max Profit</th><th class="num">Breakeven</th><th class="num">R/R</th><th>Vol</th>{model_header}<th>Liq</th></tr></thead>')
             parts.append('<tbody>')
             for r, ovl in all_ovls:
                 legs = ovl.get("legs") or []
@@ -2395,6 +2465,11 @@ def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
                     vol_chip = f'<span class="vol-chip vol-{backdrop}" title="{title_attr}">{vol_label}</span>'
                 else:
                     vol_chip = '<span class="muted">—</span>'
+                model_cell = ''
+                if chronos_map:
+                    chronos_data = chronos_map.get((r["ticker"], r["_run"]))
+                    chip = _chronos_chip(chronos_data)
+                    model_cell = f'<td>{chip if chip else "<span class=\"muted\">—</span>"}</td>'
                 parts.append(
                     f'<tr>'
                     f'<td class="tkr">{html.escape(r["ticker"])}</td>'
@@ -2410,6 +2485,7 @@ def render(rows: list[dict], metadata: dict, title: str, subtitle: str,
                     f'<td class="num">{_fmt_price(ovl.get("breakeven_underlying"))}</td>'
                     f'<td class="num">{rr_str}</td>'
                     f'<td>{vol_chip}</td>'
+                    f'{model_cell}'
                     f'<td>{liq}</td>'
                     f'</tr>'
                 )
@@ -2623,7 +2699,7 @@ def main():
     args = p.parse_args()
 
     allow_missing = not args.strict_runs
-    rows, metadata, options_map, skipped = _load_runs(args.runs, allow_missing=allow_missing)
+    rows, metadata, options_map, chronos_map, skipped = _load_runs(args.runs, allow_missing=allow_missing)
     portfolio = _load_portfolio(args.portfolio)
     screener = _load_screener(args.screener_run)
     news_enrichment = _load_news_enrichment(screener)
@@ -2638,7 +2714,9 @@ def main():
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     html_text = render(rows, metadata, args.title, args.subtitle,
-                       options_map=options_map, portfolio=portfolio,
+                       options_map=options_map,
+                       chronos_map=chronos_map,
+                       portfolio=portfolio,
                        screener=screener, news_enrichment=news_enrichment,
                        earnings_calendar=earnings_calendar,
                        macro_snapshot=macro_snapshot,
@@ -2659,6 +2737,8 @@ def main():
         print(f"     news_enrichment: {len(news_enrichment)} tickers tagged")
     if earnings_calendar:
         print(f"     earnings_calendar: {len(earnings_calendar)} tickers with next-earnings dates")
+    if chronos_map:
+        print(f"     chronos_overlay: {len(chronos_map)} ticker-run forecasts loaded")
     if macro_snapshot:
         print(f"     macro_snapshot: regime={macro_snapshot.get('regime', '—')} status={macro_snapshot.get('status', '—')}")
     if skipped:

@@ -9,10 +9,12 @@ Idempotent: re-running on the same data UPDATEs in place. Re-running on a
 file with unchanged mtime is skipped unless --force is passed.
 
 Schema:
-- runs:            one row per indexed run directory (any type)
-- screener_picks:  one row per ranked ticker per screener run
-- matrix_picks:    one row per ranked ticker per matrix run
-- options_legs:    one row per option leg per matrix run
+- runs:               one row per indexed run directory (any type)
+- screener_picks:     one row per ranked ticker per screener run
+- matrix_picks:       one row per ranked ticker per matrix run
+- options_legs:       one row per option leg per matrix run
+- chronos_forecasts:  one row per ticker per matrix run (zero-shot model
+                      forecast cross-check on the persona PTs)
 
 Usage:
     .venv/bin/python scripts/index_runs.py                # index all of runs/
@@ -39,6 +41,14 @@ Cross-run queries you can now do via `sqlite3 runs/index.db`:
          ROUND(AVG(net_debit_per_contract), 0) avg_debit
   FROM options_legs WHERE strategy_mode='long-call'
   GROUP BY tier;
+
+  -- Tier A picks where Chronos disagrees with the personas:
+  SELECT run_id, ticker, current_price, agent_aggressive_pt,
+         forecast_p50, agent_pt_vs_median_pct, model_view
+  FROM chronos_forecasts
+  WHERE tier='A' AND classification='PICK'
+    AND model_view IN ('high', 'above cone')
+  ORDER BY agent_pt_vs_median_pct DESC;
 """
 from __future__ import annotations
 
@@ -152,6 +162,35 @@ CREATE TABLE IF NOT EXISTS options_legs (
 CREATE INDEX IF NOT EXISTS idx_options_ticker ON options_legs(ticker);
 CREATE INDEX IF NOT EXISTS idx_options_strategy ON options_legs(strategy);
 CREATE INDEX IF NOT EXISTS idx_options_mode ON options_legs(strategy_mode);
+
+CREATE TABLE IF NOT EXISTS chronos_forecasts (
+    run_id                          TEXT NOT NULL,
+    ticker                          TEXT NOT NULL,
+    tier                            TEXT,
+    classification                  TEXT,
+    current_price                   REAL,
+    agent_aggressive_pt             REAL,
+    agent_conservative_pt           REAL,
+    agent_horizon                   TEXT,
+    prediction_length_days          INTEGER,
+    context_bars_used               INTEGER,
+    forecast_p10                    REAL,
+    forecast_p50                    REAL,
+    forecast_p90                    REAL,
+    forecast_pct_p10                REAL,
+    forecast_pct_p50                REAL,
+    forecast_pct_p90                REAL,
+    agent_pt_quantile               REAL,
+    agent_pt_vs_median_pct          REAL,
+    model_view                      TEXT,
+    agent_inside_cone               INTEGER,
+    PRIMARY KEY (run_id, ticker),
+    FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_chronos_ticker ON chronos_forecasts(ticker);
+CREATE INDEX IF NOT EXISTS idx_chronos_view ON chronos_forecasts(model_view);
+CREATE INDEX IF NOT EXISTS idx_chronos_tier ON chronos_forecasts(tier);
 
 CREATE VIEW IF NOT EXISTS ticker_history AS
 SELECT
@@ -275,17 +314,20 @@ def index_screener_run(conn: sqlite3.Connection, run_dir: Path,
 
 
 def index_matrix_run(conn: sqlite3.Connection, run_dir: Path,
-                     ledger_path: Path, force: bool) -> tuple[bool, bool]:
-    """Returns (matrix_indexed, options_indexed)."""
+                     ledger_path: Path, force: bool) -> tuple[bool, bool, bool]:
+    """Returns (matrix_indexed, options_indexed, chronos_indexed)."""
     mtime = ledger_path.stat().st_mtime
     options_path = run_dir / "options_overlay.json"
     options_mtime = options_path.stat().st_mtime if options_path.exists() else None
-    combined_mtime = max(mtime, options_mtime) if options_mtime else mtime
+    chronos_path = run_dir / "chronos_overlay.json"
+    chronos_mtime = chronos_path.stat().st_mtime if chronos_path.exists() else None
+    candidates = [m for m in (mtime, options_mtime, chronos_mtime) if m is not None]
+    combined_mtime = max(candidates) if candidates else mtime
 
     cur = conn.execute("SELECT source_mtime FROM runs WHERE run_id=?", (run_dir.name,))
     row = cur.fetchone()
     if row and row[0] and row[0] >= combined_mtime and not force:
-        return (False, False)
+        return (False, False, False)
 
     data = json.loads(ledger_path.read_text())
     rows = data.get("rows", [])
@@ -354,7 +396,12 @@ def index_matrix_run(conn: sqlite3.Connection, run_dir: Path,
         index_options_overlay(conn, run_dir.name, options_path)
         options_indexed = True
 
-    return (True, options_indexed)
+    chronos_indexed = False
+    if chronos_path.exists():
+        index_chronos_overlay(conn, run_dir.name, chronos_path)
+        chronos_indexed = True
+
+    return (True, options_indexed, chronos_indexed)
 
 
 def index_options_overlay(conn: sqlite3.Connection, run_id: str, overlay_path: Path) -> int:
@@ -419,6 +466,62 @@ def index_options_overlay(conn: sqlite3.Connection, run_id: str, overlay_path: P
     return len(leg_rows)
 
 
+def index_chronos_overlay(conn: sqlite3.Connection, run_id: str, overlay_path: Path) -> int:
+    """Index a chronos_overlay.json file produced by build_chronos_overlay.py.
+
+    Each row mirrors the JSON schema documented in build_chronos_overlay.py:
+    one row per ticker per run, capturing the model's quantile forecast at
+    the configured horizon plus the agent PT's quantile within that
+    distribution (the "agreement" signal).
+    """
+    data = json.loads(overlay_path.read_text())
+    overlays = data.get("overlays") or []
+
+    conn.execute("DELETE FROM chronos_forecasts WHERE run_id=?", (run_id,))
+    rows = []
+    for o in overlays:
+        if "error" in o:
+            continue
+        forecast = o.get("forecast_at_horizon") or {}
+        forecast_pct = o.get("forecast_pct_change_at_horizon") or {}
+        rows.append((
+            run_id,
+            o.get("ticker"),
+            o.get("tier"),
+            o.get("classification"),
+            o.get("current_price"),
+            o.get("agent_aggressive_pt"),
+            o.get("agent_conservative_pt"),
+            o.get("agent_horizon"),
+            o.get("prediction_length_days"),
+            o.get("context_bars_used"),
+            forecast.get("p10"),
+            forecast.get("p50"),
+            forecast.get("p90"),
+            forecast_pct.get("p10_pct"),
+            forecast_pct.get("p50_pct"),
+            forecast_pct.get("p90_pct"),
+            o.get("agent_pt_quantile"),
+            o.get("agent_pt_vs_median_pct"),
+            o.get("model_view"),
+            1 if o.get("agent_inside_cone") else 0,
+        ))
+    if rows:
+        conn.executemany(
+            """INSERT INTO chronos_forecasts
+               (run_id, ticker, tier, classification, current_price,
+                agent_aggressive_pt, agent_conservative_pt, agent_horizon,
+                prediction_length_days, context_bars_used,
+                forecast_p10, forecast_p50, forecast_p90,
+                forecast_pct_p10, forecast_pct_p50, forecast_pct_p90,
+                agent_pt_quantile, agent_pt_vs_median_pct, model_view,
+                agent_inside_cone)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            rows,
+        )
+    return len(rows)
+
+
 def print_summary(conn: sqlite3.Connection) -> None:
     print("\n=== runs/index.db summary ===\n")
     for row in conn.execute(
@@ -429,9 +532,11 @@ def print_summary(conn: sqlite3.Connection) -> None:
     n_screener = conn.execute("SELECT COUNT(*) FROM screener_picks").fetchone()[0]
     n_matrix = conn.execute("SELECT COUNT(*) FROM matrix_picks").fetchone()[0]
     n_options = conn.execute("SELECT COUNT(*) FROM options_legs").fetchone()[0]
-    print(f"\n  screener_picks: {n_screener:>5} rows")
-    print(f"  matrix_picks:   {n_matrix:>5} rows")
-    print(f"  options_legs:   {n_options:>5} rows")
+    n_chronos = conn.execute("SELECT COUNT(*) FROM chronos_forecasts").fetchone()[0]
+    print(f"\n  screener_picks:    {n_screener:>5} rows")
+    print(f"  matrix_picks:      {n_matrix:>5} rows")
+    print(f"  options_legs:      {n_options:>5} rows")
+    print(f"  chronos_forecasts: {n_chronos:>5} rows")
 
     print("\n--- Tickers appearing in most matrix runs (PICKs only) ---")
     for row in conn.execute(
@@ -466,6 +571,34 @@ def print_summary(conn: sqlite3.Connection) -> None:
             print(f"  Tier {tier or '—'}: n={n:>2}  avg gain @ aggr PT ${gain:>+7.0f}  "
                   f"avg debit ${debit:>6.0f}/ct  ROI {roi_str}")
 
+    if n_chronos:
+        print("\n--- Agent PT vs Chronos forecast (across all indexed matrix runs) ---")
+        # By tier: how often does the agent's aggressive PT land inside the
+        # model's p10-p90 cone, and how does the median agent vs model
+        # disagreement skew?
+        for row in conn.execute(
+            """SELECT tier,
+                      COUNT(*) n,
+                      ROUND(100.0 * AVG(agent_inside_cone), 0) inside_pct,
+                      ROUND(AVG(agent_pt_quantile), 2) avg_quantile,
+                      ROUND(AVG(agent_pt_vs_median_pct), 1) avg_vs_median_pct,
+                      SUM(CASE WHEN model_view='above cone' THEN 1 ELSE 0 END) above,
+                      SUM(CASE WHEN model_view='high'       THEN 1 ELSE 0 END) high_n,
+                      SUM(CASE WHEN model_view='inside'     THEN 1 ELSE 0 END) inside_n,
+                      SUM(CASE WHEN model_view='low'        THEN 1 ELSE 0 END) low_n,
+                      SUM(CASE WHEN model_view='below cone' THEN 1 ELSE 0 END) below
+               FROM chronos_forecasts
+               WHERE classification='PICK' AND tier IN ('A','B','C')
+               GROUP BY tier
+               ORDER BY tier"""
+        ):
+            tier, n, inside_pct, avg_q, avg_v, above, high_n, inside_n, low_n, below = row
+            avg_q_str = f"p{int(round(avg_q*100)):>2}" if avg_q is not None else " —"
+            print(f"  Tier {tier}: n={n:>2}  inside-cone {inside_pct or 0:>3.0f}%  "
+                  f"avg agent PT @ {avg_q_str}  ({avg_v or 0:+.1f}% vs model p50)")
+            print(f"          views: above={above} high={high_n} inside={inside_n} "
+                  f"low={low_n} below={below}")
+
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
@@ -492,7 +625,7 @@ def main() -> int:
     conn.executescript(SCHEMA)
     conn.execute("PRAGMA foreign_keys = ON")
 
-    indexed = {"screener": 0, "matrix": 0, "options": 0, "skipped": 0}
+    indexed = {"screener": 0, "matrix": 0, "options": 0, "chronos": 0, "skipped": 0}
     for run_dir in sorted(runs_dir.iterdir()):
         if not run_dir.is_dir():
             continue
@@ -506,14 +639,16 @@ def main() -> int:
                 else:
                     indexed["skipped"] += 1
             elif run_type == "matrix":
-                m_done, o_done = index_matrix_run(
+                m_done, o_done, c_done = index_matrix_run(
                     conn, run_dir, run_dir / "verdict_ledger.json", args.force
                 )
                 if m_done:
                     indexed["matrix"] += 1
                 if o_done:
                     indexed["options"] += 1
-                if not m_done and not o_done:
+                if c_done:
+                    indexed["chronos"] += 1
+                if not (m_done or o_done or c_done):
                     indexed["skipped"] += 1
         except Exception as e:
             print(f"⚠ {run_dir.name}: {e}", file=sys.stderr)
@@ -522,7 +657,8 @@ def main() -> int:
     conn.commit()
 
     print(f"✅ Indexed: {indexed['screener']} screener · {indexed['matrix']} matrix "
-          f"· {indexed['options']} options-overlay · {indexed['skipped']} unchanged")
+          f"· {indexed['options']} options · {indexed['chronos']} chronos "
+          f"· {indexed['skipped']} unchanged")
     print(f"   → {db_path}")
 
     if args.query:

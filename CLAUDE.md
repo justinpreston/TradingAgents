@@ -160,11 +160,14 @@ def _tier(row):
     return 'B'       # cons engaged but skeptical
 ```
 
-Implementations that must stay in sync:
-- `scripts/build_options_overlay.py::_tier()` (lines 65–73)
-- `scripts/index_runs.py::_classification_to_tier()` (lines 145–161)
+Implementations that must stay in sync (all four use the same `< 5.0`
+compression threshold and the same `conservative_pt is None → C` rule):
+- `scripts/build_options_overlay.py::_tier()`
+- `scripts/build_chronos_overlay.py::_tier()`
+- `scripts/build_html_report.py::_tier()`
+- `scripts/index_runs.py::_classification_to_tier()`
 
-If the 5.0 threshold ever changes, both files must change together.
+If the 5.0 threshold ever changes, all four files must change together.
 
 **Empirical context** (cross-run, indexed in `runs/index.db`):
 
