@@ -579,6 +579,18 @@ def _parse_args() -> argparse.Namespace:
         help="Target delta for the auto-built long-call overlay. Default 0.55 (slightly ITM).",
     )
     p.add_argument(
+        "--no-chronos", action="store_true",
+        help=(
+            "Skip the auto-built Chronos forecast overlay (price-action-only "
+            "cross-check on the persona PTs). Default: ON when chronos-forecasting "
+            "is installed; transparent skip with a note when it's not."
+        ),
+    )
+    p.add_argument(
+        "--chronos-prediction-length", type=int, default=90,
+        help="Forecast horizon in trading days for the auto-built Chronos overlay. Default 90 (~4mo).",
+    )
+    p.add_argument(
         "--news-enrichment", default=None,
         help="Path to a news_enrichment.json file. When set, every cell "
              "subprocess inherits TRADINGAGENTS_NEWS_ENRICHMENT_PATH so the "
@@ -596,14 +608,35 @@ def _parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def _run_auto_report(matrix_dir: Path, long_call_delta: float) -> None:
-    """Run accounting → options overlay → HTML report after a successful matrix.
+def _chronos_available() -> bool:
+    """Return True iff `chronos-forecasting` can be imported (cheap probe).
+
+    The probe is lazy-importing the library's top-level package — it does NOT
+    download the model. We use this to decide whether to attempt the chronos
+    step and to print a clear "skipped because not installed" line otherwise.
+    """
+    try:
+        import importlib  # noqa: F401  (defensive — stdlib, but stay explicit)
+        importlib.import_module("chronos")
+        return True
+    except ImportError:
+        return False
+
+
+def _run_auto_report(matrix_dir: Path, long_call_delta: float,
+                     skip_chronos: bool = False,
+                     chronos_prediction_length: int = 90) -> None:
+    """Run accounting → options overlay → Chronos overlay → HTML report after a successful matrix.
 
     Each step is best-effort: a failure logs a warning but does not abort the
     others. The matrix run output itself is already on disk; these are
     consumability layers on top of it.
+
+    The Chronos step is conditional on (a) the user not passing --no-chronos
+    AND (b) `chronos-forecasting` being importable. When the library is
+    missing we skip silently with a one-line note instead of a stack trace.
     """
-    sys.stdout.write("\n📦 Auto-report: building accounting + options overlay + HTML…\n")
+    sys.stdout.write("\n📦 Auto-report: building accounting + options overlay + Chronos + HTML…\n")
     matrix_rel = matrix_dir.relative_to(REPO_ROOT) if matrix_dir.is_absolute() else matrix_dir
     py = sys.executable
 
@@ -620,8 +653,8 @@ def _run_auto_report(matrix_dir: Path, long_call_delta: float) -> None:
     else:
         sys.stdout.write("    (no screener_run recorded in manifest — accounting will run without lineage)\n")
 
-    steps = [
-        ("accounting", accounting_cmd),
+    steps: list[tuple[str, list[str] | None, str | None]] = [
+        ("accounting", accounting_cmd, None),
         (
             "options-overlay (long-call)",
             [
@@ -630,13 +663,39 @@ def _run_auto_report(matrix_dir: Path, long_call_delta: float) -> None:
                 "--strategy-mode", "long-call",
                 "--long-call-delta", str(long_call_delta),
             ],
-        ),
-        (
-            "index-runs",
-            [py, "scripts/index_runs.py"],
+            None,
         ),
     ]
-    for label, cmd in steps:
+
+    # Chronos overlay — gated on availability. Add BEFORE index-runs so the
+    # indexer picks up the new chronos_overlay.json in the same auto-report.
+    # When skipped (flag or missing dep), append a no-op step that just prints
+    # a one-liner so the skip notice appears in the right place in the log.
+    if skip_chronos:
+        steps.append(("chronos-overlay", None, "(skipped: --no-chronos)"))
+    elif not _chronos_available():
+        steps.append((
+            "chronos-overlay", None,
+            "(skipped: chronos-forecasting not installed; "
+            "`pip install chronos-forecasting` to enable)",
+        ))
+    else:
+        steps.append((
+            "chronos-overlay",
+            [
+                py, "scripts/build_chronos_overlay.py",
+                "--matrix-run", str(matrix_rel),
+                "--prediction-length", str(chronos_prediction_length),
+            ],
+            None,
+        ))
+
+    steps.append(("index-runs", [py, "scripts/index_runs.py"], None))
+
+    for label, cmd, skip_note in steps:
+        if cmd is None:
+            sys.stdout.write(f"  → {label} … {skip_note or '(skipped)'}\n")
+            continue
         sys.stdout.write(f"  → {label}…\n")
         rc = subprocess.run(
             cmd, cwd=str(REPO_ROOT), stdin=subprocess.DEVNULL
@@ -842,7 +901,12 @@ def main() -> int:
 
     if not args.no_auto_report:
         try:
-            _run_auto_report(matrix_dir, args.long_call_delta)
+            _run_auto_report(
+                matrix_dir,
+                args.long_call_delta,
+                skip_chronos=args.no_chronos,
+                chronos_prediction_length=args.chronos_prediction_length,
+            )
         except Exception as exc:  # pragma: no cover — best-effort post-step
             sys.stderr.write(f"⚠ auto-report raised: {exc}\n")
     return 0

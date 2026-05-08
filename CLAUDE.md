@@ -94,6 +94,9 @@ scripts/build_run_accounting.py  →  same dir, adds:
 scripts/build_options_overlay.py  →  same dir, adds:
                             └ options_overlay.{md,json}     ← Polygon-pulled options structures
 
+scripts/build_chronos_overlay.py  →  same dir, adds:
+                            └ chronos_overlay.{md,json}     ← Amazon Chronos forecast vs persona PT
+
 scripts/build_html_report.py  →  runs/cross_run_<DATE>/report.html  (cross-run dashboard)
 
 scripts/index_runs.py  →  runs/index.db                     ← SQLite catalog (DERIVED, regenerable)
@@ -157,11 +160,14 @@ def _tier(row):
     return 'B'       # cons engaged but skeptical
 ```
 
-Implementations that must stay in sync:
-- `scripts/build_options_overlay.py::_tier()` (lines 65–73)
-- `scripts/index_runs.py::_classification_to_tier()` (lines 145–161)
+Implementations that must stay in sync (all four use the same `< 5.0`
+compression threshold and the same `conservative_pt is None → C` rule):
+- `scripts/build_options_overlay.py::_tier()`
+- `scripts/build_chronos_overlay.py::_tier()`
+- `scripts/build_html_report.py::_tier()`
+- `scripts/index_runs.py::_classification_to_tier()`
 
-If the 5.0 threshold ever changes, both files must change together.
+If the 5.0 threshold ever changes, all four files must change together.
 
 **Empirical context** (cross-run, indexed in `runs/index.db`):
 
@@ -353,6 +359,12 @@ sqlite3 runs/index.db "SELECT ticker, COUNT(*) AS n FROM ticker_history GROUP BY
 `scripts/build_options_overlay.py`: `--matrix-run`, `--strategy-mode {tier-driven,long-call}`,
 `--long-call-delta` (default 0.55), `--min-oi`, `--risk-free`,
 `--ticker-limit`, `--snapshot-date`, `--verbose`.
+
+`scripts/build_chronos_overlay.py`: `--matrix-run`, `--model` (default
+`amazon/chronos-bolt-base` ~200 MB), `--prediction-length` (default 90 trading
+days), `--context-length` (default 504 ≈ 2y), `--quantiles` (default
+`0.1,0.5,0.9`), `--device {auto,mps,cuda,cpu}`, `--include-vetoed`,
+`--snapshot-date`, `--polygon-pace-seconds`. Requires `pip install chronos-forecasting`.
 
 `scripts/build_run_accounting.py`: `--matrix-run`, `--snapshot-date`.
 

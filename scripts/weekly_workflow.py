@@ -549,11 +549,16 @@ def phase_report(screener_run: Path, args: argparse.Namespace, diff: dict) -> No
 
     print("\n  📈 OPTIONS REFRESH (same-day before entry, on whichever matrix run):")
     print("     Note: run_copilot_matrix.py now auto-builds accounting + long-call")
-    print("           options overlay + HTML report after every matrix run.")
-    print("           Use these only to refresh on an existing run intraday:")
+    print("           options overlay + Chronos forecast overlay + HTML report")
+    print("           after every matrix run. Use these only to refresh on an")
+    print("           existing run intraday:")
     print(
         "     .venv/bin/python scripts/build_options_overlay.py \\\n"
         "         --matrix-run runs/<matrix_id> --strategy-mode long-call"
+    )
+    print(
+        "     .venv/bin/python scripts/build_chronos_overlay.py \\\n"
+        "         --matrix-run runs/<matrix_id>"
     )
 
     print("\n  📊 RE-INDEX after any new matrix or options overlay (auto-run by matrix):")
