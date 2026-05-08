@@ -81,6 +81,15 @@ RE_SCREENER_STAGE = re.compile(r"\[(universe|scoring)\]\s+(\d+)\s+tickers")
 RE_SCREENER_PROGRESS = re.compile(r"\s*(universe|scoring)\s+(\d+)/(\d+)\s+\((\d+)%\)\s+—\s+last:\s+(\S+)")
 RE_SCREENER_DONE = re.compile(r"\[screener\]\s+done in ([\d.]+)m\s+—\s+top\s+(\d+)")
 RE_INDEX_DONE = re.compile(r"Indexed:.*\b(\d+)\s+screener\b")
+# Per-tier completion footer printed by weekly_workflow.py:
+#   "  Done in 27s."
+# Carries the authoritative elapsed time for the tier; we trust it over
+# (ended_at - started_at) which can be 0s in catch-up replay.
+RE_TIER_DONE = re.compile(r"^\s*Done in (\d+)s\.\s*$")
+# All-tiers footer printed by run_weekly_all_tiers.py:
+#   "│ All tiers complete                                       │"
+# Anywhere in the line — independent of the recent_lines window.
+RE_ALL_TIERS_DONE = re.compile(r"All tiers complete")
 RE_DROP = re.compile(r"(?:dropped|drop)", re.IGNORECASE)
 RE_RATE_LIMIT = re.compile(r"rate.?limit|429", re.IGNORECASE)
 RE_ERROR = re.compile(r"\b(?:error|❌|failed|exception)\b", re.IGNORECASE)
@@ -111,6 +120,11 @@ class TierState:
     screener_rate_per_s: float | None = None
     last_progress_at: datetime | None = None
     last_progress_count: int = 0
+    # Authoritative elapsed in seconds, parsed from weekly_workflow.py's
+    # "  Done in Xs." emission. Preferred over (ended_at - started_at) which
+    # is unreliable in catch-up replay where many lines are processed within
+    # the same TUI tick.
+    elapsed_override_s: float | None = None
 
 
 @dataclass
@@ -199,6 +213,15 @@ def process_line(line: str, state: WatchState) -> None:
         t = state.tier(tier_name)
         t.status = "running"
         t.started_at = now
+        # Reset per-tier scratch state — otherwise mega inherits large's
+        # stale "Phase 5 · Next Steps" from the previous tier's footer.
+        t.current_phase = ""
+        t.screener_stage = ""
+        t.screener_done = 0
+        t.screener_total = 0
+        t.screener_last_ticker = ""
+        t.last_progress_at = None
+        t.last_progress_count = 0
         return
 
     # Fallback when Phase/Tier banners get stuck in the inner subprocess's
@@ -267,6 +290,31 @@ def process_line(line: str, state: WatchState) -> None:
     if RE_SCREENER_DONE.search(line):
         if state.current_tier:
             state.tier(state.current_tier).screener_stage = "done"
+        return
+
+    # Per-tier "Done in Xs." — sets authoritative elapsed and marks the
+    # tier complete. The tier may continue printing a Phase 5 next-steps
+    # footer after this line; we ignore the follow-up since the tier is
+    # already done.
+    if m := RE_TIER_DONE.search(line):
+        if state.current_tier:
+            t = state.tier(state.current_tier)
+            t.elapsed_override_s = float(m.group(1))
+            if t.status == "running":
+                t.status = "done"
+                t.ended_at = now
+        return
+
+    # "All tiers complete" — independent of the recent_lines window so it
+    # fires even if the next-steps helper text scrolls past 5 lines.
+    if RE_ALL_TIERS_DONE.search(line):
+        if not state.completed_at:
+            state.completed_at = now
+        for t in state.tiers.values():
+            if t.status == "running":
+                t.status = "done"
+                t.ended_at = now
+        state.current_tier = None
         return
 
     # Matrix runs: stage banner
@@ -410,7 +458,9 @@ def render_tiers(state: WatchState) -> Panel:
             status = Text("✅ done", style="green")
         else:
             status = Text(f"❌ {t.status}", style="red")
-        if t.started_at:
+        if t.elapsed_override_s is not None:
+            elapsed = fmt_dur(timedelta(seconds=t.elapsed_override_s))
+        elif t.started_at:
             end = t.ended_at or datetime.now()
             elapsed = fmt_dur(end - t.started_at)
         else:
