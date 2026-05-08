@@ -1,26 +1,46 @@
 #!/usr/bin/env python3
-"""Live TUI for the weekly pipeline.
+"""Live TUI for the weekly pipeline (and matrix runs).
 
-Watches a log file (kickoff wrapper or pipeline) and renders a real-time
-dashboard showing:
+Watches a log file produced by any of:
+
+  • scripts/_kickoff_at_1700.sh   → runs/weekly_kickoff_*.log
+  • scripts/run_weekly_all_tiers.py | tee runs/weekly_workflow_*.log
+  • scripts/weekly_workflow.py       | tee runs/weekly_workflow_*.log
+  • launchd job (com.tradingagents.weekly.plist) → runs/weekly_workflow.log
+  • run_copilot_matrix.py | tee runs/matrix_<id>_*.log
+
+…and renders a real-time dashboard showing:
 
   • Pre-launch countdown (if the kickoff wrapper is still waiting)
   • Tier progress (mid → large → mega) for run_weekly_all_tiers.py
   • Phase progress within each tier (Phase 1-5 of weekly_workflow.py)
   • Screener stage progress bar (universe / scoring) with throughput + ETA
+  • Matrix progress (Stage A → Stage B → auto-report cascade)
   • Tail of the most recent log lines
   • Error / drop / rate-limit counters
 
 Usage:
-  .venv/bin/python scripts/watch_pipeline.py runs/weekly_kickoff_*.log
-  .venv/bin/python scripts/watch_pipeline.py --auto      # newest kickoff/weekly log
+  # Watch newest log (default):
+  .venv/bin/python scripts/watch_pipeline.py
 
-Press Ctrl+C to exit (the pipeline keeps running in the background).
+  # Watch a specific log:
+  .venv/bin/python scripts/watch_pipeline.py runs/weekly_kickoff_*.log
+
+  # Launch a run AND watch it (one command, fresh log):
+  .venv/bin/python scripts/watch_pipeline.py --run weekly
+  .venv/bin/python scripts/watch_pipeline.py --run kickoff
+  .venv/bin/python scripts/watch_pipeline.py --run matrix --tickers VIRT,DAR
+
+Press Ctrl+C to exit. The pipeline / matrix run keeps running in the
+background regardless of whether the TUI is attached.
 """
 from __future__ import annotations
 
 import argparse
+import os
 import re
+import shlex
+import subprocess
 import sys
 import time
 from collections import deque
@@ -58,6 +78,16 @@ RE_DROP = re.compile(r"(?:dropped|drop)", re.IGNORECASE)
 RE_RATE_LIMIT = re.compile(r"rate.?limit|429", re.IGNORECASE)
 RE_ERROR = re.compile(r"\b(?:error|❌|failed|exception)\b", re.IGNORECASE)
 
+# Matrix-run patterns (run_copilot_matrix.py)
+RE_MATRIX_STAGE = re.compile(
+    r"┌─\s+Stage\s+(\w+)\s+·\s+profile=(\w+)\s+·\s+(\d+)\s+tickers\s+·\s+parallel=(\d+)"
+)
+RE_MATRIX_CELL = re.compile(
+    r"^\│\s+([🟢🔴·])\s+(\S+)\s+(\w+)\s+→\s+([\w/]+)\s+\(([0-9.]+)s(?:\s+PT=([\d.]+))?\)"
+)
+RE_MATRIX_AUTOREPORT_STEP = re.compile(r"^\s+→\s+([\w\-\(\) ]+?)(?=…|\s+→|$)")
+RE_MATRIX_STOP = re.compile(r"stop-on-overweight=(\d+)\s+reached")
+
 
 @dataclass
 class TierState:
@@ -77,6 +107,24 @@ class TierState:
 
 
 @dataclass
+class MatrixState:
+    active: bool = False
+    stage: str = ""           # "A" or "B"
+    profile: str = ""
+    total: int = 0
+    done: int = 0
+    parallel: int = 0
+    last_ticker: str = ""
+    last_rating: str = ""
+    last_marker: str = ""
+    promoted: int = 0          # 🟢 count
+    vetoed: int = 0            # 🔴 count
+    started_at: datetime | None = None
+    autoreport_step: str = ""  # current cascade step (accounting / options / chronos / index)
+    autoreport_history: list[str] = field(default_factory=list)
+
+
+@dataclass
 class WatchState:
     log_path: Path
     started_at: datetime = field(default_factory=datetime.now)
@@ -89,6 +137,7 @@ class WatchState:
     errors: int = 0
     recent_lines: deque[str] = field(default_factory=lambda: deque(maxlen=10))
     completed_at: datetime | None = None
+    matrix: MatrixState = field(default_factory=MatrixState)
 
     def tier(self, name: str) -> TierState:
         n = name.lower()
@@ -177,6 +226,48 @@ def process_line(line: str, state: WatchState) -> None:
             state.tier(state.current_tier).screener_stage = "done"
         return
 
+    # Matrix runs: stage banner
+    if m := RE_MATRIX_STAGE.search(line):
+        state.matrix.active = True
+        state.matrix.stage = m.group(1)
+        state.matrix.profile = m.group(2)
+        state.matrix.total = int(m.group(3))
+        state.matrix.parallel = int(m.group(4))
+        state.matrix.done = 0
+        state.matrix.last_ticker = ""
+        state.matrix.last_rating = ""
+        state.matrix.last_marker = ""
+        state.matrix.autoreport_step = ""
+        if state.matrix.started_at is None:
+            state.matrix.started_at = now
+            state.pipeline_started_at = state.pipeline_started_at or now
+        return
+
+    # Matrix runs: per-cell completion
+    if state.matrix.active and (m := RE_MATRIX_CELL.search(line)):
+        state.matrix.done += 1
+        state.matrix.last_marker = m.group(1)
+        state.matrix.last_ticker = m.group(2)
+        state.matrix.last_rating = m.group(4)
+        if m.group(1) == "🟢":
+            state.matrix.promoted += 1
+        elif m.group(1) == "🔴":
+            state.matrix.vetoed += 1
+        return
+
+    # Matrix runs: auto-report cascade step (accounting / options-overlay / chronos / index-runs)
+    if state.matrix.active and (m := RE_MATRIX_AUTOREPORT_STEP.search(line)):
+        step = m.group(1).strip().rstrip("…").strip()
+        # Mark previous step done
+        if state.matrix.autoreport_step and state.matrix.autoreport_step not in state.matrix.autoreport_history:
+            state.matrix.autoreport_history.append(state.matrix.autoreport_step)
+        state.matrix.autoreport_step = step
+        return
+
+    if RE_MATRIX_STOP.search(line):
+        # stop-on-overweight short-circuit; treat remaining cells as cancelled
+        return
+
     # Counters
     if RE_RATE_LIMIT.search(line):
         state.rate_limit_hits += 1
@@ -225,8 +316,21 @@ def render_header(state: WatchState) -> Panel:
         )
     elif state.completed_at:
         elapsed = state.completed_at - (state.pipeline_started_at or state.started_at)
-        title = "[bold green]✅ Pipeline complete[/]"
+        title = "[bold green]✅ Run complete[/]"
         body = Text(f"Total runtime: {fmt_dur(elapsed)}", style="green")
+    elif state.matrix.active:
+        elapsed = now - (state.matrix.started_at or state.pipeline_started_at or state.started_at)
+        title = "[bold magenta]🔬 Matrix run · live[/]"
+        body = Text.assemble(
+            ("Stage: ", "dim"),
+            (f"{state.matrix.stage} · {state.matrix.profile}", "bold magenta"),
+            ("   |   ", "dim"),
+            ("Elapsed: ", "dim"),
+            (fmt_dur(elapsed), "bold cyan"),
+            ("   |   ", "dim"),
+            ("Log: ", "dim"),
+            (str(state.log_path.name), "blue"),
+        )
     elif state.pipeline_started_at:
         elapsed = now - state.pipeline_started_at
         title = "[bold green]🚀 Pipeline running[/]"
@@ -241,7 +345,7 @@ def render_header(state: WatchState) -> Panel:
             (str(state.log_path.relative_to(REPO_ROOT) if state.log_path.is_absolute() else state.log_path), "blue"),
         )
     else:
-        title = "[bold]TradingAgents Weekly Pipeline · Live[/]"
+        title = "[bold]TradingAgents · Live[/]"
         body = Text("waiting for first log line…", style="dim")
     return Panel(body, title=title, border_style="cyan")
 
@@ -318,6 +422,62 @@ def render_screener(state: WatchState) -> Panel:
     )
 
 
+def render_matrix(state: WatchState) -> Panel:
+    m = state.matrix
+    if not m.active:
+        body = Text("No matrix run active", style="dim")
+        return Panel(body, title="[bold]Matrix Run[/]", border_style="dim")
+
+    pct = (m.done / m.total * 100) if m.total else 0
+    bar_width = 40
+    filled = int(bar_width * pct / 100)
+    bar = "█" * filled + "░" * (bar_width - filled)
+
+    header = Text.assemble(
+        ("Stage ", "dim"),
+        (m.stage, "bold magenta"),
+        ("   |   ", "dim"),
+        ("profile=", "dim"),
+        (m.profile, "bold cyan"),
+        ("   |   ", "dim"),
+        ("parallel=", "dim"),
+        (str(m.parallel), "white"),
+    )
+    progress = Text.assemble(
+        (bar, "magenta"),
+        ("  ", ""),
+        (f"{m.done}/{m.total}", "white"),
+        (f" ({pct:.0f}%)", "dim"),
+    )
+    last = Text.assemble(
+        ("Last: ", "dim"),
+        (f"{m.last_marker} " if m.last_marker else "", ""),
+        (m.last_ticker or "—", "yellow"),
+        (f" → {m.last_rating}" if m.last_rating else "", "white"),
+    )
+    counts = Text.assemble(
+        ("🟢 promoted: ", "dim"),
+        (str(m.promoted), "bold green"),
+        ("   |   ", "dim"),
+        ("🔴 vetoed: ", "dim"),
+        (str(m.vetoed), "bold red"),
+    )
+    cascade_lines = []
+    if m.autoreport_step or m.autoreport_history:
+        cascade_lines.append(Text(""))
+        cascade_lines.append(Text("Auto-report cascade:", style="dim"))
+        for step in m.autoreport_history:
+            cascade_lines.append(Text(f"  ✓ {step}", style="green"))
+        if m.autoreport_step and m.autoreport_step not in m.autoreport_history:
+            cascade_lines.append(Text(f"  ⏳ {m.autoreport_step}…", style="bold yellow"))
+
+    return Panel(
+        Group(header, Text(""), progress, Text(""), last, counts, *cascade_lines),
+        title="[bold]Matrix Run[/]",
+        border_style="magenta",
+    )
+
+
 def render_log(state: WatchState) -> Panel:
     if not state.recent_lines:
         body: Text | Group = Text("waiting for log output…", style="dim")
@@ -356,16 +516,27 @@ def render_stats(state: WatchState) -> Panel:
 
 def build_layout(state: WatchState) -> Layout:
     layout = Layout()
-    layout.split_column(
-        Layout(render_header(state), name="header", size=3),
-        Layout(name="middle", size=9),
-        Layout(render_screener(state), name="screener", size=8),
-        Layout(name="bottom"),
-    )
-    layout["middle"].split_row(
-        Layout(render_tiers(state), name="tiers", ratio=2),
-        Layout(render_stats(state), name="stats", ratio=1),
-    )
+    if state.matrix.active:
+        layout.split_column(
+            Layout(render_header(state), name="header", size=3),
+            Layout(name="middle", size=14),
+            Layout(name="bottom"),
+        )
+        layout["middle"].split_row(
+            Layout(render_matrix(state), name="matrix", ratio=2),
+            Layout(render_stats(state), name="stats", ratio=1),
+        )
+    else:
+        layout.split_column(
+            Layout(render_header(state), name="header", size=3),
+            Layout(name="middle", size=9),
+            Layout(render_screener(state), name="screener", size=8),
+            Layout(name="bottom"),
+        )
+        layout["middle"].split_row(
+            Layout(render_tiers(state), name="tiers", ratio=2),
+            Layout(render_stats(state), name="stats", ratio=1),
+        )
     layout["bottom"].update(render_log(state))
     return layout
 
@@ -395,13 +566,21 @@ def tail_log(path: Path, state: WatchState, console: Console) -> None:
                 # Detect pipeline completion (stdout includes the next-step block)
                 if state.pipeline_started_at and state.recent_lines:
                     last5 = "\n".join(list(state.recent_lines)[-5:])
-                    if "Total elapsed" in last5 or "Next steps" in last5:
+                    if (
+                        "Total elapsed" in last5
+                        or "Next steps" in last5
+                        or ("✅ HTML:" in last5 and state.matrix.active)
+                    ):
                         if not state.completed_at:
                             state.completed_at = datetime.now()
                             for t in state.tiers.values():
                                 if t.status == "running":
                                     t.status = "done"
                                     t.ended_at = state.completed_at
+                            if state.matrix.active and state.matrix.autoreport_step:
+                                if state.matrix.autoreport_step not in state.matrix.autoreport_history:
+                                    state.matrix.autoreport_history.append(state.matrix.autoreport_step)
+                                state.matrix.autoreport_step = ""
 
                 live.update(build_layout(state))
                 time.sleep(1.0 / refresh_hz)
@@ -419,40 +598,140 @@ def find_latest_log() -> Path | None:
     candidates = sorted(RUNS_DIR.glob("weekly_workflow*.log"), reverse=True)
     if candidates:
         return candidates[0]
+    candidates = sorted(RUNS_DIR.glob("matrix_*.log"), reverse=True)
+    if candidates:
+        return candidates[0]
     return None
 
 
+# ---------------------------------------------------------------------------
+# Run launcher (--run): spawn pipeline/matrix as a detached subprocess and
+# tee its output to a fresh log file, then watch that log.
+# ---------------------------------------------------------------------------
+RUN_PRESETS = {
+    # name: (cmd, log_basename_template)
+    "weekly":  (["{py}", "scripts/run_weekly_all_tiers.py", "--top", "25"],
+                "weekly_workflow_{ts}.log"),
+    "screen":  (["{py}", "scripts/weekly_workflow.py", "--top", "25"],
+                "weekly_workflow_{ts}.log"),
+    "kickoff": (["bash", "scripts/_kickoff_at_1700.sh"],
+                "weekly_kickoff_{ts}.log"),
+}
+
+
+def launch_run(preset: str, tickers: list[str] | None = None) -> Path:
+    """Spawn a pipeline/matrix command in a new session, redirect both
+    stdout and stderr to a fresh log file under runs/, and return the
+    path. The child survives if this TUI exits.
+    """
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    py = sys.executable
+
+    if preset == "matrix":
+        if not tickers:
+            raise SystemExit("--run matrix requires --tickers TICKER[,TICKER...]")
+        joined = ",".join(t.strip().upper() for t in tickers if t.strip())
+        cmd_tmpl: list[str] = [
+            py, "run_copilot_matrix.py", "--tickers", *joined.split(","),
+            "--max-parallel", "2", "--stop-on-overweight", "0",
+        ]
+        log_name = f"matrix_{joined.replace(',', '_').lower()}_{ts}.log"
+        cmd = cmd_tmpl
+    elif preset in RUN_PRESETS:
+        raw_cmd, log_template = RUN_PRESETS[preset]
+        cmd = [seg.format(py=py) for seg in raw_cmd]
+        log_name = log_template.format(ts=ts)
+    else:
+        raise SystemExit(f"unknown --run preset: {preset!r} (try: weekly, screen, kickoff, matrix)")
+
+    log_path = RUNS_DIR / log_name
+    RUNS_DIR.mkdir(exist_ok=True)
+    log_fh = open(log_path, "w", buffering=1)  # line-buffered
+
+    subprocess.Popen(  # noqa: S603 - cmd is constructed from presets
+        cmd,
+        cwd=str(REPO_ROOT),
+        stdin=subprocess.DEVNULL,
+        stdout=log_fh,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        env={**os.environ},
+    )
+    log_fh.close()  # the child keeps its own fd; we hold a path
+    return log_path
+
+
 def main() -> int:
-    p = argparse.ArgumentParser(description="Live TUI for the weekly pipeline.")
-    p.add_argument("log", nargs="?", help="Path to a kickoff or pipeline log file")
+    p = argparse.ArgumentParser(
+        description="Live TUI for the weekly pipeline and matrix runs.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  watch_pipeline.py                              # auto-watch newest log\n"
+            "  watch_pipeline.py runs/weekly_workflow.log     # explicit log\n"
+            "  watch_pipeline.py --run weekly                 # launch + watch\n"
+            "  watch_pipeline.py --run kickoff                # sleep til 17:00, then run\n"
+            "  watch_pipeline.py --run matrix --tickers VIRT  # single-ticker matrix\n"
+        ),
+    )
+    p.add_argument("log", nargs="?", help="Path to a kickoff/pipeline/matrix log file")
+    p.add_argument(
+        "--run",
+        choices=["weekly", "screen", "kickoff", "matrix"],
+        help=(
+            "Launch a fresh run and watch its log. 'weekly' = run_weekly_all_tiers.py, "
+            "'screen' = weekly_workflow.py, 'kickoff' = _kickoff_at_1700.sh, "
+            "'matrix' = run_copilot_matrix.py (requires --tickers)."
+        ),
+    )
+    p.add_argument(
+        "--tickers",
+        help="Comma-separated tickers for --run matrix (e.g. VIRT,DAR).",
+    )
     p.add_argument("--auto", action="store_true",
-                   help="Automatically pick the most recent kickoff/weekly log")
+                   help="(default) Pick the newest kickoff/weekly/matrix log under runs/.")
     args = p.parse_args()
 
-    if args.log:
+    if args.run:
+        tickers = args.tickers.split(",") if args.tickers else None
+        log_path = launch_run(args.run, tickers)
+        print(f"[launched] {args.run} → log: {log_path}", file=sys.stderr)
+        # Brief settle time so the child writes its first line(s)
+        time.sleep(1.0)
+    elif args.log:
         log_path = Path(args.log).resolve()
-    elif args.auto or True:  # default to auto if no positional given
+    else:
         latest = find_latest_log()
         if latest is None:
-            print("No kickoff/weekly logs found in runs/. Pass a path explicitly.", file=sys.stderr)
+            print(
+                "No kickoff/weekly/matrix logs found in runs/. "
+                "Pass a path or use --run weekly|kickoff|matrix.",
+                file=sys.stderr,
+            )
             return 1
         log_path = latest
-    else:
-        print("usage: watch_pipeline.py [LOG] [--auto]", file=sys.stderr)
-        return 1
 
     if not log_path.exists():
-        print(f"Log file not found: {log_path}", file=sys.stderr)
-        return 1
+        # If we just launched, the child may not have created the file yet;
+        # spin briefly waiting for it.
+        for _ in range(50):
+            if log_path.exists():
+                break
+            time.sleep(0.1)
+        if not log_path.exists():
+            print(f"Log file not found: {log_path}", file=sys.stderr)
+            return 1
 
     console = Console()
     state = WatchState(log_path=log_path)
-    console.print(f"[dim]Watching {log_path}[/] [dim](Ctrl+C to exit; pipeline keeps running)[/]")
+    console.print(
+        f"[dim]Watching {log_path}[/] [dim](Ctrl+C to detach; the run keeps going)[/]"
+    )
     time.sleep(0.6)
     try:
         tail_log(log_path, state, console)
     except KeyboardInterrupt:
-        console.print("\n[dim]Detached. Pipeline still running in the background.[/]")
+        console.print("\n[dim]Detached. Run still going in the background.[/]")
     return 0
 
 
