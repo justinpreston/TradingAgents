@@ -614,7 +614,7 @@ RUN_PRESETS = {
                 "weekly_workflow_{ts}.log"),
     "screen":  (["{py}", "scripts/weekly_workflow.py", "--top", "25"],
                 "weekly_workflow_{ts}.log"),
-    "kickoff": (["bash", "scripts/_kickoff_at_1700.sh"],
+    "kickoff": (["bash", "scripts/_kickoff_at.sh"],
                 "weekly_kickoff_{ts}.log"),
 }
 
