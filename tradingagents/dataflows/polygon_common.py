@@ -101,6 +101,51 @@ _PACER_ADAPT_FACTOR: float = 1.5
 _PACER_ADAPT_FLOOR_S: float = 0.05
 
 
+# Recommended min-request-interval defaults per Polygon plan tier.
+#
+# Free tier hard-caps at 5 req/min → starting at 2.0s gives the adaptive
+# pacer no headroom to back off further; we start at 12.0s (= 5/min ceiling)
+# and let adaptive bring it down on success. In practice 0.25s + adaptive
+# ramp-on-429 has been the working compromise for free tier — it bursts
+# fast at first, then settles into the 1.5–2.0s zone after a few 429s.
+#
+# Paid tiers ("Stocks Starter" $29/mo and up) are effectively unlimited at
+# screener volumes (1500-2000 tickers × few calls each per run). 0.05s
+# (= 1200 req/min) gives plenty of headroom against any per-second cap and
+# avoids pathological burst behavior.
+_TIER_INTERVALS: dict[str, float] = {
+    "free":      0.25,   # adaptive ramp will lift this on 429s
+    "basic":     0.05,   # Stocks Starter — unlimited
+    "starter":   0.05,   # alias
+    "developer": 0.05,   # also unlimited
+    "advanced":  0.05,
+}
+
+
+def recommended_min_interval_for_tier(tier: str | None = None) -> float:
+    """Return the recommended min-interval (seconds) for a Polygon plan tier.
+
+    If ``tier`` is None, reads ``POLYGON_TIER`` env var. Defaults to the
+    free-tier interval if the env var is unset or unrecognized — the safe
+    choice for users who haven't explicitly upgraded.
+
+    The returned value is the *initial* interval. With ``adaptive=True``
+    in :func:`set_min_request_interval`, the pacer will ratchet up on
+    429s — so even an aggressive initial value self-corrects in a single
+    run. Set ``POLYGON_MIN_REQUEST_INTERVAL_S`` to override entirely.
+    """
+    explicit = os.getenv("POLYGON_MIN_REQUEST_INTERVAL_S")
+    if explicit:
+        try:
+            return max(0.0, float(explicit))
+        except ValueError:
+            pass
+
+    name = (tier or os.getenv("POLYGON_TIER") or "free").strip().lower()
+    return _TIER_INTERVALS.get(name, _TIER_INTERVALS["free"])
+
+
+
 def set_min_request_interval(seconds: float, *, adaptive: bool = False) -> None:
     """Set the global minimum interval (seconds) between Polygon REST calls.
 

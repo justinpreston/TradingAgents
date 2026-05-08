@@ -54,7 +54,9 @@ from tradingagents.screener.universe import (
 log = logging.getLogger(__name__)
 
 
-DEFAULT_MIN_REQUEST_INTERVAL_S = 0.25
+from tradingagents.dataflows.polygon_common import recommended_min_interval_for_tier as _recommended_min_interval_for_tier
+
+DEFAULT_MIN_REQUEST_INTERVAL_S = _recommended_min_interval_for_tier()
 
 
 @dataclass

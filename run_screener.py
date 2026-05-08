@@ -35,6 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parent
 load_dotenv(REPO_ROOT / ".env")
 sys.path.insert(0, str(REPO_ROOT))
 
+from tradingagents.dataflows.polygon_common import recommended_min_interval_for_tier  # noqa: E402
 from tradingagents.screener.orchestrator import run_screener  # noqa: E402
 from tradingagents.screener.output import (  # noqa: E402
     write_json,
@@ -58,10 +59,11 @@ def _parse_args() -> argparse.Namespace:
                    help="Cap stage-2 enrichment for testing (default: no cap)")
     p.add_argument("--ticker-limit", type=int, default=None,
                    help="Cap technical+fundamental scans for testing (default: no cap)")
-    p.add_argument("--min-request-interval", type=float, default=0.25,
-                   help="Min seconds between Polygon REST calls (default 0.25 ≈ 4 req/s, "
-                        "with adaptive throttle that ratchets up on 429). "
-                        "Raise if hitting rate limits; set 0 to disable pacing.")
+    p.add_argument("--min-request-interval", type=float, default=recommended_min_interval_for_tier(),
+                   help="Min seconds between Polygon REST calls. Defaults to the value "
+                        "recommended for $POLYGON_TIER (free→0.25s, basic/starter→0.05s); "
+                        "$POLYGON_MIN_REQUEST_INTERVAL_S overrides. Adaptive throttle "
+                        "ratchets up on 429. Raise if hitting rate limits; set 0 to disable.")
     p.add_argument("--top", type=int, default=25, help="Number of top names to keep")
     p.add_argument("--technical-weight", type=float, default=0.55)
     p.add_argument("--fundamental-weight", type=float, default=0.45)
