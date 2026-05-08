@@ -156,10 +156,22 @@ def process_line(line: str, state: WatchState) -> None:
     state.recent_lines.append(line)
     now = datetime.now()
 
-    # Pre-launch countdown
+    # Pre-launch countdown — compute target time from the LINE's HH:MM:SS,
+    # not from the current wall clock. Otherwise an old waiting line in a
+    # stale log produces a phantom future target when the TUI replays it.
     if m := RE_WAIT.search(line):
+        line_hhmmss = m.group(1)
         seconds_left = int(m.group(2))
-        state.countdown_until = now + timedelta(seconds=seconds_left)
+        try:
+            h, m_, s = (int(x) for x in line_hhmmss.split(":"))
+            line_dt = now.replace(hour=h, minute=m_, second=s, microsecond=0)
+            target_dt = line_dt + timedelta(seconds=seconds_left)
+            # If the parsed target is in the past, the log is stale — don't
+            # overwrite a fresher countdown_until with junk.
+            if target_dt > now:
+                state.countdown_until = target_dt
+        except ValueError:
+            pass
         return
 
     if RE_KICKOFF.search(line):
@@ -593,16 +605,20 @@ def tail_log(path: Path, state: WatchState, console: Console) -> None:
 # Main
 # ---------------------------------------------------------------------------
 def find_latest_log() -> Path | None:
-    candidates = sorted(RUNS_DIR.glob("weekly_kickoff_*.log"), reverse=True)
-    if candidates:
-        return candidates[0]
-    candidates = sorted(RUNS_DIR.glob("weekly_workflow*.log"), reverse=True)
-    if candidates:
-        return candidates[0]
-    candidates = sorted(RUNS_DIR.glob("matrix_*.log"), reverse=True)
-    if candidates:
-        return candidates[0]
-    return None
+    """Pick the most recently modified pipeline-related log under runs/.
+
+    Glob across all known patterns then sort by mtime (descending) — ensures
+    a fresh weekly_workflow log wins over a stale kickoff log even though
+    kickoff logs sort earlier alphabetically.
+    """
+    patterns = ("weekly_kickoff_*.log", "weekly_workflow*.log", "matrix_*.log")
+    candidates: list[Path] = []
+    for pat in patterns:
+        candidates.extend(RUNS_DIR.glob(pat))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return candidates[0]
 
 
 # ---------------------------------------------------------------------------
