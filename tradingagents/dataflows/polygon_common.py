@@ -125,14 +125,15 @@ _TIER_INTERVALS: dict[str, float] = {
 def recommended_min_interval_for_tier(tier: str | None = None) -> float:
     """Return the recommended min-interval (seconds) for a Polygon plan tier.
 
-    If ``tier`` is None, reads ``POLYGON_TIER`` env var. Defaults to the
-    free-tier interval if the env var is unset or unrecognized — the safe
-    choice for users who haven't explicitly upgraded.
+    If ``tier`` is None, reads ``POLYGON_TIER`` env var. An empty string is
+    treated as an explicit (unknown) tier and falls back to free-tier
+    interval — the safe choice. Set ``POLYGON_MIN_REQUEST_INTERVAL_S`` to
+    override entirely (always wins regardless of tier).
 
     The returned value is the *initial* interval. With ``adaptive=True``
     in :func:`set_min_request_interval`, the pacer will ratchet up on
     429s — so even an aggressive initial value self-corrects in a single
-    run. Set ``POLYGON_MIN_REQUEST_INTERVAL_S`` to override entirely.
+    run.
     """
     explicit = os.getenv("POLYGON_MIN_REQUEST_INTERVAL_S")
     if explicit:
@@ -141,7 +142,9 @@ def recommended_min_interval_for_tier(tier: str | None = None) -> float:
         except ValueError:
             pass
 
-    name = (tier or os.getenv("POLYGON_TIER") or "free").strip().lower()
+    if tier is None:
+        tier = os.getenv("POLYGON_TIER", "")
+    name = tier.strip().lower()
     return _TIER_INTERVALS.get(name, _TIER_INTERVALS["free"])
 
 
