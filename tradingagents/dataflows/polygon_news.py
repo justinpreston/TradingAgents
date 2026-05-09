@@ -120,13 +120,63 @@ def get_insider_transactions(
 ) -> str:
     """Insider Form-4 transactions from Polygon.
 
-    Polygon's Stocks Starter plan does not include the SEC insider
-    transactions endpoint; this raises :class:`PolygonError` so the vendor
-    router transparently falls through to alpha_vantage / yfinance instead
-    of returning an empty payload that downstream agents would have to
-    parse around.
+    Polygon does not currently expose an SEC insider-transactions endpoint
+    on the public REST surface — we have probed every documented spelling
+    (``/v3/reference/insider_transactions``,
+    ``/vX/reference/insiders/transactions``, the post-rebrand
+    ``api.massive.com/v3/...`` variants, etc.) and they all return ``404
+    page not found`` rather than the ``403 NOT_AUTHORIZED`` JSON Polygon
+    uses for paywalled-but-real URLs.
+
+    Rather than hard-coding that absence (which would silently keep
+    failing if Polygon ships the endpoint later, or if the user upgrades
+    to a plan/account that has it), we attempt the request and let
+    :class:`PolygonError` bubble up so the vendor router in
+    :mod:`tradingagents.dataflows.interface` falls through to
+    alpha_vantage / yfinance. ``404``, ``403``, ``401``, ``5xx``, and
+    network errors are all already mapped to ``PolygonError`` subclasses
+    by :func:`_make_request`, so the runtime semantics here are
+    "try, fall through on any failure". The cost of a failing probe is a
+    single HTTP round-trip — bounded and acceptable.
+
+    If/when Polygon adds the endpoint, update ``_INSIDER_TXN_ENDPOINTS``
+    to include the active path; the first 200 response wins.
     """
+    last_exc: PolygonError | None = None
+    for path in _INSIDER_TXN_ENDPOINTS:
+        try:
+            results = paginated_results(
+                path, {"ticker": ticker.upper(), "limit": 50}, max_pages=1
+            )
+        except PolygonError as exc:
+            last_exc = exc
+            continue
+        return _format_insider_transactions(ticker.upper(), results)
     raise PolygonError(
-        "Polygon insider transactions endpoint requires Insider Transactions "
-        "add-on — falling back to next vendor"
+        "Polygon insider transactions unavailable on every known endpoint "
+        f"spelling — last error: {last_exc}"
     )
+
+
+_INSIDER_TXN_ENDPOINTS: tuple[str, ...] = (
+    "/v3/reference/insider_transactions",
+    "/vX/reference/insider_transactions",
+)
+
+
+def _format_insider_transactions(ticker: str, results: list[dict[str, Any]]) -> str:
+    if not results:
+        return f"No insider transactions found for {ticker}."
+    lines = [f"Insider transactions for {ticker} ({len(results)} entries):", ""]
+    for r in results:
+        date = r.get("transaction_date") or r.get("filing_date") or "?"
+        name = r.get("executive") or r.get("filer_name") or "?"
+        title = r.get("executive_title") or r.get("filer_title") or ""
+        action = r.get("acquisition_or_disposal") or r.get("transaction_type") or "?"
+        shares = r.get("shares") or r.get("quantity") or "?"
+        price = r.get("price_per_share") or r.get("price") or "?"
+        title_blurb = f" ({title})" if title else ""
+        lines.append(
+            f"- {date} {name}{title_blurb}: {action} {shares} @ {price}"
+        )
+    return "\n".join(lines)

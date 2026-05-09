@@ -296,13 +296,80 @@ class TestPolygonNews:
             out = pn.get_news("NVDA", "2024-05-01", "2024-05-10")
         assert "No news found" in out
 
-    def test_get_insider_transactions_raises_to_trigger_fallback(self):
-        """Polygon Stocks Starter doesn't include insider transactions —
-        the function must raise PolygonError so route_to_vendor falls
-        through to the next configured vendor."""
+    def test_get_insider_transactions_falls_through_when_all_endpoints_404(self):
+        """Polygon does not currently expose an insider transactions
+        endpoint on the public REST surface — every documented spelling
+        returns 404. After probing all configured paths, the function
+        must raise :class:`PolygonError` so the vendor router transparently
+        falls through to alpha_vantage / yfinance.
+        """
         from tradingagents.dataflows import polygon_news as pn
-        with pytest.raises(PolygonError):
-            pn.get_insider_transactions("NVDA")
+
+        # All configured probes raise PolygonNotFoundError → final raise.
+        with patch.object(
+            pn,
+            "paginated_results",
+            side_effect=PolygonNotFoundError("404 page not found"),
+        ) as mock_paginate:
+            with pytest.raises(PolygonError):
+                pn.get_insider_transactions("NVDA")
+        # Should have probed every spelling, not just the first.
+        assert mock_paginate.call_count == len(pn._INSIDER_TXN_ENDPOINTS)
+        called_paths = [c.args[0] for c in mock_paginate.call_args_list]
+        assert called_paths == list(pn._INSIDER_TXN_ENDPOINTS)
+
+    def test_get_insider_transactions_returns_formatted_on_first_200(self):
+        """If any probe spelling returns 200 (e.g. Polygon ships the
+        endpoint, or a future plan upgrade entitles us), the formatter
+        must produce a usable digest and the remaining probes are
+        skipped — no wasted round-trips."""
+        from tradingagents.dataflows import polygon_news as pn
+
+        sample = [
+            {
+                "transaction_date": "2026-04-23",
+                "executive": "PAREKH, KEVAN",
+                "executive_title": "SVP, CFO",
+                "acquisition_or_disposal": "D",
+                "shares": 1234,
+                "price_per_share": 175.42,
+            }
+        ]
+        with patch.object(
+            pn, "paginated_results", return_value=sample
+        ) as mock_paginate:
+            out = pn.get_insider_transactions("AAPL")
+        assert mock_paginate.call_count == 1  # short-circuit on first 200
+        assert "Insider transactions for AAPL" in out
+        assert "PAREKH, KEVAN" in out
+        assert "SVP, CFO" in out
+
+    def test_get_insider_transactions_empty_results_returns_friendly_message(self):
+        from tradingagents.dataflows import polygon_news as pn
+        with patch.object(pn, "paginated_results", return_value=[]):
+            out = pn.get_insider_transactions("XYZ")
+        assert "No insider transactions found" in out
+
+    def test_get_insider_transactions_recovers_when_first_endpoint_404s(self):
+        """If the first probe 404s but a later one succeeds (defends
+        against URL drift across Polygon API versions), the function
+        must return the successful payload."""
+        from tradingagents.dataflows import polygon_news as pn
+
+        sample = [{"transaction_date": "2026-04-23", "executive": "DOE, JANE"}]
+        side_effects = [
+            PolygonNotFoundError("404"),  # first endpoint missing
+            sample,                       # second endpoint returns
+        ]
+        # Ensure the probe list has at least 2 entries so this test is
+        # meaningful — gate explicitly so future trims don't silently
+        # turn this into a no-op.
+        assert len(pn._INSIDER_TXN_ENDPOINTS) >= 2
+        with patch.object(
+            pn, "paginated_results", side_effect=side_effects
+        ):
+            out = pn.get_insider_transactions("XYZ")
+        assert "DOE, JANE" in out
 
 
 # ---------------------------------------------------------------------------
