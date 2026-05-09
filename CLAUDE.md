@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # Coding-agent runbook — TradingAgents
 
 > **Read this first.** This file is the canonical operational guide for Claude
@@ -420,6 +424,96 @@ stay local). `.env` is also gitignored.
 
 ---
 
+## Testing
+
+```bash
+# Full suite (baseline: 535 pass, 41 subtests, ~16s)
+.venv/bin/python -m pytest tests/ -x -q
+
+# Single test file
+.venv/bin/python -m pytest tests/test_news_enrichment.py -x -q
+
+# Single test function
+.venv/bin/python -m pytest tests/test_polygon_tier.py::test_tier_a_threshold -x -q
+
+# By marker (defined in pyproject.toml)
+.venv/bin/python -m pytest -m unit -x -q      # fast isolated tests
+.venv/bin/python -m pytest -m smoke -x -q      # quick sanity checks
+.venv/bin/python -m pytest -m integration -x -q # needs external services
+```
+
+Known flake: `tests/test_polygon_pacer.py::test_retry_after_seconds_is_honored`
+is timing-sensitive — deselect if a parallel run perturbs sleep budgets.
+
+---
+
+## Core package architecture (`tradingagents/`)
+
+The framework is a LangGraph state machine. `TradingAgentsGraph.propagate(ticker, date)`
+is the entry point — it builds the graph, creates initial `AgentState`, and
+runs it to a terminal node that returns a portfolio decision.
+
+```
+tradingagents/
+├── graph/                        ← LangGraph wiring
+│   ├── trading_graph.py          ← TradingAgentsGraph (main class, builds the graph)
+│   ├── setup.py                  ← GraphSetup: node/edge registration
+│   ├── propagation.py            ← Propagator: initial state + graph invoke
+│   ├── conditional_logic.py      ← Edge predicates (debate rounds, risk discussion)
+│   ├── signal_processing.py      ← Post-run signal extraction
+│   ├── reflection.py             ← Cross-run memory reflection (decision log)
+│   └── checkpointer.py           ← LangGraph checkpoint resume (opt-in)
+│
+├── agents/                       ← Node implementations (each is a LangGraph node)
+│   ├── analysts/                 ← Four analyst nodes (fundamentals, market, news, social_media)
+│   ├── researchers/              ← Bull/bear researchers (structured debate)
+│   ├── managers/                 ← Research manager + portfolio manager (structured output)
+│   ├── trader/                   ← Trader node (structured output: Buy/Sell/Hold)
+│   ├── risk_mgmt/                ← Risk discussion nodes
+│   ├── schemas.py                ← Pydantic schemas for structured-output agents
+│   └── utils/
+│       ├── agent_states.py       ← AgentState, InvestDebateState, RiskDebateState TypedDicts
+│       ├── agent_utils.py        ← Abstract tool functions (get_stock_data, get_news, etc.)
+│       └── memory.py             ← TradingMemoryLog (decision log persistence)
+│
+├── dataflows/                    ← Data vendor abstraction layer
+│   ├── interface.py              ← Vendor-agnostic tool interface
+│   ├── config.py                 ← set_config() wires DEFAULT_CONFIG → vendor routing
+│   ├── polygon_*.py              ← Polygon.io implementations
+│   ├── alpha_vantage*.py         ← Alpha Vantage implementations
+│   ├── y_finance.py              ← yfinance implementations
+│   └── news_enrichment_loader.py ← Loads pre-computed news enrichment from env var
+│
+├── llm_clients/                  ← Provider abstraction
+│   ├── factory.py                ← create_llm_client(provider, model) → LangChain LLM
+│   ├── model_catalog.py          ← Canonical model names per provider
+│   ├── openai_client.py, anthropic_client.py, google_client.py, azure_client.py
+│   └── base_client.py            ← Base class for provider clients
+│
+├── default_config.py             ← DEFAULT_CONFIG dict (LLM, vendors, debate rounds)
+├── screener/                     ← Universe screening (technical + fundamental scoring)
+└── ui/                           ← Rich terminal UI components
+
+cli/                              ← Interactive CLI (`tradingagents` entry point)
+    └── main.py                   ← Typer app; `python -m cli.main` or `tradingagents`
+```
+
+**Graph flow**: Analysts → Research Manager → Bull/Bear Debate (N rounds) →
+Trader → Risk Discussion (N rounds) → Portfolio Manager → Decision.
+
+**Data vendor routing**: `default_config.py::data_vendors` sets category-level
+defaults (polygon, alpha_vantage, yfinance). `tool_vendors` overrides at the
+individual tool level (e.g. `get_insider_transactions` routes to
+`yfinance,alpha_vantage` because Polygon free tier lacks insider data).
+`dataflows/config.py::set_config()` wires this at graph construction time.
+
+**Structured output**: Research Manager, Trader, and Portfolio Manager use
+Pydantic schemas (`agents/schemas.py`) with provider-native structured output
+(OpenAI json_schema, Gemini response_schema, Anthropic tool-use). A render
+helper converts parsed models back to markdown for reports and memory log.
+
+---
+
 ## Common workflows
 
 ### Weekly tick (most common)
@@ -519,15 +613,15 @@ days), `--context-length` (default 504 ≈ 2y), `--quantiles` (default
 
 `scripts/portfolio_check.py`: `--positions-file`, `--policy-file`,
 `--matrix-run`, `--trades-log`, `--ticker <T>` (limit to one position),
-`--format {markdown,json}`.
+`--json`.
 
 `scripts/portfolio_allocation.py`: `--positions-file`, `--policy-file`,
 `--matrix-run`, `--candidate <T>` (simulator mode: emits BUY ticket with
-starter sizing from policy), `--format {markdown,json}`.
+starter sizing from policy), `--json`.
 
 `scripts/portfolio_trade_tickets.py`: `--positions-file`, `--policy-file`,
 `--matrix-run`, `--trades-log`, `--max-new-picks` (default 5),
-`--format {markdown,json}`.
+`--json`.
 
 `scripts/portfolio_health.py`: `--positions-file`, `--policy-file`,
 `--matrix-run`, `--trades-log`, `--output` (write markdown to file).
@@ -561,11 +655,10 @@ starter sizing from policy), `--format {markdown,json}`.
 
 ## Persisted session notes
 
+For GitHub Copilot CLI:
 `~/.copilot/session-state/<id>/files/codebase_conventions.md` carries
-session-survival-grade notes. If `store_memory` is unavailable to your agent
-(e.g. the GitHub Copilot CLI memory store rejects writes for personal
-forks), persist new conventions there instead.
+session-survival-grade notes. A shell wrapper at `~/.zshrc` routes the
+memory store to the correct identity for `justinpreston/*` repos.
 
-A shell wrapper at `~/.zshrc` routes the GitHub Copilot CLI memory store to
-the correct identity for `justinpreston/*` repos. See
-`files/codebase_conventions.md` "store_memory limitation" for details.
+For Claude Code: project memory lives at
+`~/.claude/projects/-Users-jpp5q-Documents-GitHub-TradingAgents/memory/`.
