@@ -35,8 +35,10 @@ The `classification` column in `verdict_ledger.json` only takes `PICK` or
 - `pt_compression_pct < 5.0` → **A** (tight dual-frame agreement)
 - otherwise → **B** (cons engaged but skeptical)
 
-Two implementations must stay in sync if you change the threshold:
-`scripts/build_options_overlay.py::_tier()` and
+Four implementations must stay in sync if you change the threshold:
+`scripts/build_options_overlay.py::_tier()`,
+`scripts/build_chronos_overlay.py::_tier()`,
+`scripts/build_html_report.py::_tier()`, and
 `scripts/index_runs.py::_classification_to_tier()`.
 
 ### 5. Subprocess invariants (each has historically broken matrix runs)
@@ -50,6 +52,23 @@ Without it, RR/upside numbers are meaningless. Polygon
 `/v2/aggs/ticker/{T}/prev` is the canonical source. The `current_prices.json`
 file in each matrix run already has them.
 
+### 7. Portfolio advisor must be plain-spoken and follow up
+Lead every ticket with a one-sentence `spoken_summary` (action + why).
+Plain English over jargon; no Greek letters outside contract specs; no
+derivation walkthroughs. Tone = experienced colleague in a Slack DM.
+After the user executes, call `scripts/portfolio_log_action.py` to append
+to `runs/portfolio/trades_log.jsonl`. The next `portfolio_check.py` run
+surfaces the recent action in the rationale so you follow up rather than
+re-suggest. Never auto-edit `runs/portfolio/positions.json` — the log and
+positions intentionally diverge until the user reconciles. Full doc:
+`.copilot/skills/tradingagents-portfolio-advisor/SKILL.md`.
+
+### 8. Per-share vs per-contract option fields
+`premium_paid_per_share` and `current_mark_per_share` are per-share (what
+the broker shows). Total contract cost = `qty × 100 × per_share`. Matrix
+overlay's `net_debit_per_share` is per-share, `net_debit_per_contract` is
+total $ for one contract. Mixing them under/over-counts P&L by 100×.
+
 ---
 
 ## Run the pipeline
@@ -62,7 +81,12 @@ file in each matrix run already has them.
 .venv/bin/python scripts/build_options_overlay.py \
     --matrix-run runs/<matrix_id> --strategy-mode long-call
 
-# Tests baseline (267 pass, 41 subtests, ~4s)
+# Portfolio health check (per-position + portfolio-wide trade tickets)
+.venv/bin/python scripts/portfolio_health.py \
+    --positions-file runs/portfolio/positions.json \
+    --policy-file runs/portfolio/policy.json
+
+# Tests baseline (535 pass, 41 subtests, ~16s)
 .venv/bin/python -m pytest tests/ -x -q
 ```
 
@@ -91,3 +115,5 @@ OPENAI_API_KEY=...    # OR any other supported LLM provider key
 - ❌ Don't drop `stdin=subprocess.DEVNULL` from subprocess invocations.
 - ❌ Don't commit anything under `runs/` — it's all gitignored.
 - ❌ Don't add new dependencies casually — `requirements.txt` is intentionally minimal.
+- ❌ Don't auto-edit `runs/portfolio/positions.json` from any portfolio script — `portfolio_log_action.py` only appends to the log; reconciling is the user's job.
+- ❌ Don't lecture or walk through derivations in portfolio output — lead with the action, plain English over jargon.
