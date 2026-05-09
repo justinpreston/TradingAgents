@@ -212,10 +212,10 @@ class TradingAgentsGraph:
             ),
             "news": ToolNode(
                 [
-                    # News and insider information
+                    # News tools (insider lives in the fundamentals
+                    # ToolNode below — the news_analyst does not bind it).
                     get_news,
                     get_global_news,
-                    get_insider_transactions,
                 ]
             ),
             "fundamentals": ToolNode(
@@ -225,6 +225,12 @@ class TradingAgentsGraph:
                     get_balance_sheet,
                     get_cashflow,
                     get_income_statement,
+                    # Insider transactions: the fundamentals_analyst binds
+                    # this tool to the LLM, so its tool calls route here.
+                    # Without this entry the LLM's call returns
+                    # "is not a valid tool …" and the agent retries 3-6×
+                    # before giving up — see commit history for context.
+                    get_insider_transactions,
                 ]
             ),
         }
