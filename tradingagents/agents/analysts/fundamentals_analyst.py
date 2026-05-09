@@ -1,3 +1,5 @@
+import os
+
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
@@ -11,23 +13,60 @@ from tradingagents.agents.utils.agent_utils import (
 from tradingagents.dataflows.config import get_config
 
 
+def _insider_txns_disabled() -> bool:
+    """Whether to omit get_insider_transactions from the fundamentals analyst.
+
+    Set ``TRADINGAGENTS_DISABLE_INSIDER_TXNS=1`` (or ``true`` / ``yes``) to
+    drop the insider-transactions tool binding and its system-message
+    sentence. Useful for ablation studies that need to isolate the impact
+    of the insider data stream on agent verdicts, and as a temporary
+    escape hatch when the upstream vendor chain is degraded.
+    """
+    val = os.environ.get("TRADINGAGENTS_DISABLE_INSIDER_TXNS", "")
+    return val.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def create_fundamentals_analyst(llm):
     def fundamentals_analyst_node(state):
         current_date = state["trade_date"]
         instrument_context = build_instrument_context(state["company_of_interest"])
 
-        tools = [
-            get_fundamentals,
-            get_balance_sheet,
-            get_cashflow,
-            get_income_statement,
-            get_insider_transactions,
-        ]
+        insider_disabled = _insider_txns_disabled()
+
+        if insider_disabled:
+            tools = [
+                get_fundamentals,
+                get_balance_sheet,
+                get_cashflow,
+                get_income_statement,
+            ]
+            tool_doc = (
+                " Use the available tools: `get_fundamentals` for comprehensive"
+                " company analysis, `get_balance_sheet`, `get_cashflow`, and"
+                " `get_income_statement` for specific financial statements."
+            )
+        else:
+            tools = [
+                get_fundamentals,
+                get_balance_sheet,
+                get_cashflow,
+                get_income_statement,
+                get_insider_transactions,
+            ]
+            tool_doc = (
+                " Use the available tools: `get_fundamentals` for comprehensive"
+                " company analysis, `get_balance_sheet`, `get_cashflow`, and"
+                " `get_income_statement` for specific financial statements, and"
+                " `get_insider_transactions` to surface SEC Form-4 buying/selling"
+                " by officers and directors (a strong signal for entry timing —"
+                " clusters of insider buying are bullish, persistent insider"
+                " selling is a yellow flag)."
+            )
 
         system_message = (
             "You are a researcher tasked with analyzing fundamental information over the past week about a company. Please write a comprehensive report of the company's fundamental information such as financial documents, company profile, basic company financials, and company financial history to gain a full view of the company's fundamental information to inform traders. Make sure to include as much detail as possible. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
-            + " Use the available tools: `get_fundamentals` for comprehensive company analysis, `get_balance_sheet`, `get_cashflow`, and `get_income_statement` for specific financial statements, and `get_insider_transactions` to surface SEC Form-4 buying/selling by officers and directors (a strong signal for entry timing — clusters of insider buying are bullish, persistent insider selling is a yellow flag)."
+            + tool_doc
             + get_language_instruction(),
         )
 
