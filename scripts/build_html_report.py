@@ -365,13 +365,83 @@ _SIC_SECTORS = [
 ]
 
 
+# Polygon returns SIC as free-form description text ("SEMICONDUCTORS & RELATED DEVICES")
+# rather than the numeric code. Map common description keywords → coarse sector buckets.
+# Order matters: more-specific patterns first.
+_SIC_DESC_PATTERNS: list[tuple[tuple[str, ...], str]] = [
+    (("SEMICONDUCTOR", "ELECTRONIC COMPONENT", "ELECTRONIC COMPUTER",
+      "PRINTED CIRCUIT", "COMPUTER PERIPHERAL"), "Electronics / Semiconductors"),
+    (("PHARMACEUTICAL", "BIOLOGICAL PRODUCT", "PHARMA", "MEDICINAL CHEMICAL",
+      "IN VITRO", "MEDICAL INSTRUMENT", "SURGICAL"), "Pharma / MedTech"),
+    (("SERVICES-PREPACKAGED SOFTWARE", "COMPUTER PROGRAM", "PREPACKAGED SOFTWARE",
+      "COMPUTER SERVICES", "BUSINESS SERVICE", "SERVICES-COMPUTER",
+      "SERVICES-BUSINESS"), "Business Services / Software"),
+    (("CRUDE PETROLEUM", "PETROLEUM REFIN", "NATURAL GAS", "OIL & GAS",
+      "OIL AND GAS", "PIPELINES, EXCEPT NATURAL GAS"), "Energy / Oil & Gas"),
+    (("ELECTRIC SERVICE", "ELECTRIC & OTHER SERVICES", "WATER SUPPLY",
+      "GAS DISTRIBUTION", "COGENERATION"), "Utilities"),
+    (("TELEPHONE", "WIRELESS", "RADIOTELEPHONE", "TELECOMMUNICATION",
+      "COMMUNICATIONS SERVICE"), "Telecommunications"),
+    (("NATIONAL COMMERCIAL BANK", "STATE COMMERCIAL BANK", "SAVINGS INSTITUTION",
+      "BANK HOLDING", "BANKS"), "Banks"),
+    (("SECURITY BROKER", "INVESTMENT ADVICE", "INVESTMENT OFFICE",
+      "SECURITY DEALER"), "Securities / Brokers"),
+    (("FIRE, MARINE", "LIFE INSURANCE", "ACCIDENT & HEALTH INSURANCE",
+      "INSURANCE CARRIER", "SURETY INSURANCE"), "Insurance"),
+    (("REAL ESTATE INVESTMENT TRUST", "REIT", "REAL ESTATE"), "Real Estate / REIT"),
+    (("RETAIL-CATALOG", "RETAIL-MAIL-ORDER", "RETAIL-FAMILY",
+      "RETAIL-VARIETY", "RETAIL-WOMEN", "RETAIL-MEN", "RETAIL-DEPARTMENT",
+      "RETAIL-APPAREL", "RETAIL-SHOE", "RETAIL-AUTO", "RETAIL-BUILDING",
+      "RETAIL-DRUG", "RETAIL-FURNITURE", "RETAIL-RADIO", "RETAIL-EATING",
+      "RETAIL"), "Retail"),
+    (("MOTOR VEHICLE", "AIRCRAFT", "SHIP BUILDING", "RAILROAD EQUIPMENT",
+      "TRANSPORTATION EQUIPMENT"), "Transportation Equipment"),
+    (("AIR TRANSPORTATION", "WATER TRANSPORTATION", "TRUCKING",
+      "RAILROAD", "TRANSPORTATION"), "Transportation"),
+    (("STEEL WORKS", "METAL MINING", "PRIMARY SMELTING", "PRIMARY METAL",
+      "FABRICATED METAL", "PRIMARY PRODUCTION OF"), "Primary Metals / Steel"),
+    (("MINING", "GOLD MINING", "SILVER MINING", "COAL MINING", "URANIUM"),
+     "Mining / Metals"),
+    (("INDUSTRIAL MACHINERY", "CONSTRUCTION MACHINERY", "FARM MACHINERY",
+      "GENERAL INDUSTRIAL", "SPECIAL INDUSTRY"), "Industrial Machinery"),
+    (("FOOD AND KINDRED", "BEVERAGE", "BAKERY PRODUCT", "BOTTLED",
+      "BREAD", "DAIRY", "MEAT"), "Food & Beverage"),
+    (("HOTEL", "EATING PLACE", "RESTAURANT"), "Hotels / Restaurants"),
+    (("HEALTH SERVICE", "HOSPITAL", "NURSING"), "Health Services"),
+    (("MOTION PICTURE", "BROADCAST", "CABLE", "TELEVISION"),
+     "Media / Entertainment"),
+    (("CHEMICAL", "PLASTIC", "PAINT", "INDUSTRIAL ORGANIC"), "Chemicals"),
+    (("PAPER MILL", "PULP", "PAPERBOARD"), "Paper / Pulp"),
+    (("CONSTRUCTION-",), "Construction"),
+    (("HOLDING COMPANY",), "Holding / Investment"),
+]
+
+
 def _sector_from_sic(sic: str | None) -> str:
+    """Return a coarse sector bucket from a SIC code or sic_description string.
+
+    Handles two forms because Polygon returns sic_description (text) while the
+    legacy screener path stored a numeric SIC code:
+      1. Numeric SIC code (e.g. "62" or "6211")   → digit-prefix table lookup
+      2. SIC description text (e.g. "SECURITY BROKER, DEALER") → keyword match
+    """
     if not sic:
         return "Unknown"
-    s = str(sic)
-    for prefix, name in _SIC_SECTORS:
-        if s.startswith(prefix):
-            return name
+    s = str(sic).strip()
+    if not s:
+        return "Unknown"
+    # Numeric SIC code path (handles the legacy/screener case).
+    if s[0].isdigit():
+        for prefix, name in _SIC_SECTORS:
+            if s.startswith(prefix):
+                return name
+        return "Unknown"
+    # Description-text path (Polygon sic_description).
+    upper = s.upper()
+    for keywords, bucket in _SIC_DESC_PATTERNS:
+        for kw in keywords:
+            if kw in upper:
+                return bucket
     return "Unknown"
 
 
