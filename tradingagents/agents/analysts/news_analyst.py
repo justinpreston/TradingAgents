@@ -1,3 +1,4 @@
+from langchain_core.messages import ToolMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
@@ -8,6 +9,10 @@ from tradingagents.agents.utils.agent_utils import (
 from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.news_enrichment_loader import (
     build_enrichment_prefix,
+)
+from tradingagents.dataflows.tool_errors import (
+    build_data_gaps_section,
+    extract_tool_errors,
 )
 
 
@@ -65,6 +70,21 @@ def create_news_analyst(llm):
 
         if len(result.tool_calls) == 0:
             report = result.content
+
+        # Grounded-pipeline guardrail: scan the tool-message history for any
+        # TOOL_ERROR markers (or legacy "Error fetching" / "Error retrieving"
+        # phrasing). If present, prepend an explicit "Data Gaps" section to
+        # the report. The LLM has already written its summary by this point;
+        # surfacing the gaps in-band ensures any downstream consumer (the
+        # research manager, the grounding audit) can see that part of the
+        # report is unsupported instead of fabricated.
+        tool_errors = []
+        for msg in state.get("messages", []):
+            if isinstance(msg, ToolMessage):
+                tool_errors.extend(extract_tool_errors(getattr(msg, "content", "")))
+        if report and tool_errors:
+            gaps_block = build_data_gaps_section(tool_errors)
+            report = gaps_block + "\n" + report
 
         return {
             "messages": [result],

@@ -1,3 +1,4 @@
+from langchain_core.messages import ToolMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
@@ -6,6 +7,10 @@ from tradingagents.agents.utils.agent_utils import (
     get_stock_data,
 )
 from tradingagents.dataflows.config import get_config
+from tradingagents.dataflows.tool_errors import (
+    build_data_gaps_section,
+    extract_tool_errors,
+)
 
 
 def create_market_analyst(llm):
@@ -82,6 +87,14 @@ Volume-Based Indicators:
 
         if len(result.tool_calls) == 0:
             report = result.content
+
+        # Grounded-pipeline guardrail (see news_analyst.py for full rationale).
+        tool_errors = []
+        for msg in state.get("messages", []):
+            if isinstance(msg, ToolMessage):
+                tool_errors.extend(extract_tool_errors(getattr(msg, "content", "")))
+        if report and tool_errors:
+            report = build_data_gaps_section(tool_errors) + "\n" + report
 
         return {
             "messages": [result],

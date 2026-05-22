@@ -82,7 +82,8 @@ def get_news(
     except PolygonNotFoundError:
         return f"No news found for {ticker} between {start_date} and {end_date}"
     except PolygonError as exc:
-        return f"Error retrieving news for {ticker}: {exc}"
+        from tradingagents.dataflows.tool_errors import format_tool_error
+        return format_tool_error("get_news (polygon)", ticker, exc)
 
     return _format_news_entries(
         results,
@@ -107,7 +108,8 @@ def get_global_news(
     try:
         results = paginated_results("/v2/reference/news", params, max_pages=2)
     except PolygonError as exc:
-        return f"Error retrieving global news: {exc}"
+        from tradingagents.dataflows.tool_errors import format_tool_error
+        return format_tool_error("get_global_news (polygon)", None, exc)
 
     return _format_news_entries(
         results[: int(limit)],

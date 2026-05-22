@@ -278,7 +278,8 @@ def get_stock_data(
     except PolygonNotFoundError:
         return f"No data found for symbol '{symbol}' between {start_date} and {end_date}"
     except PolygonError as exc:
-        return f"Error retrieving data for {symbol}: {exc}"
+        from tradingagents.dataflows.tool_errors import format_tool_error
+        return format_tool_error("get_stock_data (polygon)", symbol, exc)
 
     bars = payload.get("results") or []
     if not bars:
@@ -346,7 +347,8 @@ def get_fundamentals(
     except PolygonNotFoundError:
         return f"No fundamentals data found for symbol '{ticker}'"
     except PolygonError as exc:
-        return f"Error retrieving fundamentals for {ticker}: {exc}"
+        from tradingagents.dataflows.tool_errors import format_tool_error
+        return format_tool_error("get_fundamentals (polygon)", ticker, exc)
 
     name = results.get("name")
     if name:

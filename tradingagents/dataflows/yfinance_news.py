@@ -105,7 +105,8 @@ def get_news_yfinance(
         return f"## {ticker} News, from {start_date} to {end_date}:\n\n{news_str}"
 
     except Exception as e:
-        return f"Error fetching news for {ticker}: {str(e)}"
+        from tradingagents.dataflows.tool_errors import format_tool_error
+        return format_tool_error("get_news (yfinance)", ticker, e)
 
 
 def get_global_news_yfinance(
@@ -199,4 +200,5 @@ def get_global_news_yfinance(
         return f"## Global Market News, from {start_date} to {curr_date}:\n\n{news_str}"
 
     except Exception as e:
-        return f"Error fetching global news: {str(e)}"
+        from tradingagents.dataflows.tool_errors import format_tool_error
+        return format_tool_error("get_global_news (yfinance)", None, e)
