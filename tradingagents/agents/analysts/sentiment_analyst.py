@@ -16,11 +16,20 @@ the LLM is invoked and injects them into the prompt as structured blocks:
 The agent does not use tool-calling; the data is in the prompt from
 turn 0. The LLM produces the sentiment report in a single invocation.
 
+**Grounding hard-block (fabrication prevention).** When all three
+fetchers return placeholders / empty results, the LLM is *not* invoked
+— a literal ``INSUFFICIENT SENTIMENT DATA`` report is written instead.
+Without this guard, a thin-coverage ticker (illiquid mid-cap with no
+StockTwits cashtag and zero Reddit mentions) would still pass three
+empty blocks to the LLM, which under persona pressure can confabulate
+sentiment from its training-data prior.
+
 See: https://github.com/TauricResearch/TradingAgents/issues/557
 """
 
 from datetime import datetime, timedelta
 
+from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
@@ -29,6 +38,15 @@ from tradingagents.agents.utils.agent_utils import (
 )
 from tradingagents.dataflows.reddit import fetch_reddit_posts
 from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
+from tradingagents.dataflows.tool_errors import has_tool_errors
+
+
+# Minimum *informative* characters across all three blocks below which
+# the LLM is bypassed entirely. Empirically calibrated so that one
+# real headline (~150 chars) + a thin StockTwits/Reddit response will
+# still clear the bar, but three placeholder strings (each ~50 chars)
+# definitively will not.
+_MIN_INFORMATIVE_CHARS = 400
 
 
 def _seven_days_back(trade_date: str) -> str:
@@ -55,6 +73,27 @@ def create_sentiment_analyst(llm):
         news_block = get_news.func(ticker, start_date, end_date)
         stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
         reddit_block = fetch_reddit_posts(ticker)
+
+        # Grounding hard-block. If every source came back as a placeholder
+        # or a tool error, invoking the LLM would invite it to confabulate
+        # sentiment from training-data memory of this ticker. Short-circuit
+        # to an explicit "insufficient data" report so downstream nodes
+        # (and the grounding audit) see a clean signal of the gap.
+        informative_chars = _informative_chars(news_block, stocktwits_block, reddit_block)
+        if informative_chars < _MIN_INFORMATIVE_CHARS:
+            insufficient_report = _build_insufficient_data_report(
+                ticker=ticker,
+                start_date=start_date,
+                end_date=end_date,
+                news_block=news_block,
+                stocktwits_block=stocktwits_block,
+                reddit_block=reddit_block,
+                informative_chars=informative_chars,
+            )
+            return {
+                "messages": [AIMessage(content=insufficient_report)],
+                "sentiment_report": insufficient_report,
+            }
 
         system_message = _build_system_message(
             ticker=ticker,
@@ -160,6 +199,81 @@ Produce a sentiment report covering, in order:
 5. **Markdown table** at the end summarizing key sentiment signals, their direction, source, and supporting evidence.
 
 {get_language_instruction()}"""
+
+
+# ---------------------------------------------------------------------------
+# Grounding hard-block helpers
+# ---------------------------------------------------------------------------
+_PLACEHOLDER_MARKERS = (
+    "<no Reddit posts found",
+    "<no StockTwits messages found",
+    "<stocktwits unavailable",
+    "<no posts found mentioning",  # per-subreddit placeholder
+    "No news found for",
+    "[[TOOL_ERROR:",
+)
+
+
+def _informative_chars(*blocks: str) -> int:
+    """Count characters across all blocks excluding pure-placeholder lines.
+
+    A line counts toward the budget only if it contains content beyond
+    the known placeholder markers. This ensures three "thin" blocks made
+    entirely of placeholders evaluate to 0 even though each individual
+    block has a non-trivial character count.
+    """
+    total = 0
+    for block in blocks:
+        if not block:
+            continue
+        for line in block.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if any(marker in stripped for marker in _PLACEHOLDER_MARKERS):
+                continue
+            total += len(stripped)
+    return total
+
+
+def _build_insufficient_data_report(
+    *,
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    news_block: str,
+    stocktwits_block: str,
+    reddit_block: str,
+    informative_chars: int,
+) -> str:
+    """Produce the no-LLM short-circuit report for a data-empty cell."""
+    has_news_error = has_tool_errors(news_block)
+    has_st_error = has_tool_errors(stocktwits_block) or stocktwits_block.startswith("<stocktwits unavailable")
+    has_reddit_error = has_tool_errors(reddit_block) or "no Reddit posts found" in reddit_block
+
+    lines = [
+        f"# Sentiment Report — {ticker} ({start_date} → {end_date})",
+        "",
+        "## ⚠️ INSUFFICIENT SENTIMENT DATA",
+        "",
+        "This report was generated **without invoking the language model** because every pre-fetched data source returned a placeholder, an empty result, or a tool error. Sentiment analysis under these conditions invites fabrication from the model's training-data memory rather than grounded analysis of current sources.",
+        "",
+        f"- Informative characters detected across all sources: **{informative_chars}** (threshold: {_MIN_INFORMATIVE_CHARS})",
+        f"- News block: {'tool error' if has_news_error else ('no recent items' if 'No news found' in news_block else 'sparse')}",
+        f"- StockTwits block: {'tool error / unavailable' if has_st_error else 'no recent messages'}",
+        f"- Reddit block: {'tool error / no posts' if has_reddit_error else 'sparse'}",
+        "",
+        "## Implications for downstream consumers",
+        "",
+        "- Treat the absence of sentiment as **informational, not signal**. Do not infer bullish or bearish positioning.",
+        "- Bull/bear researchers and risk debators should weight the fundamentals + market + news reports more heavily, and explicitly avoid claims that depend on sentiment data.",
+        "- The grounding audit will flag this cell with `sentiment_grounding: INSUFFICIENT`.",
+        "",
+        "| Metric | Direction | Source | Evidence |",
+        "|---|---|---|---|",
+        "| Overall | — | (none) | Insufficient data; LLM bypassed |",
+    ]
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
