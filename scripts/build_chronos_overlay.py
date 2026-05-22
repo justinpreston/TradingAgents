@@ -88,7 +88,8 @@ def _tier(row: dict) -> str:
     comp = row.get("pt_compression_pct")
     if row.get("conservative_pt") is None:
         return "C"
-    if comp is not None and comp < 5.0:
+    suspect_flags = row.get("pt_quality_flags") or []
+    if comp is not None and comp < 5.0 and not suspect_flags:
         return "A"
     return "B"
 

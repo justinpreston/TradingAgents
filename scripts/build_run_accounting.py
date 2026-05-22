@@ -79,6 +79,33 @@ def _classify(aggr_rating: Optional[str], cons_rating: Optional[str]) -> str:
     return "OTHER"
 
 
+# --- Grounded-pipeline guardrail: PT sanity check vs current price -------------
+#
+# Persona PTs are LLM-generated floats with no DCF tool grounding. When a
+# persona PT is more than ``PT_SUSPECT_PCT`` from the current price, it's
+# very likely the model hallucinated from a different point in time
+# (this is exactly the failure that produced the 5/5/2026 INTC $140 vs
+# $108 actual incident). Picks with at least one suspect PT are flagged
+# in the ledger and downgraded out of Tier A by the indexer's tier rule.
+PT_SUSPECT_PCT = 50.0  # ±50% from current price
+
+
+def _pt_quality(pt: Optional[float], current_price: Optional[float]) -> tuple[str, Optional[float]]:
+    """Classify a persona PT's plausibility relative to current price.
+
+    Returns (label, distance_pct):
+      - ``OK``       — within ±PT_SUSPECT_PCT of current
+      - ``SUSPECT``  — outside that band (likely hallucination)
+      - ``MISSING``  — PT or current price unavailable
+    """
+    if pt is None or current_price is None or current_price <= 0:
+        return "MISSING", None
+    distance = round((pt - current_price) / current_price * 100, 1)
+    if abs(distance) > PT_SUSPECT_PCT:
+        return "SUSPECT", distance
+    return "OK", distance
+
+
 def _fetch_prices(tickers: list[str], pace: float = 1.4, retry_sleep: float = 70.0) -> dict[str, float]:
     """Fetch previous-day close for each ticker via Polygon REST."""
     try:
@@ -440,6 +467,35 @@ def main() -> int:
     tickers = sorted(p.name for p in aggressive_dir.iterdir() if p.is_dir())
     print(f"[accounting] matrix: {matrix_run.name} · screener: {screener_label or '(none — ad-hoc matrix)'} · tickers: {len(tickers)}")
 
+    # --- Backfill sector_sic from Polygon when screener data is missing ---
+    tickers_missing_sector = [t for t in tickers if not candidates.get(t, {}).get("sector_sic")]
+    if tickers_missing_sector:
+        print(f"[accounting] fetching SIC sectors for {len(tickers_missing_sector)} tickers from Polygon...")
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(".env")
+        except Exception:
+            pass
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+        from tradingagents.dataflows.polygon_common import _make_request, PolygonError  # type: ignore
+        for t in tickers_missing_sector:
+            try:
+                r = _make_request(f"/v3/reference/tickers/{t}")
+                info = r.get("results", {})
+                sic = info.get("sic_description") or info.get("type")
+                name = info.get("name")
+                mcap = info.get("market_cap")
+                cand = candidates.setdefault(t, {})
+                if sic:
+                    cand["sector_sic"] = sic
+                if name and not cand.get("name"):
+                    cand["name"] = name
+                if mcap and not cand.get("market_cap"):
+                    cand["market_cap"] = mcap
+            except PolygonError:
+                pass
+            time.sleep(0.15)
+
     # --- Prices ---
     prices_path = matrix_run / "current_prices.json"
     prices: dict[str, float] = {}
@@ -476,6 +532,16 @@ def main() -> int:
         upside = round((aggr_pt - cur) / cur * 100, 1) if (aggr_pt and cur) else None
         cons_upside = round((cons_pt - cur) / cur * 100, 1) if (cons_pt and cur) else None
         compression = round((aggr_pt - cons_pt) / aggr_pt * 100, 1) if (aggr_pt and cons_pt) else None
+
+        # Grounded-pipeline guardrail — flag implausible PTs as SUSPECT.
+        aggr_pt_quality, aggr_pt_distance = _pt_quality(aggr_pt, cur)
+        cons_pt_quality, cons_pt_distance = _pt_quality(cons_pt, cur)
+        pt_quality_flags: list[str] = []
+        if aggr_pt_quality == "SUSPECT":
+            pt_quality_flags.append("aggressive_pt_suspect")
+        if cons_pt_quality == "SUSPECT":
+            pt_quality_flags.append("conservative_pt_suspect")
+
         row = {
             "rank": cand.get("rank"), "ticker": t, "name": cand.get("name"),
             "sector_sic": cand.get("sector_sic"),
@@ -483,8 +549,11 @@ def main() -> int:
             "composite_score": cand.get("composite_score"),
             "current_price_usd": cur,
             "aggressive_rating": aggr_rating, "aggressive_pt": aggr_pt, "aggressive_upside_pct": upside,
+            "aggressive_pt_quality": aggr_pt_quality, "aggressive_pt_distance_pct": aggr_pt_distance,
             "conservative_rating": cons_rating, "conservative_pt": cons_pt, "conservative_upside_pct": cons_upside,
+            "conservative_pt_quality": cons_pt_quality, "conservative_pt_distance_pct": cons_pt_distance,
             "pt_compression_pct": compression,
+            "pt_quality_flags": pt_quality_flags,
             "classification": classification,
             "aggressive_horizon": aggr["horizon"] if aggr else None,
             "conservative_horizon": cons["horizon"] if cons else None,

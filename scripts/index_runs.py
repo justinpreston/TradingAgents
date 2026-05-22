@@ -241,7 +241,12 @@ def _classify_run(run_dir: Path) -> str | None:
 
 def _classification_to_tier(row: dict) -> str | None:
     """Derive A/B/C tier from a verdict_ledger row, matching the same
-    convention used by build_options_overlay._tier()."""
+    convention used by build_options_overlay._tier().
+
+    Grounded-pipeline guardrail: a PICK with any ``pt_quality_flags`` is
+    capped at Tier B regardless of compression — a SUSPECT PT (>50% from
+    current price, likely hallucinated) cannot drive a Tier A allocation.
+    """
     cls = (row.get("classification") or "").strip()
     if cls == "VETOED":
         return "VETO"
@@ -250,7 +255,8 @@ def _classification_to_tier(row: dict) -> str | None:
     comp = row.get("pt_compression_pct")
     if row.get("conservative_pt") is None:
         return "C"
-    if comp is not None and comp < 5.0:
+    suspect_flags = row.get("pt_quality_flags") or []
+    if comp is not None and comp < 5.0 and not suspect_flags:
         return "A"
     return "B"
 
