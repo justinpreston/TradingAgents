@@ -587,6 +587,13 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     p.add_argument(
+        "--no-iv-surface", action="store_true",
+        help=(
+            "Skip the auto-built IV-surface scoring step (medloh/stockpile "
+            "methodology) that flags 'rich' long-option entries. Default: ON."
+        ),
+    )
+    p.add_argument(
         "--chronos-prediction-length", type=int, default=90,
         help="Forecast horizon in trading days for the auto-built Chronos overlay. Default 90 (~4mo).",
     )
@@ -625,6 +632,7 @@ def _chronos_available() -> bool:
 
 def _run_auto_report(matrix_dir: Path, long_call_delta: float,
                      skip_chronos: bool = False,
+                     skip_iv_surface: bool = False,
                      chronos_prediction_length: int = 90) -> None:
     """Run accounting → options overlay → Chronos overlay → HTML report after a successful matrix.
 
@@ -666,6 +674,30 @@ def _run_auto_report(matrix_dir: Path, long_call_delta: float,
             None,
         ),
     ]
+
+    if skip_iv_surface:
+        steps.append(("iv-surface scoring", None, "(skipped: --no-iv-surface)"))
+    else:
+        steps.append((
+            "iv-surface scoring",
+            [
+                py, "scripts/score_picks_iv_surface.py",
+                "--matrix-run", str(matrix_rel),
+            ],
+            None,
+        ))
+
+    # Grounding audit — runs after accounting so it has access to the full
+    # ledger including PT quality flags. Always on; fails soft when the
+    # yfinance analyst-PT consensus call is unreachable.
+    steps.append((
+        "grounding-audit",
+        [
+            py, "scripts/grounding_audit.py",
+            "--matrix-run", str(matrix_rel),
+        ],
+        None,
+    ))
 
     # Chronos overlay — gated on availability. Add BEFORE index-runs so the
     # indexer picks up the new chronos_overlay.json in the same auto-report.
@@ -905,6 +937,7 @@ def main() -> int:
                 matrix_dir,
                 args.long_call_delta,
                 skip_chronos=args.no_chronos,
+                skip_iv_surface=args.no_iv_surface,
                 chronos_prediction_length=args.chronos_prediction_length,
             )
         except Exception as exc:  # pragma: no cover — best-effort post-step

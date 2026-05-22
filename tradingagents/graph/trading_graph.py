@@ -46,6 +46,7 @@ from .setup import GraphSetup
 from .propagation import Propagator
 from .reflection import Reflector
 from .signal_processing import SignalProcessor
+from tradingagents.grounding.runtime import assert_analyst_grounding
 
 
 class TradingAgentsGraph:
@@ -458,6 +459,14 @@ class TradingAgentsGraph:
 
         # Store current state for reflection.
         self.curr_state = final_state
+
+        # Runtime grounding assertion — warns (does not abort) if a
+        # tool-bound analyst produced a non-empty report without making
+        # any tool calls. See tradingagents/grounding/runtime.py.
+        try:
+            assert_analyst_grounding(final_state, ticker=str(company_name))
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Grounding assertion failed: %s", exc)
 
         # Log state to disk.
         self._log_state(trade_date, final_state)
