@@ -15,12 +15,15 @@ class DataflowsConfigIsolationTests(unittest.TestCase):
         set_config(copy.deepcopy(default_config.DEFAULT_CONFIG))
 
     def test_get_config_returns_deep_copy(self):
+        # Capture the baseline before any mutation
+        expected_vendor = default_config.DEFAULT_CONFIG["data_vendors"]["core_stock_apis"]
+
         cfg = get_config()
         cfg["data_vendors"]["core_stock_apis"] = "alpha_vantage"
         cfg["tool_vendors"]["get_stock_data"] = "alpha_vantage"
 
         fresh = get_config()
-        self.assertEqual(fresh["data_vendors"]["core_stock_apis"], "yfinance")
+        self.assertEqual(fresh["data_vendors"]["core_stock_apis"], expected_vendor)
         self.assertNotIn("get_stock_data", fresh["tool_vendors"])
 
     def test_set_config_does_not_alias_caller_nested_dicts(self):
@@ -38,6 +41,7 @@ class DataflowsConfigIsolationTests(unittest.TestCase):
         self.assertEqual(fresh["tool_vendors"]["get_stock_data"], "alpha_vantage")
 
     def test_partial_nested_update_preserves_existing_defaults(self):
+        defaults = default_config.DEFAULT_CONFIG["data_vendors"]
         set_config(
             {
                 "data_vendors": {
@@ -48,9 +52,15 @@ class DataflowsConfigIsolationTests(unittest.TestCase):
 
         fresh = get_config()
         self.assertEqual(fresh["data_vendors"]["core_stock_apis"], "alpha_vantage")
-        self.assertEqual(fresh["data_vendors"]["technical_indicators"], "yfinance")
-        self.assertEqual(fresh["data_vendors"]["fundamental_data"], "yfinance")
-        self.assertEqual(fresh["data_vendors"]["news_data"], "yfinance")
+        self.assertEqual(
+            fresh["data_vendors"]["technical_indicators"],
+            defaults["technical_indicators"],
+        )
+        self.assertEqual(
+            fresh["data_vendors"]["fundamental_data"],
+            defaults["fundamental_data"],
+        )
+        self.assertEqual(fresh["data_vendors"]["news_data"], defaults["news_data"])
 
     def test_nested_dict_updates_merge_one_level_deep(self):
         set_config({"tool_vendors": {"get_stock_data": "alpha_vantage"}})
