@@ -104,6 +104,9 @@ scripts/build_run_accounting.py  →  same dir, adds:
 scripts/build_options_overlay.py  →  same dir, adds:
                             └ options_overlay.{md,json}     ← Polygon-pulled options structures
 
+scripts/score_picks_iv_surface.py  →  same dir, adds:
+                            └ iv_surface_ranking.{md,json}  ← stockpile-style IV-surface scoring + earnings flag
+
 scripts/build_chronos_overlay.py  →  same dir, adds:
                             └ chronos_overlay.{md,json}     ← Amazon Chronos forecast vs persona PT
 
@@ -587,6 +590,13 @@ sqlite3 runs/index.db "SELECT ticker, COUNT(*) AS n FROM ticker_history GROUP BY
 `scripts/build_options_overlay.py`: `--matrix-run`, `--strategy-mode {tier-driven,long-call}`,
 `--long-call-delta` (default 0.55), `--min-oi`, `--risk-free`,
 `--ticker-limit`, `--snapshot-date`, `--verbose`.
+
+`scripts/score_picks_iv_surface.py`: `--matrix-run` (required, reads
+`options_overlay.json`), `--earnings-calendar` (auto-discovers
+`<matrix-run>/earnings_calendar.json`), `--snapshot-date`, `--output`,
+`--strike-window-pct` (default 25), `--expiry-window-days` (default 60),
+`--pace-seconds`. Implements medloh/stockpile's 5-param IV-surface fit and
+flags picks with earnings inside the option's expiry window.
 
 `scripts/build_chronos_overlay.py`: `--matrix-run`, `--model` (default
 `amazon/chronos-bolt-base` ~200 MB), `--prediction-length` (default 90 trading

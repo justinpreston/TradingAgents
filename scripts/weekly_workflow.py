@@ -71,6 +71,15 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 RUNS_DIR = REPO_ROOT / "runs"
 CATALOG_DB = RUNS_DIR / "index.db"
 
+# Ensure the live source tree wins over any non-editable site-packages copy
+# of `tradingagents` that might be missing newer modules (matches the same
+# defensive shim used by sibling scripts like build_macro_snapshot.py and
+# build_news_enrichment.py). Without this, lazy imports below — e.g. the
+# `tradingagents.dataflows.macro_snapshot` import in phase_macro — silently
+# fall back to a stale install and raise ModuleNotFoundError.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 # Tier presets — each preset defines a market-cap band, an ADV floor, and a
 # minimum price. The ADV floor scales with mcap so the liquidity quality bar
 # stays consistent across tiers (a $50M ADV is meaningful for a $5B mid-cap
@@ -149,7 +158,11 @@ def _run(cmd: list[str], dry_run: bool = False) -> int:
     if dry_run:
         print("    (skipped: --dry-run)")
         return 0
-    return subprocess.run(cmd, cwd=REPO_ROOT).returncode
+    # stdin=DEVNULL is a subprocess invariant documented in CLAUDE.md — without
+    # it, children inherit potentially-broken stdio handles (e.g. when the
+    # workflow is launched under nohup or a detached shell) and Python crashes
+    # at startup with `init_sys_streams: Bad file descriptor`.
+    return subprocess.run(cmd, cwd=REPO_ROOT, stdin=subprocess.DEVNULL).returncode
 
 
 def phase_screen(args: argparse.Namespace) -> Path:
