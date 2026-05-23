@@ -220,3 +220,6 @@ __marimo__/
 
 # Screener / batch run outputs
 runs/
+
+# macOS junk
+.DS_Store
