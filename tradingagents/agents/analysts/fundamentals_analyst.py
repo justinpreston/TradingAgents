@@ -3,7 +3,7 @@ import os
 from langchain_core.messages import ToolMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from tradingagents.agents.utils.agent_utils import (
-    build_instrument_context,
+    get_instrument_context_from_state,
     get_balance_sheet,
     get_cashflow,
     get_fundamentals,
@@ -34,7 +34,7 @@ def _insider_txns_disabled() -> bool:
 def create_fundamentals_analyst(llm):
     def fundamentals_analyst_node(state):
         current_date = state["trade_date"]
-        instrument_context = build_instrument_context(state["company_of_interest"])
+        instrument_context = get_instrument_context_from_state(state)
 
         insider_disabled = _insider_txns_disabled()
 
