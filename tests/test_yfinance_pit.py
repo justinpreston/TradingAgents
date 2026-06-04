@@ -465,8 +465,15 @@ def test_malformed_curr_date_treated_as_live():
 
 @pytest.mark.unit
 def test_empty_info_payload():
-    """A None / empty info dict still produces a clean error string, not a crash."""
-    with _patch_ticker({}):
-        out = y_finance.get_fundamentals("NVDA", curr_date="2024-05-10")
+    """A None / empty info dict raises NoMarketDataError (the no-data contract).
 
-    assert "No fundamentals data found" in out
+    Upstream's grounding design routes genuine no-data through
+    ``NoMarketDataError`` so the vendor-fallback layer in ``interface.py`` can
+    emit a single ``NO_DATA_AVAILABLE`` sentinel instead of a vendor-specific
+    string the agent might fabricate around.
+    """
+    from tradingagents.dataflows.symbol_utils import NoMarketDataError
+
+    with _patch_ticker({}):
+        with pytest.raises(NoMarketDataError):
+            y_finance.get_fundamentals("NVDA", curr_date="2024-05-10")
