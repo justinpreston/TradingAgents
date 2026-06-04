@@ -49,7 +49,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     --policy-file runs/portfolio/policy.json
 # (See "Portfolio advisor" section below.)
 
-# Tests (baseline: 535 pass, 41 subtests in ~16s)
+# Tests — see the "Testing" section for baseline + known flake
 .venv/bin/python -m pytest tests/ -x -q
 ```
 
@@ -122,8 +122,8 @@ shells out to — also runnable directly for a quick single-stage analysis on
 one or more tickers (produces flat `<T>.state.json` files; **does not**
 produce the `verdict_ledger.json` + `cells/` structure that
 `build_options_overlay.py`/`build_run_accounting.py` consume — for that you
-need `run_copilot_matrix.py`). Other runners (`run_copilot_aggressive_aligned.py`,
-`run_copilot_opus*.py`) exist for ad-hoc / experimental work.
+need `run_copilot_matrix.py`). See the **Top-level runners** section below
+for how the half-dozen `run_*.py` shims at repo root relate to the cadence.
 
 `scripts/weekly_workflow.py --chain` defaults to `--chain-runner run_copilot_matrix.py`
 for exactly this reason — feed it any other runner and Phase 4 will warn that
@@ -133,6 +133,32 @@ the rest of the cadence can't ingest the output.
 `verdict_ledger.json` or `screener.json` (not by directory name), so
 custom run-ids like `matrix_pipeline_test_<id>` or `matrix_weekly_<ts>_chain`
 are indexed correctly.
+
+---
+
+## Top-level runners (`run_*.py`, `compare_runs.py`, `resynthesize_pm.py`)
+
+The repo root holds a fan of single-purpose runner scripts. Only two are
+wired into the weekly cadence; the rest are ad-hoc or experimental and a
+fresh agent should not promote them into the rhythm without confirmation.
+
+| Script | Role | When to touch |
+|---|---|---|
+| `run_screener.py` | **Cadence.** Tier-aware universe screen. | Driven by `weekly_workflow.py`. |
+| `run_copilot_matrix.py` | **Cadence.** Dual-persona Stage-A → Stage-B matrix; the only runner whose output the rest of the pipeline ingests. | `weekly_workflow.py --chain`; one-off matrix runs. |
+| `run_copilot_persona_aligned.py` | Per-ticker subrunner (matrix shells out to it). Also runnable standalone for a single-stage view — but does **not** write `verdict_ledger.json`. | Ad-hoc single-ticker checks. |
+| `run_copilot_aggressive_aligned.py` | Aggressive-persona only (no Stage B). | Experimental / ad-hoc. |
+| `run_copilot_multi.py` | Sequential multi-ticker via Copilot Chat API (any model). | Ad-hoc batches. |
+| `run_copilot_opus.py`, `run_copilot_opus_multi.py` | Legacy Opus-via-Copilot launchers. | Kept for back-compat; new work should use the multi variant. |
+| `run_opus.py` | Direct Anthropic API (no Copilot proxy). Premium-cost. | Ad-hoc Opus runs with a raw key. |
+| `run_github_models.py` | Routes through GitHub Models (OpenAI-compat; falls back to `gh auth token`). | Experimentation across hosted models. |
+| `compare_runs.py` | Side-by-side markdown diff of two `runs/<id>/summary.json` files. | Comparing persona / model behaviour. |
+| `resynthesize_pm.py` | Re-invoke just the Portfolio Manager against a saved `final_state` — skips the expensive debate. | Iterating on PM behaviour without paying for the upstream graph again. |
+
+**Rule of thumb:** if it isn't `run_screener.py` or `run_copilot_matrix.py`,
+it isn't part of the cadence. Don't feed it to
+`weekly_workflow.py --chain-runner <other>` — Phase 4 explicitly warns when
+you do.
 
 ---
 
@@ -356,11 +382,37 @@ detects+surfaces that divergence.
 ### Discoverability
 
 Repo-local skills at `.copilot/skills/<name>` are not auto-loaded by the CLI.
-Symlink once to make discoverable across sessions:
+Symlink the whole set once to make them discoverable across sessions:
 ```bash
-ln -s "$(pwd)/.copilot/skills/tradingagents-portfolio-advisor" \
-    ~/.copilot/skills/tradingagents-portfolio-advisor
+for s in tradingagents-portfolio-advisor \
+         tradingagents-quick-{fundamentals,news,sentiment,technicals,verdict}; do
+    ln -s "$(pwd)/.copilot/skills/$s" ~/.copilot/skills/$s
+done
 ```
+
+---
+
+## Quick lookup skills (`tradingagents-quick-*`)
+
+Five sibling skills wrap raw-signal dataflows so a future agent (or the
+user) can answer single-ticker questions in seconds instead of re-running
+the full LangGraph pipeline. All live in `.copilot/skills/` alongside the
+portfolio advisor and symlink into `~/.copilot/skills/`.
+
+| Skill / script | What it does | Typical latency |
+|---|---|---|
+| `tradingagents-quick-fundamentals` → `scripts/quick_fundamentals.py` | Fundamentals snapshot + insider transactions (yfinance → alpha_vantage fallback chain). | ~5–10s |
+| `tradingagents-quick-news` → `scripts/quick_news.py` | Recent headlines for a ticker; no LLM step. | ~3–8s |
+| `tradingagents-quick-sentiment` → `scripts/quick_sentiment.py` | Reddit + Stocktwits raw posts, optional FinBERT/keyword polarity. | ~5–10s |
+| `tradingagents-quick-technicals` → `scripts/quick_technicals.py` | OHLCV + indicators via the market dataflow. | ~3–8s |
+| `tradingagents-quick-verdict` → `scripts/quick_verdict.py` | **Slow path** — shells out to `run_copilot_matrix.py` for one ticker, parses `verdict_ledger.json`, prints Rating / PTs / compression / tier / one-line ticket. | ~3–5 min |
+
+Routing heuristic:
+- "What's the read on X?" → `quick-verdict` (full dual-frame verdict on one name).
+- "Is X sentiment turning?" / "What's the recent news?" → the matching
+  single-dimension quick skill.
+- Anything that touches the live book or asks "what should I do with my
+  portfolio?" → the portfolio advisor skill, not these.
 
 ---
 
@@ -415,11 +467,8 @@ POLYGON_API_KEY=...        # mandatory for screener + options overlay
 OPENAI_API_KEY=...         # OR any other supported LLM provider:
 ANTHROPIC_API_KEY=...      # (GOOGLE/XAI/DEEPSEEK/DASHSCOPE/ZHIPU/OPENROUTER)
 
-# Tests baseline
+# Tests — see the dedicated "Testing" section for baseline + known flake
 .venv/bin/python -m pytest tests/ -x -q
-# → 535 passed, 41 subtests passed in ~16s
-# (one timing-sensitive flake: deselect tests/test_polygon_pacer.py::test_retry_after_seconds_is_honored
-#  if a parallel run perturbs sleep budgets)
 ```
 
 `runs/` is fully gitignored (so `runs/index.db` and all per-run artifacts
@@ -642,6 +691,47 @@ starter sizing from policy), `--json`.
 
 ---
 
+## Support scripts (not part of the cadence)
+
+These exist in `scripts/` but aren't called automatically by
+`weekly_workflow.py`. Use the right one for the right job; don't wire them
+into the weekly tick without explicit confirmation.
+
+| Script | Purpose |
+|---|---|
+| `build_earnings_calendar.py` | Builds `earnings_calendar.json` next to a screener or matrix run (auto-discovered by `score_picks_iv_surface.py` for its earnings-inside-expiry flag). Tickers from `--screener-run`, `--matrix-run`, or explicit `--tickers`. |
+| `build_short_interest.py` | Polygon biweekly short-interest + daily short-volume snapshot. Wired into the portfolio skill to surface squeeze potential. `--tickers` or `--from-positions`. |
+| `build_theme_momentum.py` | 5d/20d/60d returns for a basket + relative strength vs SPY. Answers "is the AI stack still ripping?" `--tickers` or `--from-positions`. |
+| `build_macro_snapshot.py` | VIX / SPX 5d / 10y-3m yield curve → `normal` / `defensive` / `halt` regime. **Advisory by default**; the weekly workflow chooses via `--macro-gate` whether non-normal warns / throttles / blocks. |
+| `build_position_greeks.py` | Live Δ/Γ/Θ/Vega per options position from Polygon `/v3/snapshot/options/`, plus portfolio-level aggregates. Consumed by the portfolio skill. |
+| `compare_insider_ablation.py` | Markdown comparison of verdict ledgers across the broken / ablated / fixed insider-tool trio — the empirical basis for the `VETO=0, —=1, C=2, B=3, A=4` tier rank ladder used by the portfolio advisor. |
+| `grounding_audit.py` | Deterministic per-ticker grounding-risk score over a completed matrix run; flags fabrication risk in researcher / risk-debate / PM nodes that lack grounding tools. |
+| `run_weekly_all_tiers.py` | Runs `weekly_workflow.py` sequentially across mid + large + mega tiers (Polygon free-tier is 5 req/min, so serializing is forced anyway). Default is screen-only — pass `--chain` to also matrix-run each tier's NEW list. |
+| `watch_pipeline.py` | Live TUI dashboard over a weekly / matrix log file (`runs/weekly_workflow_*.log`, `runs/matrix_<id>_*.log`, launchd's `runs/weekly_workflow.log`). Read-only. |
+| `smoke_structured_output.py` | End-to-end smoke for the three structured-output agents (Research Manager, Trader, Portfolio Manager) against a real LLM provider. Use to verify `json_schema` / `response_schema` / tool-use bindings before bumping a model. |
+
+---
+
+## Live market data — use the Massive MCP, not guesses
+
+For **live** prices, quotes, options chains, and greeks, route through the
+Massive MCP (`mcp__massive__*`) — `search_endpoints` → `call_api`, with
+`store_as` + `query_data` for multi-step joins. Don't quote prices,
+deltas, or IV from memory; the user has explicitly flagged this as a
+common failure mode (memory: `feedback_massive_mcp_usage.md`).
+
+The `scripts/build_*` family stays the right path for **batch** lookups
+feeding a run artifact — don't replace those with the MCP. Rough split:
+
+- **Single-ticker, ad-hoc question** ("what's NVDA's 0.55Δ Jan strike right
+  now?") → Massive MCP.
+- **Run-time artifact** (matrix overlay, portfolio greeks, weekly tick) →
+  the existing scripts.
+- **Library docs / SDK syntax** ("what's the Polygon snapshot endpoint
+  shape?") → Context7 MCP, not web search.
+
+---
+
 ## Don'ts
 
 - ❌ Don't add new dependencies casually — `requirements.txt` is intentionally
@@ -659,7 +749,11 @@ starter sizing from policy), `--json`.
   reconciled — that divergence is signal the skill surfaces.
 - ❌ Don't mix per-share and per-contract option fields. `premium_paid_per_share`
   is the broker-quoted per-share price; `qty × 100 × per_share = total cost`.
-  See `runs/portfolio/positions.schema.md`.
+  See `runs/portfolio/positions.schema.md` (generated on first portfolio-skill
+  run; `runs/` is gitignored, so a fresh checkout won't have it until then).
+- ❌ Don't quote live prices, greeks, or IV from memory. Route ad-hoc
+  market-data lookups through the Massive MCP (`mcp__massive__*`). The
+  `scripts/build_*` family stays the right tool for batch artifacts.
 
 ---
 
