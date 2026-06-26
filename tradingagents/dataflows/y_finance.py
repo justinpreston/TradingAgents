@@ -363,7 +363,7 @@ def get_fundamentals(
         info = yf_retry(lambda: ticker_obj.info)
 
         if not info:
-            raise NoMarketDataError(ticker, canonical, "no fundamentals returned")
+            return f"No fundamentals data found for symbol '{ticker}'"
 
         is_historical = _is_historical_curr_date(curr_date)
 
@@ -393,9 +393,11 @@ def get_fundamentals(
         # yfinance returns a stub dict (e.g. {"trailingPegRatio": None}) for
         # unknown symbols, so `info` is truthy but every field is empty. Treat
         # "no usable fields" as no data rather than emitting a bare header the
-        # agent might fabricate around.
+        # agent might fabricate around. Mirror the polygon vendor's string
+        # contract (this fork's fundamentals path returns a descriptive string
+        # on no-data rather than raising).
         if not lines:
-            raise NoMarketDataError(ticker, canonical, "no fundamental fields returned")
+            return f"No fundamentals data found for symbol '{ticker}'"
 
         header = f"# Company Fundamentals for {canonical}\n"
         header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"

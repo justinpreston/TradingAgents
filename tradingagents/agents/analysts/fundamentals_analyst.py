@@ -8,6 +8,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_cashflow,
     get_fundamentals,
     get_income_statement,
+    get_insider_transactions,
     get_instrument_context_from_state,
     get_language_instruction,
 )

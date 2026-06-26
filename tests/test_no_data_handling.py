@@ -15,6 +15,7 @@ import pandas as pd
 import pytest
 
 from tradingagents.dataflows import interface, stockstats_utils
+from tradingagents.dataflows import config as _config_mod
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.symbol_utils import NoMarketDataError
 
@@ -48,6 +49,19 @@ class TestLoadOhlcvNoPoison(unittest.TestCase):
 
 @pytest.mark.unit
 class TestRouteToVendorSentinel(unittest.TestCase):
+    def setUp(self):
+        # This fork defaults get_stock_data to the polygon vendor (a locked-in
+        # invariant). These tests patch VENDOR_METHODS with {yfinance,
+        # alpha_vantage} to exercise the vendor-agnostic sentinel mechanism, so
+        # route get_stock_data at those vendors for the duration of the test.
+        # The full config is snapshotted and restored to avoid leaking into
+        # other tests.
+        self._saved_config = _config_mod.get_config()
+        set_config({"tool_vendors": {"get_stock_data": "yfinance,alpha_vantage"}})
+
+    def tearDown(self):
+        _config_mod._config = self._saved_config
+
     def test_no_data_from_all_vendors_returns_sentinel(self):
         def raises_no_data(symbol, *a, **k):
             raise NoMarketDataError(symbol, "GC=F", "no rows")
