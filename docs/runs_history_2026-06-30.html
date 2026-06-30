@@ -1,0 +1,754 @@
+<!doctype html><html><head><meta charset="utf-8"><title>TradingAgents Run History</title><style>:root{color-scheme:dark;--bg:#0b1020;--panel:#111827;--muted:#94a3b8;--text:#e5e7eb;--accent:#60a5fa;--line:#263246}body{margin:0;background:linear-gradient(180deg,#0b1020,#111827);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}main{max-width:1200px;margin:0 auto;padding:32px}h1{font-size:36px}h2{border-top:1px solid var(--line);padding-top:24px;margin-top:36px;color:#bfdbfe}h3{color:#93c5fd}code{background:#0f172a;border:1px solid var(--line);border-radius:4px;padding:1px 4px;color:#dbeafe}table{width:100%;border-collapse:collapse;margin:14px 0 24px;background:rgba(17,24,39,.75);border:1px solid var(--line)}th,td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}th{text-align:left;background:#1f2937;color:#bfdbfe}tr:nth-child(even) td{background:rgba(15,23,42,.55)}p{color:#d1d5db}</style></head><body><main>
+<h1>TradingAgents Run History</h1>
+<p>Generated: 2026-06-30</p>
+<p>This inventory documents the TradingAgents pipeline run artifacts under <code>runs/</code> to date. The operating cadence is the locked-in weekly Friday screener, on-demand matrix only for NEW tickers, and same-day options refresh before entry. Raw JSON/Markdown files in each run directory are authoritative; <code>runs/index.db</code> is a derived catalog rebuilt by <code>scripts/index_runs.py</code>.</p>
+<h2>At-a-glance</h2>
+<table>
+<tr><th>Metric</th><th>Value</th><th>Source</th></tr>
+<tr><td>Screener directories found</td><td>32</td><td><code>runs/screener_*</code></td></tr>
+<tr><td>Matrix directories found</td><td>37</td><td><code>runs/matrix_*</code></td></tr>
+<tr><td>Matrix rows analyzed</td><td>358</td><td><code>runs/matrix_*/verdict_ledger.json</code></td></tr>
+<tr><td>Overall PICK / VETOED</td><td>106 / 249</td><td><code>verdict_ledger.json</code> per run</td></tr>
+<tr><td>Derived matrix tier counts</td><td>A: 25, B: 14, C: 67, VETO: 249, —: 3</td><td>Derived row rule</td></tr>
+<tr><td>Chronological span</td><td>2026-04-29 → 2026-06-26</td><td>Run manifests / directory names</td></tr>
+</table>
+<h2>Matrix timeline</h2>
+<table>
+<tr><th>Date</th><th>Run id</th><th>Universe</th><th>Analyzed</th><th>#PICK</th><th>#VETOED</th><th>Picks (derived tier)</th><th>Source</th></tr>
+<tr><td>2026-04-30</td><td>matrix_2026-04-30_1839_top25</td><td>unspecified</td><td>25</td><td>10</td><td>15</td><td>ADI (A), APD (A), APH (C), ARMK (B), AROC (A), EQIX (C), KEY (C), TJX (C), TRGP (A), VIRT (C)</td><td><code>runs/matrix_2026-04-30_1839_top25/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-01</td><td>matrix_2026-05-01_top25</td><td>unspecified</td><td>25</td><td>11</td><td>14</td><td>AROC (B), CRUS (C), CTRE (A), FHB (B), GVA (C), IDA (A), KALU (C), LGND (C), PRIM (C), VIRT (B), VNOM (A)</td><td><code>runs/matrix_2026-05-01_top25/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-05</td><td>matrix_portfolio_2026-05-05</td><td>single/ad hoc</td><td>9</td><td>2</td><td>7</td><td>METC (C), MSFT (A)</td><td><code>runs/matrix_portfolio_2026-05-05/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-06</td><td>matrix_megacap_followup_2026-05-06</td><td>unspecified</td><td>6</td><td>1</td><td>5</td><td>GOOGL (C)</td><td><code>runs/matrix_megacap_followup_2026-05-06/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-06</td><td>matrix_weekly_2026-05-06_chain</td><td>unspecified</td><td>5</td><td>4</td><td>1</td><td>GS (C), KO (A), NVDA (C), TXN (A)</td><td><code>runs/matrix_weekly_2026-05-06_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-08</td><td>matrix_ablation_no_insider_2026-05-08_2228</td><td>unspecified</td><td>7</td><td>4</td><td>3</td><td>ARMK (C), FHB (A), VIRT (C), VNOM (C)</td><td><code>runs/matrix_ablation_no_insider_2026-05-08_2228/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-08</td><td>matrix_fixed_insider_2026-05-08_2303</td><td>unspecified</td><td>7</td><td>5</td><td>2</td><td>ARMK (C), CTRE (A), FHB (A), VIRT (B), VNOM (C)</td><td><code>runs/matrix_fixed_insider_2026-05-08_2303/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-08</td><td>matrix_large_weekly_2026-05-08_1754_chain</td><td>large</td><td>16</td><td>3</td><td>13</td><td>HAS (B), IEX (C), STT (B)</td><td><code>runs/matrix_large_weekly_2026-05-08_1754_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-08</td><td>matrix_mega_weekly_2026-05-08_1754_chain</td><td>mega</td><td>17</td><td>7</td><td>10</td><td>AMZN (C), BAC (C), C (C), COST (A), GE (C), MS (C), WMT (C)</td><td><code>runs/matrix_mega_weekly_2026-05-08_1754_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-08</td><td>matrix_mid_weekly_2026-05-08_1754_chain</td><td>mid</td><td>16</td><td>6</td><td>9</td><td>AVT (C), CARG (C), CXW (C), RSI (C), SLAB (C), YOU (C)</td><td><code>runs/matrix_mid_weekly_2026-05-08_1754_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-08</td><td>matrix_refresh_priortier_ab_2026-05-08_2053</td><td>unspecified</td><td>10</td><td>6</td><td>4</td><td>APD (A), ARMK (C), AROC (B), FHB (C), IDA (A), VNOM (C)</td><td><code>runs/matrix_refresh_priortier_ab_2026-05-08_2053/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-08</td><td>matrix_virt_20260508_1452</td><td>single/ad hoc</td><td>1</td><td>1</td><td>0</td><td>VIRT (C)</td><td><code>runs/matrix_virt_20260508_1452/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-09</td><td>matrix_ai_stack_2026-05-09</td><td>theme: AI stack</td><td>19</td><td>4</td><td>15</td><td>AMZN (C), CEG (C), GOOGL (C), TSM (B)</td><td><code>runs/matrix_ai_stack_2026-05-09/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-09</td><td>matrix_ai_stack_2026-05-09_b</td><td>theme: AI stack</td><td>15</td><td>1</td><td>14</td><td>ETN (C)</td><td><code>runs/matrix_ai_stack_2026-05-09_b/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-09</td><td>matrix_ai_stack_2026-05-09_full</td><td>theme: AI stack</td><td>19</td><td>4</td><td>15</td><td>AMZN (B), GOOGL (C), TER (B), TSM (C)</td><td><code>runs/matrix_ai_stack_2026-05-09_full/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-14</td><td>matrix_amzn_2026-05-14</td><td>single/ad hoc</td><td>1</td><td>1</td><td>0</td><td>AMZN (C)</td><td><code>runs/matrix_amzn_2026-05-14/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-14</td><td>matrix_ilmn_2026-05-14</td><td>single/ad hoc</td><td>1</td><td>0</td><td>1</td><td>—</td><td><code>runs/matrix_ilmn_2026-05-14/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-14</td><td>matrix_virt_2026-05-14</td><td>single/ad hoc</td><td>1</td><td>0</td><td>1</td><td>—</td><td><code>runs/matrix_virt_2026-05-14/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-15</td><td>matrix_large_weekly_2026-05-15_2251_chain</td><td>large</td><td>24</td><td>7</td><td>17</td><td>AFL (C), EQIX (C), ET (A), HL (C), KMI (A), STLD (A), TT (C)</td><td><code>runs/matrix_large_weekly_2026-05-15_2251_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-15</td><td>matrix_mega_weekly_2026-05-15_2236_chain</td><td>mega</td><td>19</td><td>8</td><td>11</td><td>ADI (C), AVGO (C), GOOG (C), GOOGL (C), KO (A), LIN (C), LLY (C), PM (B)</td><td><code>runs/matrix_mega_weekly_2026-05-15_2236_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-15</td><td>matrix_weekly_2026-05-15_1957_chain</td><td>unspecified</td><td>5</td><td>1</td><td>4</td><td>DAR (C)</td><td><code>runs/matrix_weekly_2026-05-15_1957_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-15</td><td>matrix_weekly_2026-05-15_extended</td><td>unspecified</td><td>20</td><td>5</td><td>14</td><td>AROC (C), GVA (A), RSI (C), SSRM (C), YOU (B)</td><td><code>runs/matrix_weekly_2026-05-15_extended/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-22</td><td>matrix_large_weekly_2026-05-22_1142_chain</td><td>large</td><td>10</td><td>2</td><td>8</td><td>EBAY (B), TJX (C)</td><td><code>runs/matrix_large_weekly_2026-05-22_1142_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-22</td><td>matrix_mega_weekly_2026-05-22_1139_chain</td><td>mega</td><td>10</td><td>4</td><td>6</td><td>AMZN (C), C (C), GS (A), VZ (A)</td><td><code>runs/matrix_mega_weekly_2026-05-22_1139_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-22</td><td>matrix_mid_weekly_2026-05-22_1142_chain</td><td>mid</td><td>10</td><td>1</td><td>9</td><td>CRUS (C)</td><td><code>runs/matrix_mid_weekly_2026-05-22_1142_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-30</td><td>matrix_large_weekly_2026-05-30_1357_chain</td><td>large</td><td>5</td><td>0</td><td>5</td><td>—</td><td><code>runs/matrix_large_weekly_2026-05-30_1357_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-30</td><td>matrix_mega_weekly_2026-05-30_1335_chain</td><td>mega</td><td>5</td><td>1</td><td>4</td><td>ADI (C)</td><td><code>runs/matrix_mega_weekly_2026-05-30_1335_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-05-30</td><td>matrix_weekly_2026-05-30_1247_chain</td><td>unspecified</td><td>5</td><td>0</td><td>5</td><td>—</td><td><code>runs/matrix_weekly_2026-05-30_1247_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-06-06</td><td>matrix_large_weekly_2026-06-06_2302_chain</td><td>large</td><td>5</td><td>0</td><td>5</td><td>—</td><td><code>runs/matrix_large_weekly_2026-06-06_2302_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-06-06</td><td>matrix_mega_weekly_2026-06-06_2323_chain</td><td>mega</td><td>5</td><td>1</td><td>4</td><td>C (A)</td><td><code>runs/matrix_mega_weekly_2026-06-06_2323_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-06-06</td><td>matrix_mid_weekly_2026-06-06_2239_chain</td><td>mid</td><td>5</td><td>0</td><td>5</td><td>—</td><td><code>runs/matrix_mid_weekly_2026-06-06_2239_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-06-12</td><td>matrix_large_weekly_2026-06-12_1051_chain</td><td>large</td><td>5</td><td>0</td><td>5</td><td>—</td><td><code>runs/matrix_large_weekly_2026-06-12_1051_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-06-12</td><td>matrix_mega_weekly_2026-06-12_1115_chain</td><td>mega</td><td>5</td><td>2</td><td>3</td><td>ADI (C), GS (C)</td><td><code>runs/matrix_mega_weekly_2026-06-12_1115_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-06-12</td><td>matrix_mid_weekly_2026-06-12_1021_chain</td><td>mid</td><td>5</td><td>1</td><td>3</td><td>KLIC (C)</td><td><code>runs/matrix_mid_weekly_2026-06-12_1021_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-06-26</td><td>matrix_large_weekly_2026-06-26_2126_chain</td><td>large</td><td>5</td><td>1</td><td>4</td><td>NUE (A)</td><td><code>runs/matrix_large_weekly_2026-06-26_2126_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-06-26</td><td>matrix_mega_weekly_2026-06-26_2146_chain</td><td>mega</td><td>5</td><td>1</td><td>4</td><td>ADI (C)</td><td><code>runs/matrix_mega_weekly_2026-06-26_2146_chain/verdict_ledger.json</code></td></tr>
+<tr><td>2026-06-26</td><td>matrix_mid_weekly_2026-06-26_2103_chain</td><td>mid</td><td>5</td><td>1</td><td>4</td><td>KLIC (C)</td><td><code>runs/matrix_mid_weekly_2026-06-26_2103_chain/verdict_ledger.json</code></td></tr>
+</table>
+<h2>Screener run inventory</h2>
+<table>
+<tr><th>Trading date</th><th>Run id</th><th>Tier/universe</th><th>Universe size</th><th>Candidates</th><th>Top tickers (up to 10)</th><th>Partial?</th><th>Source</th></tr>
+<tr><td>2026-04-29</td><td>screener_2026-04-30_0809</td><td>mcap $2B–$200B</td><td>40</td><td>10</td><td>LITE, ROG, TTE, NBIS, AKAM, FLEX, ALAB, ONB, MOS, LAUR</td><td>—</td><td><code>runs/screener_2026-04-30_0809/screener.json</code></td></tr>
+<tr><td>2026-04-29</td><td>screener_2026-04-30_0815</td><td>mcap $2B–$200B</td><td>164</td><td>20</td><td>ADI, STLD, KEY, CTRE, COHU, MTSI, WULF, AXGN, SLAB, BIIB</td><td>—</td><td><code>runs/screener_2026-04-30_0815/screener.json</code></td></tr>
+<tr><td>2026-04-29</td><td>screener_2026-04-30_0920</td><td>mcap $2B–$200B</td><td>20</td><td>10</td><td>LITE, ROG, RIVN, FLEX, ONB, EXTR, MOS, PNFP, LAUR, Z</td><td>yes</td><td><code>runs/screener_2026-04-30_0920/screener.json</code></td></tr>
+<tr><td>2026-04-29</td><td>screener_2026-04-30_0926</td><td>mcap $2B–$200B</td><td>27</td><td>10</td><td>LITE, STLD, MTSI, ROG, PL, RIVN, PAYX, AKAM, FLEX, ONB</td><td>no</td><td><code>runs/screener_2026-04-30_0926/screener.json</code></td></tr>
+<tr><td>2026-04-29</td><td>screener_2026-04-30_0955</td><td>mcap $2B–$200B</td><td>1155</td><td>25</td><td>ABNB, TVTX, DAR, APD, ADI, SNDK, AROC, AAOI, ALGM, TRGP</td><td>no</td><td><code>runs/screener_2026-04-30_0955/screener.json</code></td></tr>
+<tr><td>2026-04-30</td><td>screener_2026-04-30_0905</td><td>unspecified</td><td>—</td><td>missing</td><td>—</td><td>—</td><td><code>missing screener.json</code></td></tr>
+<tr><td>2026-04-30</td><td>screener_2026-04-30_0932</td><td>unspecified</td><td>—</td><td>missing</td><td>—</td><td>—</td><td><code>missing screener.json</code></td></tr>
+<tr><td>2026-04-30</td><td>screener_2026-05-01_0750</td><td>mid (by mcap filter)</td><td>543</td><td>25</td><td>TVTX, DAR, SXI, KLIC, KALU, FHB, VFC, AROC, VIRT, VNOM</td><td>yes</td><td><code>runs/screener_2026-05-01_0750/screener.json</code></td></tr>
+<tr><td>2026-05-05</td><td>screener_2026-05-06_1027</td><td>mega (by mcap filter)</td><td>54</td><td>25</td><td>TXN, GS, KO, NVDA, AVGO, LLY, SNDK, MU, AMD, ANET</td><td>yes</td><td><code>runs/screener_2026-05-06_1027/screener.json</code></td></tr>
+<tr><td>2026-05-05</td><td>screener_2026-05-06_1705</td><td>mega (by mcap filter)</td><td>54</td><td>25</td><td>TXN, GS, KO, NVDA, AVGO, LLY, SNDK, MU, AMD, ANET</td><td>no</td><td><code>runs/screener_2026-05-06_1705/screener.json</code></td></tr>
+<tr><td>2026-05-07</td><td>screener_large_2026-05-08_1734</td><td>large</td><td>509</td><td>25</td><td>ABNB, ADI, STLD, ROK, ON, AAOI, EBAY, SNDK, LITE, APD</td><td>no</td><td><code>runs/screener_large_2026-05-08_1734/screener.json</code></td></tr>
+<tr><td>2026-05-07</td><td>screener_mega_2026-05-08_1736</td><td>mega</td><td>52</td><td>25</td><td>TXN, MU, GS, KO, AMD, AMZN, AVGO, LLY, BAC, LRCX</td><td>no</td><td><code>runs/screener_mega_2026-05-08_1736/screener.json</code></td></tr>
+<tr><td>2026-05-07</td><td>screener_mid_2026-05-08_1730</td><td>mid</td><td>571</td><td>25</td><td>RSI, AVT, KMT, THR, SLAB, COHU, LION, UUUU, VFC, CENX</td><td>no</td><td><code>runs/screener_mid_2026-05-08_1730/screener.json</code></td></tr>
+<tr><td>2026-05-08</td><td>screener_mid_2026-05-08_1636</td><td>mid</td><td>—</td><td>missing</td><td>—</td><td>—</td><td><code>missing screener.json</code></td></tr>
+<tr><td>2026-05-14</td><td>screener_2026-05-15_1954</td><td>mid (by mcap filter)</td><td>474</td><td>25</td><td>DAR, CORZ, SLAB, RDW, COHU, KLIC, LION, ONDS, AVT, RSI</td><td>no</td><td><code>runs/screener_2026-05-15_1954/screener.json</code></td></tr>
+<tr><td>2026-05-14</td><td>screener_large_2026-05-15_2239</td><td>large</td><td>424</td><td>25</td><td>WDC, VICR, APD, LITE, ROK, STLD, EBAY, LSCC, NUE, CRDO</td><td>no</td><td><code>runs/screener_large_2026-05-15_2239/screener.json</code></td></tr>
+<tr><td>2026-05-14</td><td>screener_mega_2026-05-15_2235</td><td>mega</td><td>52</td><td>25</td><td>ADI, SNDK, MU, GS, AMZN, TXN, AMD, C, AVGO, LLY</td><td>no</td><td><code>runs/screener_mega_2026-05-15_2235/screener.json</code></td></tr>
+<tr><td>2026-05-21</td><td>screener_large_2026-05-22_1138</td><td>large</td><td>424</td><td>25</td><td>WDC, NUE, CRDO, EBAY, ROK, TJX, LSCC, TTMI, LITE, PWR</td><td>no</td><td><code>runs/screener_large_2026-05-22_1138/screener.json</code></td></tr>
+<tr><td>2026-05-21</td><td>screener_mega_2026-05-22_1138</td><td>mega</td><td>54</td><td>25</td><td>TXN, SNDK, MU, AMD, GS, C, AMZN, LLY, VZ, GOOG</td><td>no</td><td><code>runs/screener_mega_2026-05-22_1138/screener.json</code></td></tr>
+<tr><td>2026-05-21</td><td>screener_mid_2026-05-22_1138</td><td>mid</td><td>452</td><td>25</td><td>CORZ, KLIC, MXL, SLAB, AVT, OSCR, LION, VSH, RDW, CRUS</td><td>no</td><td><code>runs/screener_mid_2026-05-22_1138/screener.json</code></td></tr>
+<tr><td>2026-05-29</td><td>screener_2026-05-30_1243</td><td>mid (by mcap filter)</td><td>565</td><td>25</td><td>CORZ, KLIC, OUST, KALU, SLAB, AVT, COHU, FROG, THR, RCAT</td><td>no</td><td><code>runs/screener_2026-05-30_1243/screener.json</code></td></tr>
+<tr><td>2026-05-29</td><td>screener_large_2026-05-30_1355</td><td>large</td><td>563</td><td>25</td><td>ARW, CRDO, CPAY, ROK, TWLO, WDC, TJX, NET, PWR, RKLB</td><td>no</td><td><code>runs/screener_large_2026-05-30_1355/screener.json</code></td></tr>
+<tr><td>2026-05-29</td><td>screener_mega_2026-05-30_1334</td><td>mega</td><td>55</td><td>25</td><td>ADI, SNDK, TXN, C, AMZN, MU, LLY, PLTR, GS, AMD</td><td>no</td><td><code>runs/screener_mega_2026-05-30_1334/screener.json</code></td></tr>
+<tr><td>2026-06-05</td><td>screener_large_2026-06-06_2300</td><td>large</td><td>438</td><td>25</td><td>FROG, NUE, CRDO, ROK, ADI, WDC, TWLO, MNST, STLD, DDOG</td><td>no</td><td><code>runs/screener_large_2026-06-06_2300/screener.json</code></td></tr>
+<tr><td>2026-06-05</td><td>screener_mega_2026-06-06_2322</td><td>mega</td><td>53</td><td>25</td><td>MU, SNDK, C, GS, MRVL, LLY, AMD, TXN, GOOG, DELL</td><td>no</td><td><code>runs/screener_mega_2026-06-06_2322/screener.json</code></td></tr>
+<tr><td>2026-06-05</td><td>screener_mid_2026-06-06_2236</td><td>mid</td><td>475</td><td>25</td><td>OSCR, RAL, SLAB, RDW, LQDA, HNGE, XMTR, OUST, PSMT, KLIC</td><td>no</td><td><code>runs/screener_mid_2026-06-06_2236/screener.json</code></td></tr>
+<tr><td>2026-06-11</td><td>screener_large_2026-06-12_1044</td><td>large</td><td>443</td><td>25</td><td>KEYS, CRDO, NUE, ROK, WDC, TTMI, BTSG, STLD, FTNT, LSCC</td><td>no</td><td><code>runs/screener_large_2026-06-12_1044/screener.json</code></td></tr>
+<tr><td>2026-06-11</td><td>screener_mega_2026-06-12_1114</td><td>mega</td><td>56</td><td>25</td><td>MU, ADI, SNDK, GS, C, TXN, MRVL, BAC, AMD, LLY</td><td>no</td><td><code>runs/screener_mega_2026-06-12_1114/screener.json</code></td></tr>
+<tr><td>2026-06-11</td><td>screener_mid_2026-06-12_1014</td><td>mid</td><td>514</td><td>25</td><td>KLIC, RSI, KALU, VFC, OSCR, SLAB, RDW, FROG, HNGE, VSH</td><td>no</td><td><code>runs/screener_mid_2026-06-12_1014/screener.json</code></td></tr>
+<tr><td>2026-06-25</td><td>screener_large_2026-06-26_1829</td><td>large</td><td>459</td><td>25</td><td>NUE, CRDO, ALGM, KEYS, ROK, SNX, STT, MTZ, FTNT, DKS</td><td>no</td><td><code>runs/screener_large_2026-06-26_1829/screener.json</code></td></tr>
+<tr><td>2026-06-25</td><td>screener_mega_2026-06-26_1836</td><td>mega</td><td>58</td><td>25</td><td>MU, ADI, SNDK, WDC, TXN, GS, DELL, AVGO, MRVL, AMD</td><td>no</td><td><code>runs/screener_mega_2026-06-26_1836/screener.json</code></td></tr>
+<tr><td>2026-06-25</td><td>screener_mid_2026-06-26_1820</td><td>mid</td><td>519</td><td>25</td><td>RSI, KALU, AVT, ESTA, KLIC, KN, FROG, VSH, COHU, OSCR</td><td>no</td><td><code>runs/screener_mid_2026-06-26_1820/screener.json</code></td></tr>
+</table>
+<h2>Per-run matrix details</h2>
+<h3>matrix_2026-04-30_1839_top25</h3>
+<p>• Date/universe: <strong>2026-04-30</strong>, <strong>unspecified</strong>; source <code>runs/matrix_2026-04-30_1839_top25/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>25 analyzed</strong>, <strong>10 PICK</strong>, <strong>15 VETOED</strong>; derived tiers: A=4, B=1, C=5, VETO=15.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>ADI</td><td>A</td><td>$402.26</td><td>$408.00</td><td>$420.00</td><td>-2.9%</td></tr>
+<tr><td>APD</td><td>A</td><td>$300.05</td><td>$330.00</td><td>$315.00</td><td>4.5%</td></tr>
+<tr><td>APH</td><td>C</td><td>$147.27</td><td>$166.00</td><td>—</td><td>—</td></tr>
+<tr><td>ARMK</td><td>B</td><td>$45.69</td><td>$52.00</td><td>$47.00</td><td>9.6%</td></tr>
+<tr><td>AROC</td><td>A</td><td>$38.75</td><td>$42.00</td><td>$40.50</td><td>3.6%</td></tr>
+<tr><td>EQIX</td><td>C</td><td>$1,082.83</td><td>$1,250.00</td><td>—</td><td>—</td></tr>
+<tr><td>KEY</td><td>C</td><td>$22.11</td><td>$23.34</td><td>—</td><td>—</td></tr>
+<tr><td>TJX</td><td>C</td><td>$156.75</td><td>$180.00</td><td>—</td><td>—</td></tr>
+<tr><td>TRGP</td><td>A</td><td>$260.08</td><td>$270.00</td><td>$262.50</td><td>2.8%</td></tr>
+<tr><td>VIRT</td><td>C</td><td>$49.66</td><td>$65.00</td><td>—</td><td>—</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_2026-04-30_1839_top25/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>10</strong> of <strong>10</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>ADI</td><td>A</td><td>long_call</td><td>2026-09-18</td><td>long call 400 @ $45.20 (delta 0.55)</td><td>$4,520.00</td><td>$445.20</td></tr>
+<tr><td>APD</td><td>A</td><td>long_call</td><td>2026-09-18</td><td>long call 300 @ $22.40 (delta 0.54)</td><td>$2,240.00</td><td>$322.40</td></tr>
+<tr><td>APH</td><td>C</td><td>long_call</td><td>2027-03-19</td><td>long call 160 @ $20.38 (delta 0.51)</td><td>$2,038.00</td><td>$180.38</td></tr>
+<tr><td>ARMK</td><td>B</td><td>long_call</td><td>2026-10-16</td><td>long call 49 @ $2.00 (delta 0.39)</td><td>$200.00</td><td>$51.00</td></tr>
+<tr><td>AROC</td><td>A</td><td>long_call</td><td>2026-11-20</td><td>long call 35 @ $6.10 (delta 0.69)</td><td>$610.00</td><td>$41.10</td></tr>
+<tr><td>EQIX</td><td>C</td><td>long_call</td><td>2026-12-18</td><td>long call 1020 @ $158.00 (delta 0.64)</td><td>$15,800.00</td><td>$1,178.00</td></tr>
+<tr><td>KEY</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 22 @ $1.30 (delta 0.52)</td><td>$130.00</td><td>$23.30</td></tr>
+<tr><td>TJX</td><td>C</td><td>long_call</td><td>2027-01-15</td><td>long call 160 @ $12.50 (delta 0.53)</td><td>$1,250.00</td><td>$172.50</td></tr>
+<tr><td>TRGP</td><td>A</td><td>long_call</td><td>2026-09-18</td><td>long call 260 @ $20.60 (delta 0.51)</td><td>$2,060.00</td><td>$280.60</td></tr>
+<tr><td>VIRT</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 48 @ $4.59 (delta 0.57)</td><td>$459.00</td><td>$52.59</td></tr>
+</table>
+<h3>matrix_2026-05-01_top25</h3>
+<p>• Date/universe: <strong>2026-05-01</strong>, <strong>unspecified</strong>; source <code>runs/matrix_2026-05-01_top25/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>25 analyzed</strong>, <strong>11 PICK</strong>, <strong>14 VETOED</strong>; derived tiers: A=3, B=3, C=5, VETO=14.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>AROC</td><td>B</td><td>$38.75</td><td>$45.00</td><td>$42.00</td><td>6.7%</td></tr>
+<tr><td>CRUS</td><td>C</td><td>$163.08</td><td>$190.00</td><td>—</td><td>—</td></tr>
+<tr><td>CTRE</td><td>A</td><td>$39.45</td><td>$41.70</td><td>$41.70</td><td>0.0%</td></tr>
+<tr><td>FHB</td><td>B</td><td>$27.28</td><td>$30.00</td><td>$28.50</td><td>5.0%</td></tr>
+<tr><td>GVA</td><td>C</td><td>$137.07</td><td>$150.00</td><td>—</td><td>—</td></tr>
+<tr><td>IDA</td><td>A</td><td>$147.74</td><td>$156.00</td><td>$155.00</td><td>0.6%</td></tr>
+<tr><td>KALU</td><td>C</td><td>$170.43</td><td>$200.00</td><td>—</td><td>—</td></tr>
+<tr><td>LGND</td><td>C</td><td>$229.45</td><td>$270.00</td><td>—</td><td>—</td></tr>
+<tr><td>PRIM</td><td>C</td><td>$181.15</td><td>$220.00</td><td>—</td><td>—</td></tr>
+<tr><td>VIRT</td><td>B</td><td>$49.66</td><td>$65.00</td><td>$52.15</td><td>19.8%</td></tr>
+<tr><td>VNOM</td><td>A</td><td>$49.38</td><td>$52.00</td><td>$52.50</td><td>-1.0%</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_2026-05-01_top25/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>11</strong> of <strong>11</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>AROC</td><td>B</td><td>long_call</td><td>2026-11-20</td><td>long call 35 @ $6.10 (delta 0.72)</td><td>$610.00</td><td>$41.10</td></tr>
+<tr><td>CRUS</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 170 @ $15.60 (delta 0.53)</td><td>$1,560.00</td><td>$185.60</td></tr>
+<tr><td>CTRE</td><td>A</td><td>long_call</td><td>2026-10-16</td><td>long call 40 @ $2.00 (delta 0.49)</td><td>$200.00</td><td>$42.00</td></tr>
+<tr><td>FHB</td><td>B</td><td>long_call</td><td>2026-09-18</td><td>long call 30 @ $1.73 (delta 0.44)</td><td>$173.00</td><td>$31.73</td></tr>
+<tr><td>GVA</td><td>C</td><td>long_call</td><td>2026-12-18</td><td>long call 140 @ $7.50 (delta 0.57)</td><td>$750.00</td><td>$147.50</td></tr>
+<tr><td>IDA</td><td>A</td><td>long_call</td><td>2026-11-20</td><td>long call 145 @ $9.43 (delta 0.57)</td><td>$943.00</td><td>$154.43</td></tr>
+<tr><td>KALU</td><td>C</td><td>long_call</td><td>2026-11-20</td><td>long call 170 @ $16.80 (delta 0.60)</td><td>$1,680.00</td><td>$186.80</td></tr>
+<tr><td>LGND</td><td>C</td><td>long_call</td><td>2026-08-21</td><td>long call 220 @ $27.09 (delta 0.59)</td><td>$2,709.00</td><td>$247.09</td></tr>
+<tr><td>PRIM</td><td>C</td><td>long_call</td><td>2026-12-18</td><td>long call 190 @ $25.71 (delta 0.56)</td><td>$2,571.00</td><td>$215.71</td></tr>
+<tr><td>VIRT</td><td>B</td><td>long_call</td><td>2026-09-18</td><td>long call 48 @ $4.59 (delta 0.55)</td><td>$459.00</td><td>$52.59</td></tr>
+<tr><td>VNOM</td><td>A</td><td>long_call</td><td>2026-09-18</td><td>long call 50 @ $3.80 (delta 0.53)</td><td>$380.00</td><td>$53.80</td></tr>
+</table>
+<h3>matrix_portfolio_2026-05-05</h3>
+<p>• Date/universe: <strong>2026-05-05</strong>, <strong>single/ad hoc</strong>; source <code>runs/matrix_portfolio_2026-05-05/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>9 analyzed</strong>, <strong>2 PICK</strong>, <strong>7 VETOED</strong>; derived tiers: A=1, B=0, C=1, VETO=7.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>METC</td><td>C</td><td>$14.49</td><td>$18.00</td><td>—</td><td>—</td></tr>
+<tr><td>MSFT</td><td>A</td><td>$413.62</td><td>$466.00</td><td>$466.00</td><td>0.0%</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_portfolio_2026-05-05/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>2</strong> of <strong>2</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>METC</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 16 @ $2.80 (delta 0.56)</td><td>$280.00</td><td>$18.80</td></tr>
+<tr><td>MSFT</td><td>A</td><td>long_call</td><td>2027-01-15</td><td>long call 420 @ $40.00 (delta 0.54)</td><td>$4,000.00</td><td>$460.00</td></tr>
+</table>
+<h3>matrix_megacap_followup_2026-05-06</h3>
+<p>• Date/universe: <strong>2026-05-06</strong>, <strong>unspecified</strong>; source <code>runs/matrix_megacap_followup_2026-05-06/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>6 analyzed</strong>, <strong>1 PICK</strong>, <strong>5 VETOED</strong>; derived tiers: A=0, B=0, C=1, VETO=5.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>GOOGL</td><td>C</td><td>$388.43</td><td>$450.00</td><td>—</td><td>—</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_megacap_followup_2026-05-06/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>1</strong> of <strong>1</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>GOOGL</td><td>C</td><td>long_call</td><td>2027-01-15</td><td>long call 410 @ $46.00 (delta 0.55)</td><td>$4,600.00</td><td>$456.00</td></tr>
+</table>
+<h3>matrix_weekly_2026-05-06_chain</h3>
+<p>• Date/universe: <strong>2026-05-06</strong>, <strong>unspecified</strong>; source <code>runs/matrix_weekly_2026-05-06_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>5 analyzed</strong>, <strong>4 PICK</strong>, <strong>1 VETOED</strong>; derived tiers: A=2, B=0, C=2, VETO=1.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>GS</td><td>C</td><td>$918.89</td><td>$981.00</td><td>—</td><td>—</td></tr>
+<tr><td>KO</td><td>A</td><td>$78.48</td><td>$82.00</td><td>$82.00</td><td>0.0%</td></tr>
+<tr><td>NVDA</td><td>C</td><td>$196.50</td><td>$265.00</td><td>—</td><td>—</td></tr>
+<tr><td>TXN</td><td>A</td><td>$281.00</td><td>$304.00</td><td>$303.00</td><td>0.3%</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_weekly_2026-05-06_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>4</strong> of <strong>4</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>GS</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 930 @ $66.10 (delta 0.55)</td><td>$6,610.00</td><td>$996.10</td></tr>
+<tr><td>KO</td><td>A</td><td>long_call</td><td>2026-09-18</td><td>long call 77.5 @ $4.54 (delta 0.58)</td><td>$454.00</td><td>$82.04</td></tr>
+<tr><td>NVDA</td><td>C</td><td>long_call</td><td>2027-12-17</td><td>long call 245 @ $40.88 (delta 0.56)</td><td>$4,088.00</td><td>$285.88</td></tr>
+<tr><td>TXN</td><td>A</td><td>long_call</td><td>2026-09-18</td><td>long call 290 @ $27.75 (delta 0.55)</td><td>$2,775.00</td><td>$317.75</td></tr>
+</table>
+<h3>matrix_ablation_no_insider_2026-05-08_2228</h3>
+<p>• Date/universe: <strong>2026-05-08</strong>, <strong>unspecified</strong>; source <code>runs/matrix_ablation_no_insider_2026-05-08_2228/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>7 analyzed</strong>, <strong>4 PICK</strong>, <strong>3 VETOED</strong>; derived tiers: A=1, B=0, C=3, VETO=3.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>ARMK</td><td>C</td><td>$45.08</td><td>$52.00</td><td>—</td><td>—</td></tr>
+<tr><td>FHB</td><td>A</td><td>$27.34</td><td>$30.00</td><td>$30.00</td><td>0.0%</td></tr>
+<tr><td>VIRT</td><td>C</td><td>$51.31</td><td>$65.00</td><td>—</td><td>—</td></tr>
+<tr><td>VNOM</td><td>C</td><td>$46.79</td><td>$55.00</td><td>—</td><td>—</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_ablation_no_insider_2026-05-08_2228/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>4</strong> of <strong>4</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>ARMK</td><td>C</td><td>long_call</td><td>2026-10-16</td><td>long call 49 @ $2.00 (delta 0.39)</td><td>$200.00</td><td>$51.00</td></tr>
+<tr><td>FHB</td><td>A</td><td>long_call</td><td>2026-09-18</td><td>long call 25 @ $2.22 (delta 0.66)</td><td>$222.00</td><td>$27.22</td></tr>
+<tr><td>VIRT</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 50 @ $4.30 (delta 0.60)</td><td>$430.00</td><td>$54.30</td></tr>
+<tr><td>VNOM</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 47 @ $3.60 (delta 0.53)</td><td>$360.00</td><td>$50.60</td></tr>
+</table>
+<h3>matrix_fixed_insider_2026-05-08_2303</h3>
+<p>• Date/universe: <strong>2026-05-08</strong>, <strong>unspecified</strong>; source <code>runs/matrix_fixed_insider_2026-05-08_2303/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>7 analyzed</strong>, <strong>5 PICK</strong>, <strong>2 VETOED</strong>; derived tiers: A=2, B=1, C=2, VETO=2.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>ARMK</td><td>C</td><td>$45.08</td><td>$52.00</td><td>—</td><td>—</td></tr>
+<tr><td>CTRE</td><td>A</td><td>$41.60</td><td>$45.00</td><td>$45.00</td><td>0.0%</td></tr>
+<tr><td>FHB</td><td>A</td><td>$27.34</td><td>$30.00</td><td>$30.00</td><td>0.0%</td></tr>
+<tr><td>VIRT</td><td>B</td><td>$51.31</td><td>$58.00</td><td>$55.00</td><td>5.2%</td></tr>
+<tr><td>VNOM</td><td>C</td><td>$46.79</td><td>$51.50</td><td>—</td><td>—</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_fixed_insider_2026-05-08_2303/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>5</strong> of <strong>5</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>ARMK</td><td>C</td><td>long_call</td><td>2026-10-16</td><td>long call 49 @ $2.00 (delta 0.39)</td><td>$200.00</td><td>$51.00</td></tr>
+<tr><td>CTRE</td><td>A</td><td>long_call</td><td>2026-10-16</td><td>long call 40 @ $2.30 (delta 0.63)</td><td>$230.00</td><td>$42.30</td></tr>
+<tr><td>FHB</td><td>A</td><td>long_call</td><td>2026-09-18</td><td>long call 25 @ $2.22 (delta 0.66)</td><td>$222.00</td><td>$27.22</td></tr>
+<tr><td>VIRT</td><td>B</td><td>long_call</td><td>2026-09-18</td><td>long call 50 @ $4.30 (delta 0.60)</td><td>$430.00</td><td>$54.30</td></tr>
+<tr><td>VNOM</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 47 @ $3.60 (delta 0.53)</td><td>$360.00</td><td>$50.60</td></tr>
+</table>
+<h3>matrix_large_weekly_2026-05-08_1754_chain</h3>
+<p>• Date/universe: <strong>2026-05-08</strong>, <strong>large</strong>; source <code>runs/matrix_large_weekly_2026-05-08_1754_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>16 analyzed</strong>, <strong>3 PICK</strong>, <strong>13 VETOED</strong>; derived tiers: A=0, B=2, C=1, VETO=13.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>HAS</td><td>B</td><td>$97.39</td><td>$112.00</td><td>$102.50</td><td>8.5%</td></tr>
+<tr><td>IEX</td><td>C</td><td>$214.87</td><td>$235.00</td><td>—</td><td>—</td></tr>
+<tr><td>STT</td><td>B</td><td>$148.78</td><td>$172.00</td><td>$156.18</td><td>9.2%</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_large_weekly_2026-05-08_1754_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>3</strong> of <strong>3</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>HAS</td><td>B</td><td>long_call</td><td>2026-09-18</td><td>long call 95 @ $9.40 (delta 0.60)</td><td>$940.00</td><td>$104.40</td></tr>
+<tr><td>IEX</td><td>C</td><td>long_call</td><td>2026-10-16</td><td>long call 220 @ $16.92 (delta 0.52)</td><td>$1,692.00</td><td>$236.92</td></tr>
+<tr><td>STT</td><td>B</td><td>long_call</td><td>2026-09-18</td><td>long call 145 @ $12.00 (delta 0.61)</td><td>$1,200.00</td><td>$157.00</td></tr>
+</table>
+<h3>matrix_mega_weekly_2026-05-08_1754_chain</h3>
+<p>• Date/universe: <strong>2026-05-08</strong>, <strong>mega</strong>; source <code>runs/matrix_mega_weekly_2026-05-08_1754_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>17 analyzed</strong>, <strong>7 PICK</strong>, <strong>10 VETOED</strong>; derived tiers: A=1, B=0, C=6, VETO=10.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>AMZN</td><td>C</td><td>$271.17</td><td>$290.00</td><td>—</td><td>—</td></tr>
+<tr><td>BAC</td><td>C</td><td>$52.75</td><td>$56.50</td><td>—</td><td>—</td></tr>
+<tr><td>C</td><td>C</td><td>$129.09</td><td>$150.00</td><td>—</td><td>—</td></tr>
+<tr><td>COST</td><td>A</td><td>$1,012.06</td><td>$1,070.00</td><td>$1,035.00</td><td>3.3%</td></tr>
+<tr><td>GE</td><td>C</td><td>$302.63</td><td>$345.00</td><td>—</td><td>—</td></tr>
+<tr><td>MS</td><td>C</td><td>$190.17</td><td>$208.00</td><td>—</td><td>—</td></tr>
+<tr><td>WMT</td><td>C</td><td>$130.20</td><td>$138.00</td><td>—</td><td>—</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_mega_weekly_2026-05-08_1754_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>7</strong> of <strong>7</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>AMZN</td><td>C</td><td>long_call</td><td>2027-01-15</td><td>long call 280 @ $30.76 (delta 0.55)</td><td>$3,076.00</td><td>$310.76</td></tr>
+<tr><td>BAC</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 50 @ $4.25 (delta 0.60)</td><td>$425.00</td><td>$54.25</td></tr>
+<tr><td>C</td><td>C</td><td>long_call</td><td>2027-01-15</td><td>long call 125 @ $14.64 (delta 0.57)</td><td>$1,464.00</td><td>$139.64</td></tr>
+<tr><td>COST</td><td>A</td><td>long_call</td><td>2026-09-18</td><td>long call 1020 @ $57.20 (delta 0.52)</td><td>$5,720.00</td><td>$1,077.20</td></tr>
+<tr><td>GE</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 300 @ $27.29 (delta 0.55)</td><td>$2,729.00</td><td>$327.29</td></tr>
+<tr><td>MS</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 190 @ $15.34 (delta 0.57)</td><td>$1,534.00</td><td>$205.34</td></tr>
+<tr><td>WMT</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 130 @ $10.07 (delta 0.56)</td><td>$1,007.00</td><td>$140.07</td></tr>
+</table>
+<h3>matrix_mid_weekly_2026-05-08_1754_chain</h3>
+<p>• Date/universe: <strong>2026-05-08</strong>, <strong>mid</strong>; source <code>runs/matrix_mid_weekly_2026-05-08_1754_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>16 analyzed</strong>, <strong>6 PICK</strong>, <strong>9 VETOED</strong>; derived tiers: A=0, B=0, C=6, VETO=9.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>AVT</td><td>C</td><td>$80.86</td><td>$90.00</td><td>—</td><td>—</td></tr>
+<tr><td>CARG</td><td>C</td><td>$38.16</td><td>$39.00</td><td>—</td><td>—</td></tr>
+<tr><td>CXW</td><td>C</td><td>$21.82</td><td>$23.50</td><td>—</td><td>—</td></tr>
+<tr><td>RSI</td><td>C</td><td>$27.90</td><td>$35.00</td><td>—</td><td>—</td></tr>
+<tr><td>SLAB</td><td>C</td><td>$217.64</td><td>$240.00</td><td>—</td><td>—</td></tr>
+<tr><td>YOU</td><td>C</td><td>$58.17</td><td>$62.00</td><td>—</td><td>—</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_mid_weekly_2026-05-08_1754_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>6</strong> of <strong>6</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>AVT</td><td>C</td><td>long_call</td><td>2026-08-21</td><td>long call 75 @ $9.61 (delta 0.71)</td><td>$961.00</td><td>$84.61</td></tr>
+<tr><td>CARG</td><td>C</td><td>long_call</td><td>2026-08-21</td><td>long call 35 @ $2.20 (delta 0.56)</td><td>$220.00</td><td>$37.20</td></tr>
+<tr><td>CXW</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 21 @ $2.35 (delta 0.52)</td><td>$235.00</td><td>$23.35</td></tr>
+<tr><td>RSI</td><td>C</td><td>long_call</td><td>2026-10-16</td><td>long call 30 @ $3.25 (delta 0.50)</td><td>$325.00</td><td>$33.25</td></tr>
+<tr><td>SLAB</td><td>C</td><td>long_call</td><td>2026-10-16</td><td>long call 210 @ $10.80 (delta 0.77)</td><td>$1,080.00</td><td>$220.80</td></tr>
+<tr><td>YOU</td><td>C</td><td>long_call</td><td>2026-08-21</td><td>long call 59.8 @ $7.20 (delta 0.50)</td><td>$720.00</td><td>$67.00</td></tr>
+</table>
+<h3>matrix_refresh_priortier_ab_2026-05-08_2053</h3>
+<p>• Date/universe: <strong>2026-05-08</strong>, <strong>unspecified</strong>; source <code>runs/matrix_refresh_priortier_ab_2026-05-08_2053/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>10 analyzed</strong>, <strong>6 PICK</strong>, <strong>4 VETOED</strong>; derived tiers: A=2, B=1, C=3, VETO=4.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>APD</td><td>A</td><td>$295.41</td><td>$330.00</td><td>$315.00</td><td>4.5%</td></tr>
+<tr><td>ARMK</td><td>C</td><td>$45.08</td><td>$52.00</td><td>—</td><td>—</td></tr>
+<tr><td>AROC</td><td>B</td><td>$36.96</td><td>$45.00</td><td>$40.00</td><td>11.1%</td></tr>
+<tr><td>FHB</td><td>C</td><td>$27.34</td><td>$32.00</td><td>—</td><td>—</td></tr>
+<tr><td>IDA</td><td>A</td><td>$144.00</td><td>$156.00</td><td>$150.00</td><td>3.8%</td></tr>
+<tr><td>VNOM</td><td>C</td><td>$46.79</td><td>$52.00</td><td>—</td><td>—</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_refresh_priortier_ab_2026-05-08_2053/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>6</strong> of <strong>6</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>APD</td><td>A</td><td>long_call</td><td>2026-09-18</td><td>long call 290 @ $21.20 (delta 0.57)</td><td>$2,120.00</td><td>$311.20</td></tr>
+<tr><td>ARMK</td><td>C</td><td>long_call</td><td>2026-10-16</td><td>long call 49 @ $2.00 (delta 0.39)</td><td>$200.00</td><td>$51.00</td></tr>
+<tr><td>AROC</td><td>B</td><td>long_call</td><td>2026-11-20</td><td>long call 35 @ $5.61 (delta 0.61)</td><td>$561.00</td><td>$40.61</td></tr>
+<tr><td>FHB</td><td>C</td><td>long_call</td><td>2026-12-18</td><td>long call 25 @ $5.91 (delta 0.65)</td><td>$591.00</td><td>$30.91</td></tr>
+<tr><td>IDA</td><td>A</td><td>long_call</td><td>2026-11-20</td><td>long call 145 @ $9.43 (delta 0.51)</td><td>$943.00</td><td>$154.43</td></tr>
+<tr><td>VNOM</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 47 @ $3.60 (delta 0.53)</td><td>$360.00</td><td>$50.60</td></tr>
+</table>
+<h3>matrix_virt_20260508_1452</h3>
+<p>• Date/universe: <strong>2026-05-08</strong>, <strong>single/ad hoc</strong>; source <code>runs/matrix_virt_20260508_1452/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>1 analyzed</strong>, <strong>1 PICK</strong>, <strong>0 VETOED</strong>; derived tiers: A=0, B=0, C=1.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>VIRT</td><td>C</td><td>$49.54</td><td>$65.00</td><td>—</td><td>—</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_virt_20260508_1452/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>1</strong> of <strong>1</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>VIRT</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 50 @ $4.30 (delta 0.56)</td><td>$430.00</td><td>$54.30</td></tr>
+</table>
+<h3>matrix_ai_stack_2026-05-09</h3>
+<p>• Date/universe: <strong>2026-05-09</strong>, <strong>theme: AI stack</strong>; source <code>runs/matrix_ai_stack_2026-05-09/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>19 analyzed</strong>, <strong>4 PICK</strong>, <strong>15 VETOED</strong>; derived tiers: A=0, B=1, C=3, VETO=15.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>AMZN</td><td>C</td><td>$272.68</td><td>$305.00</td><td>—</td><td>—</td></tr>
+<tr><td>CEG</td><td>C</td><td>$303.63</td><td>$330.00</td><td>—</td><td>—</td></tr>
+<tr><td>GOOGL</td><td>C</td><td>$400.80</td><td>$450.00</td><td>—</td><td>—</td></tr>
+<tr><td>TSM</td><td>B</td><td>$411.68</td><td>$445.00</td><td>$420.00</td><td>5.6%</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_ai_stack_2026-05-09/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>4</strong> of <strong>4</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>AMZN</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 275 @ $22.50 (delta 0.55)</td><td>$2,250.00</td><td>$297.50</td></tr>
+<tr><td>CEG</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 310 @ $34.40 (delta 0.56)</td><td>$3,440.00</td><td>$344.40</td></tr>
+<tr><td>GOOGL</td><td>C</td><td>long_call</td><td>2027-01-15</td><td>long call 410 @ $47.57 (delta 0.56)</td><td>$4,757.00</td><td>$457.57</td></tr>
+<tr><td>TSM</td><td>B</td><td>long_call</td><td>2026-09-18</td><td>long call 420 @ $42.00 (delta 0.54)</td><td>$4,200.00</td><td>$462.00</td></tr>
+</table>
+<h3>matrix_ai_stack_2026-05-09_b</h3>
+<p>• Date/universe: <strong>2026-05-09</strong>, <strong>theme: AI stack</strong>; source <code>runs/matrix_ai_stack_2026-05-09_b/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>15 analyzed</strong>, <strong>1 PICK</strong>, <strong>14 VETOED</strong>; derived tiers: A=0, B=0, C=1, VETO=14.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>ETN</td><td>C</td><td>$401.51</td><td>$450.00</td><td>—</td><td>—</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_ai_stack_2026-05-09_b/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>1</strong> of <strong>1</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>ETN</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 400 @ $38.08 (delta 0.57)</td><td>$3,808.00</td><td>$438.08</td></tr>
+</table>
+<h3>matrix_ai_stack_2026-05-09_full</h3>
+<p>• Date/universe: <strong>2026-05-09</strong>, <strong>theme: AI stack</strong>; source <code>runs/matrix_ai_stack_2026-05-09_full/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>19 analyzed</strong>, <strong>4 PICK</strong>, <strong>15 VETOED</strong>; derived tiers: A=0, B=2, C=2, VETO=15.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>AMZN</td><td>B</td><td>$272.68</td><td>$337.50</td><td>$312.00</td><td>7.6%</td></tr>
+<tr><td>GOOGL</td><td>C</td><td>$400.80</td><td>$450.00</td><td>—</td><td>—</td></tr>
+<tr><td>TER</td><td>B</td><td>$359.77</td><td>$500.00</td><td>$383.00</td><td>23.4%</td></tr>
+<tr><td>TSM</td><td>C</td><td>$411.68</td><td>$480.00</td><td>—</td><td>—</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_ai_stack_2026-05-09_full/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>4</strong> of <strong>4</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>AMZN</td><td>B</td><td>long_call</td><td>2027-12-17</td><td>long call 300 @ $45.30 (delta 0.56)</td><td>$4,530.00</td><td>$345.30</td></tr>
+<tr><td>GOOGL</td><td>C</td><td>long_call</td><td>2027-01-15</td><td>long call 410 @ $47.57 (delta 0.56)</td><td>$4,757.00</td><td>$457.57</td></tr>
+<tr><td>TER</td><td>B</td><td>long_call</td><td>2027-01-15</td><td>long call 400 @ $72.60 (delta 0.56)</td><td>$7,260.00</td><td>$472.60</td></tr>
+<tr><td>TSM</td><td>C</td><td>long_call</td><td>2027-06-17</td><td>long call 450 @ $69.20 (delta 0.54)</td><td>$6,920.00</td><td>$519.20</td></tr>
+</table>
+<h3>matrix_amzn_2026-05-14</h3>
+<p>• Date/universe: <strong>2026-05-14</strong>, <strong>single/ad hoc</strong>; source <code>runs/matrix_amzn_2026-05-14/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>1 analyzed</strong>, <strong>1 PICK</strong>, <strong>0 VETOED</strong>; derived tiers: A=0, B=0, C=1.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>AMZN</td><td>C</td><td>$270.13</td><td>$312.00</td><td>—</td><td>—</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_amzn_2026-05-14/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>1</strong> of <strong>1</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>AMZN</td><td>C</td><td>long_call</td><td>2027-01-15</td><td>long call 275 @ $31.94 (delta 0.55)</td><td>$3,194.00</td><td>$306.94</td></tr>
+</table>
+<h3>matrix_ilmn_2026-05-14</h3>
+<p>• Date/universe: <strong>2026-05-14</strong>, <strong>single/ad hoc</strong>; source <code>runs/matrix_ilmn_2026-05-14/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>1 analyzed</strong>, <strong>0 PICK</strong>, <strong>1 VETOED</strong>; derived tiers: A=0, B=0, C=0, VETO=1.</p>
+<p>No PICK rows in the ledger.</p>
+<p>Options overlay: <code>runs/matrix_ilmn_2026-05-14/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>0</strong> of <strong>0</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+</table>
+<h3>matrix_virt_2026-05-14</h3>
+<p>• Date/universe: <strong>2026-05-14</strong>, <strong>single/ad hoc</strong>; source <code>runs/matrix_virt_2026-05-14/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>1 analyzed</strong>, <strong>0 PICK</strong>, <strong>1 VETOED</strong>; derived tiers: A=0, B=0, C=0, VETO=1.</p>
+<p>No PICK rows in the ledger.</p>
+<p>Options overlay: <code>runs/matrix_virt_2026-05-14/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>0</strong> of <strong>0</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+</table>
+<h3>matrix_large_weekly_2026-05-15_2251_chain</h3>
+<p>• Date/universe: <strong>2026-05-15</strong>, <strong>large</strong>; source <code>runs/matrix_large_weekly_2026-05-15_2251_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>24 analyzed</strong>, <strong>7 PICK</strong>, <strong>17 VETOED</strong>; derived tiers: A=3, B=0, C=4, VETO=17.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>AFL</td><td>C</td><td>$116.81</td><td>$123.00</td><td>—</td><td>—</td></tr>
+<tr><td>EQIX</td><td>C</td><td>$1,059.44</td><td>$1,250.00</td><td>—</td><td>—</td></tr>
+<tr><td>ET</td><td>A</td><td>$20.15</td><td>$22.50</td><td>$21.50</td><td>4.4%</td></tr>
+<tr><td>HL</td><td>C</td><td>$17.64</td><td>$21.30</td><td>—</td><td>—</td></tr>
+<tr><td>KMI</td><td>A</td><td>$33.63</td><td>$36.00</td><td>$34.75</td><td>3.5%</td></tr>
+<tr><td>STLD</td><td>A</td><td>$229.34</td><td>$250.00</td><td>$240.00</td><td>4.0%</td></tr>
+<tr><td>TT</td><td>C</td><td>$466.60</td><td>$503.00</td><td>—</td><td>—</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_large_weekly_2026-05-15_2251_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>7</strong> of <strong>7</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>AFL</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 115 @ $7.56 (delta 0.58)</td><td>$756.00</td><td>$122.56</td></tr>
+<tr><td>EQIX</td><td>C</td><td>long_call</td><td>2026-12-18</td><td>long call 1020 @ $134.08 (delta 0.61)</td><td>$13,408.00</td><td>$1,154.08</td></tr>
+<tr><td>ET</td><td>A</td><td>long_call</td><td>2026-10-16</td><td>long call 20 @ $1.55 (delta 0.52)</td><td>$155.00</td><td>$21.55</td></tr>
+<tr><td>HL</td><td>C</td><td>long_call</td><td>2026-12-18</td><td>long call 20 @ $3.19 (delta 0.53)</td><td>$319.00</td><td>$23.19</td></tr>
+<tr><td>KMI</td><td>A</td><td>long_call</td><td>2026-09-18</td><td>long call 33 @ $2.59 (delta 0.57)</td><td>$259.00</td><td>$35.59</td></tr>
+<tr><td>STLD</td><td>A</td><td>long_call</td><td>2026-09-18</td><td>long call 220 @ $31.40 (delta 0.60)</td><td>$3,140.00</td><td>$251.40</td></tr>
+<tr><td>TT</td><td>C</td><td>long_call</td><td>2027-01-15</td><td>long call 480 @ $49.66 (delta 0.52)</td><td>$4,966.00</td><td>$529.66</td></tr>
+</table>
+<h3>matrix_mega_weekly_2026-05-15_2236_chain</h3>
+<p>• Date/universe: <strong>2026-05-15</strong>, <strong>mega</strong>; source <code>runs/matrix_mega_weekly_2026-05-15_2236_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>19 analyzed</strong>, <strong>8 PICK</strong>, <strong>11 VETOED</strong>; derived tiers: A=1, B=1, C=6, VETO=11.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>ADI</td><td>C</td><td>$417.49</td><td>$450.00</td><td>—</td><td>—</td></tr>
+<tr><td>AVGO</td><td>C</td><td>$425.19</td><td>$475.00</td><td>—</td><td>—</td></tr>
+<tr><td>GOOG</td><td>C</td><td>$393.32</td><td>$500.00</td><td>—</td><td>—</td></tr>
+<tr><td>GOOGL</td><td>C</td><td>$396.78</td><td>$450.00</td><td>—</td><td>—</td></tr>
+<tr><td>KO</td><td>A</td><td>$80.82</td><td>$84.00</td><td>$82.00</td><td>2.4%</td></tr>
+<tr><td>LIN</td><td>C</td><td>$506.11</td><td>$575.00</td><td>—</td><td>—</td></tr>
+<tr><td>LLY</td><td>C</td><td>$1,004.92</td><td>$1,215.00</td><td>—</td><td>—</td></tr>
+<tr><td>PM</td><td>B</td><td>$189.61</td><td>$210.00</td><td>$195.00</td><td>7.1%</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_mega_weekly_2026-05-15_2236_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>8</strong> of <strong>8</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>ADI</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 420 @ $47.57 (delta 0.55)</td><td>$4,757.00</td><td>$467.57</td></tr>
+<tr><td>AVGO</td><td>C</td><td>long_call</td><td>2027-01-15</td><td>long call 450 @ $66.46 (delta 0.54)</td><td>$6,646.00</td><td>$516.46</td></tr>
+<tr><td>GOOG</td><td>C</td><td>long_call</td><td>2027-01-15</td><td>long call 405 @ $46.91 (delta 0.54)</td><td>$4,691.00</td><td>$451.91</td></tr>
+<tr><td>GOOGL</td><td>C</td><td>long_call</td><td>2027-01-15</td><td>long call 405 @ $50.56 (delta 0.56)</td><td>$5,056.00</td><td>$455.56</td></tr>
+<tr><td>KO</td><td>A</td><td>long_call</td><td>2026-09-18</td><td>long call 80 @ $4.91 (delta 0.56)</td><td>$491.00</td><td>$84.91</td></tr>
+<tr><td>LIN</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 500 @ $35.77 (delta 0.57)</td><td>$3,577.00</td><td>$535.77</td></tr>
+<tr><td>LLY</td><td>C</td><td>long_call</td><td>2027-01-15</td><td>long call 1030 @ $124.81 (delta 0.55)</td><td>$12,481.00</td><td>$1,154.81</td></tr>
+<tr><td>PM</td><td>B</td><td>long_call</td><td>2026-09-18</td><td>long call 190 @ $14.52 (delta 0.53)</td><td>$1,452.00</td><td>$204.52</td></tr>
+</table>
+<h3>matrix_weekly_2026-05-15_1957_chain</h3>
+<p>• Date/universe: <strong>2026-05-15</strong>, <strong>unspecified</strong>; source <code>runs/matrix_weekly_2026-05-15_1957_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>5 analyzed</strong>, <strong>1 PICK</strong>, <strong>4 VETOED</strong>; derived tiers: A=0, B=0, C=1, VETO=4.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>DAR</td><td>C</td><td>$62.37</td><td>$74.00</td><td>—</td><td>—</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_weekly_2026-05-15_1957_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>1</strong> of <strong>1</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>DAR</td><td>C</td><td>long_call</td><td>2026-10-16</td><td>long call 65 @ $5.99 (delta 0.51)</td><td>$599.00</td><td>$70.99</td></tr>
+</table>
+<h3>matrix_weekly_2026-05-15_extended</h3>
+<p>• Date/universe: <strong>2026-05-15</strong>, <strong>unspecified</strong>; source <code>runs/matrix_weekly_2026-05-15_extended/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>20 analyzed</strong>, <strong>5 PICK</strong>, <strong>14 VETOED</strong>; derived tiers: A=1, B=1, C=3, VETO=14.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>AROC</td><td>C</td><td>$37.43</td><td>$45.00</td><td>—</td><td>—</td></tr>
+<tr><td>GVA</td><td>A</td><td>$138.55</td><td>$150.00</td><td>$150.00</td><td>0.0%</td></tr>
+<tr><td>RSI</td><td>C</td><td>$26.77</td><td>$35.00</td><td>—</td><td>—</td></tr>
+<tr><td>SSRM</td><td>C</td><td>$31.39</td><td>$36.28</td><td>—</td><td>—</td></tr>
+<tr><td>YOU</td><td>B</td><td>$58.89</td><td>$75.00</td><td>$62.00</td><td>17.3%</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_weekly_2026-05-15_extended/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>5</strong> of <strong>5</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>AROC</td><td>C</td><td>long_call</td><td>2026-11-20</td><td>long call 35 @ $5.72 (delta 0.65)</td><td>$572.00</td><td>$40.72</td></tr>
+<tr><td>GVA</td><td>A</td><td>long_call</td><td>2026-12-18</td><td>long call 140 @ $15.29 (delta 0.56)</td><td>$1,529.00</td><td>$155.29</td></tr>
+<tr><td>RSI</td><td>C</td><td>long_call</td><td>2026-10-16</td><td>long call 30 @ $2.42 (delta 0.46)</td><td>$242.00</td><td>$32.42</td></tr>
+<tr><td>SSRM</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 33 @ $4.35 (delta 0.55)</td><td>$435.00</td><td>$37.35</td></tr>
+<tr><td>YOU</td><td>B</td><td>long_call</td><td>2026-08-21</td><td>long call 59.8 @ $6.80 (delta 0.57)</td><td>$680.00</td><td>$66.60</td></tr>
+</table>
+<h3>matrix_large_weekly_2026-05-22_1142_chain</h3>
+<p>• Date/universe: <strong>2026-05-22</strong>, <strong>large</strong>; source <code>runs/matrix_large_weekly_2026-05-22_1142_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>10 analyzed</strong>, <strong>2 PICK</strong>, <strong>8 VETOED</strong>; derived tiers: A=0, B=1, C=1, VETO=8.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>EBAY</td><td>B</td><td>$117.13</td><td>$130.00</td><td>$120.00</td><td>7.7%</td></tr>
+<tr><td>TJX</td><td>C</td><td>$157.46</td><td>$190.00</td><td>—</td><td>—</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_large_weekly_2026-05-22_1142_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>2</strong> of <strong>2</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>EBAY</td><td>B</td><td>long_call</td><td>2026-10-16</td><td>long call 120 @ $10.93 (delta 0.52)</td><td>$1,093.00</td><td>$130.93</td></tr>
+<tr><td>TJX</td><td>C</td><td>long_call</td><td>2027-03-19</td><td>long call 160 @ $15.95 (delta 0.53)</td><td>$1,595.00</td><td>$175.95</td></tr>
+</table>
+<h3>matrix_mega_weekly_2026-05-22_1139_chain</h3>
+<p>• Date/universe: <strong>2026-05-22</strong>, <strong>mega</strong>; source <code>runs/matrix_mega_weekly_2026-05-22_1139_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>10 analyzed</strong>, <strong>4 PICK</strong>, <strong>6 VETOED</strong>; derived tiers: A=2, B=0, C=2, VETO=6.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>AMZN</td><td>C</td><td>$268.46</td><td>$312.00</td><td>—</td><td>—</td></tr>
+<tr><td>C</td><td>C</td><td>$125.22</td><td>$150.00</td><td>—</td><td>—</td></tr>
+<tr><td>GS</td><td>A</td><td>$988.17</td><td>$1,050.00</td><td>$1,050.00</td><td>0.0%</td></tr>
+<tr><td>VZ</td><td>A</td><td>$48.27</td><td>$52.50</td><td>$51.70</td><td>1.5%</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_mega_weekly_2026-05-22_1139_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>4</strong> of <strong>4</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>AMZN</td><td>C</td><td>long_call</td><td>2027-03-19</td><td>long call 280 @ $33.27 (delta 0.54)</td><td>$3,327.00</td><td>$313.27</td></tr>
+<tr><td>C</td><td>C</td><td>long_call</td><td>2027-03-19</td><td>long call 125 @ $17.73 (delta 0.57)</td><td>$1,773.00</td><td>$142.73</td></tr>
+<tr><td>GS</td><td>A</td><td>long_call</td><td>2026-10-16</td><td>long call 1000 @ $83.46 (delta 0.55)</td><td>$8,346.00</td><td>$1,083.46</td></tr>
+<tr><td>VZ</td><td>A</td><td>long_call</td><td>2026-10-16</td><td>long call 48 @ $3.52 (delta 0.53)</td><td>$352.00</td><td>$51.52</td></tr>
+</table>
+<h3>matrix_mid_weekly_2026-05-22_1142_chain</h3>
+<p>• Date/universe: <strong>2026-05-22</strong>, <strong>mid</strong>; source <code>runs/matrix_mid_weekly_2026-05-22_1142_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>10 analyzed</strong>, <strong>1 PICK</strong>, <strong>9 VETOED</strong>; derived tiers: A=0, B=0, C=1, VETO=9.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>CRUS</td><td>C</td><td>$166.62</td><td>$190.00</td><td>—</td><td>—</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_mid_weekly_2026-05-22_1142_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>1</strong> of <strong>1</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>CRUS</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 170 @ $16.56 (delta 0.59)</td><td>$1,656.00</td><td>$186.56</td></tr>
+</table>
+<h3>matrix_large_weekly_2026-05-30_1357_chain</h3>
+<p>• Date/universe: <strong>2026-05-30</strong>, <strong>large</strong>; source <code>runs/matrix_large_weekly_2026-05-30_1357_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>5 analyzed</strong>, <strong>0 PICK</strong>, <strong>5 VETOED</strong>; derived tiers: A=0, B=0, C=0, VETO=5.</p>
+<p>No PICK rows in the ledger.</p>
+<p>Options overlay: <code>runs/matrix_large_weekly_2026-05-30_1357_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>0</strong> of <strong>0</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+</table>
+<h3>matrix_mega_weekly_2026-05-30_1335_chain</h3>
+<p>• Date/universe: <strong>2026-05-30</strong>, <strong>mega</strong>; source <code>runs/matrix_mega_weekly_2026-05-30_1335_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>5 analyzed</strong>, <strong>1 PICK</strong>, <strong>4 VETOED</strong>; derived tiers: A=0, B=0, C=1, VETO=4.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>ADI</td><td>C</td><td>$413.85</td><td>$460.00</td><td>—</td><td>—</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_mega_weekly_2026-05-30_1335_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>1</strong> of <strong>1</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>ADI</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 420 @ $42.34 (delta 0.53)</td><td>$4,234.00</td><td>$462.34</td></tr>
+</table>
+<h3>matrix_weekly_2026-05-30_1247_chain</h3>
+<p>• Date/universe: <strong>2026-05-30</strong>, <strong>unspecified</strong>; source <code>runs/matrix_weekly_2026-05-30_1247_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>5 analyzed</strong>, <strong>0 PICK</strong>, <strong>5 VETOED</strong>; derived tiers: A=0, B=0, C=0, VETO=5.</p>
+<p>No PICK rows in the ledger.</p>
+<p>Options overlay: <code>runs/matrix_weekly_2026-05-30_1247_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>0</strong> of <strong>0</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+</table>
+<h3>matrix_large_weekly_2026-06-06_2302_chain</h3>
+<p>• Date/universe: <strong>2026-06-06</strong>, <strong>large</strong>; source <code>runs/matrix_large_weekly_2026-06-06_2302_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>5 analyzed</strong>, <strong>0 PICK</strong>, <strong>5 VETOED</strong>; derived tiers: A=0, B=0, C=0, VETO=5.</p>
+<p>No PICK rows in the ledger.</p>
+<p>Options overlay: <code>runs/matrix_large_weekly_2026-06-06_2302_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>0</strong> of <strong>0</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+</table>
+<h3>matrix_mega_weekly_2026-06-06_2323_chain</h3>
+<p>• Date/universe: <strong>2026-06-06</strong>, <strong>mega</strong>; source <code>runs/matrix_mega_weekly_2026-06-06_2323_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>5 analyzed</strong>, <strong>1 PICK</strong>, <strong>4 VETOED</strong>; derived tiers: A=1, B=0, C=0, VETO=4.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>C</td><td>A</td><td>$132.47</td><td>$150.00</td><td>$145.00</td><td>3.3%</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_mega_weekly_2026-06-06_2323_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>1</strong> of <strong>1</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>C</td><td>A</td><td>long_call</td><td>2027-03-19</td><td>long call 135 @ $17.19 (delta 0.54)</td><td>$1,719.00</td><td>$152.19</td></tr>
+</table>
+<h3>matrix_mid_weekly_2026-06-06_2239_chain</h3>
+<p>• Date/universe: <strong>2026-06-06</strong>, <strong>mid</strong>; source <code>runs/matrix_mid_weekly_2026-06-06_2239_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>5 analyzed</strong>, <strong>0 PICK</strong>, <strong>5 VETOED</strong>; derived tiers: A=0, B=0, C=0, VETO=5.</p>
+<p>No PICK rows in the ledger.</p>
+<p>Options overlay: <code>runs/matrix_mid_weekly_2026-06-06_2239_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>0</strong> of <strong>0</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+</table>
+<h3>matrix_large_weekly_2026-06-12_1051_chain</h3>
+<p>• Date/universe: <strong>2026-06-12</strong>, <strong>large</strong>; source <code>runs/matrix_large_weekly_2026-06-12_1051_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>5 analyzed</strong>, <strong>0 PICK</strong>, <strong>5 VETOED</strong>; derived tiers: A=0, B=0, C=0, VETO=5.</p>
+<p>No PICK rows in the ledger.</p>
+<p>Options overlay: <code>runs/matrix_large_weekly_2026-06-12_1051_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>0</strong> of <strong>0</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+</table>
+<h3>matrix_mega_weekly_2026-06-12_1115_chain</h3>
+<p>• Date/universe: <strong>2026-06-12</strong>, <strong>mega</strong>; source <code>runs/matrix_mega_weekly_2026-06-12_1115_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>5 analyzed</strong>, <strong>2 PICK</strong>, <strong>3 VETOED</strong>; derived tiers: A=0, B=0, C=2, VETO=3.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>ADI</td><td>C</td><td>$412.13</td><td>$470.00</td><td>—</td><td>—</td></tr>
+<tr><td>GS</td><td>C</td><td>$1,035.64</td><td>$1,200.00</td><td>—</td><td>—</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_mega_weekly_2026-06-12_1115_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>2</strong> of <strong>2</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>ADI</td><td>C</td><td>long_call</td><td>2026-09-18</td><td>long call 420 @ $41.61 (delta 0.56)</td><td>$4,161.00</td><td>$461.61</td></tr>
+<tr><td>GS</td><td>C</td><td>long_call</td><td>2026-10-16</td><td>long call 1080 @ $77.77 (delta 0.53)</td><td>$7,777.00</td><td>$1,157.77</td></tr>
+</table>
+<h3>matrix_mid_weekly_2026-06-12_1021_chain</h3>
+<p>• Date/universe: <strong>2026-06-12</strong>, <strong>mid</strong>; source <code>runs/matrix_mid_weekly_2026-06-12_1021_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>5 analyzed</strong>, <strong>1 PICK</strong>, <strong>3 VETOED</strong>; derived tiers: A=0, B=0, C=1, VETO=3.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>KLIC</td><td>C</td><td>$111.82</td><td>$130.00</td><td>—</td><td>—</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_mid_weekly_2026-06-12_1021_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>1</strong> of <strong>1</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>KLIC</td><td>C</td><td>long_call</td><td>2027-01-15</td><td>long call 130 @ $17.39 (delta 0.51)</td><td>$1,739.00</td><td>$147.39</td></tr>
+</table>
+<h3>matrix_large_weekly_2026-06-26_2126_chain</h3>
+<p>• Date/universe: <strong>2026-06-26</strong>, <strong>large</strong>; source <code>runs/matrix_large_weekly_2026-06-26_2126_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>5 analyzed</strong>, <strong>1 PICK</strong>, <strong>4 VETOED</strong>; derived tiers: A=1, B=0, C=0, VETO=4.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>NUE</td><td>A</td><td>$239.78</td><td>$274.00</td><td>$274.00</td><td>0.0%</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_large_weekly_2026-06-26_2126_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>1</strong> of <strong>1</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>NUE</td><td>A</td><td>long_call</td><td>2026-12-18</td><td>long call 240 @ $26.37 (delta 0.57)</td><td>$2,637.00</td><td>$266.37</td></tr>
+</table>
+<h3>matrix_mega_weekly_2026-06-26_2146_chain</h3>
+<p>• Date/universe: <strong>2026-06-26</strong>, <strong>mega</strong>; source <code>runs/matrix_mega_weekly_2026-06-26_2146_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>5 analyzed</strong>, <strong>1 PICK</strong>, <strong>4 VETOED</strong>; derived tiers: A=0, B=0, C=1, VETO=4.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>ADI</td><td>C</td><td>$386.91</td><td>$470.00</td><td>—</td><td>—</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_mega_weekly_2026-06-26_2146_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>1</strong> of <strong>1</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>ADI</td><td>C</td><td>long_call</td><td>2026-12-18</td><td>long call 400 @ $55.36 (delta 0.54)</td><td>$5,536.00</td><td>$455.36</td></tr>
+</table>
+<h3>matrix_mid_weekly_2026-06-26_2103_chain</h3>
+<p>• Date/universe: <strong>2026-06-26</strong>, <strong>mid</strong>; source <code>runs/matrix_mid_weekly_2026-06-26_2103_chain/verdict_ledger.json</code>.</p>
+<p>• Verdicts: <strong>5 analyzed</strong>, <strong>1 PICK</strong>, <strong>4 VETOED</strong>; derived tiers: A=0, B=0, C=1, VETO=4.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th><th>PT compression</th></tr>
+<tr><td>KLIC</td><td>C</td><td>$125.22</td><td>$140.00</td><td>—</td><td>—</td></tr>
+</table>
+<p>Options overlay: <code>runs/matrix_mid_weekly_2026-06-26_2103_chain/options_overlay.json</code>; mode <strong>long-call</strong>, delta target <strong>0.55</strong>, structures built <strong>1</strong> of <strong>1</strong> picks.</p>
+<table>
+<tr><th>Ticker</th><th>Tier</th><th>Strategy</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th></tr>
+<tr><td>KLIC</td><td>C</td><td>long_call</td><td>2027-01-15</td><td>long call 130 @ $27.13 (delta 0.58)</td><td>$2,713.00</td><td>$157.13</td></tr>
+</table>
+<h2>SQLite catalog cross-run views</h2>
+<p><code>runs/index.db</code> is a derived catalog. <code>.venv/bin/python scripts/index_runs.py --force --query</code> was run for this document; it reported 29 indexed screener runs, 40 indexed matrix runs, 675 screener rows, 373 matrix rows, 106 option legs, and 73 Chronos forecasts. The filesystem inventory found 32 screener directories (3 empty/malformed with no <code>screener.json</code>) and 37 matrix directories; the catalog still contains 3 matrix run ids with no matching directory: <code>matrix_large_weekly_2026-06-26_1830_chain</code>, <code>matrix_mega_weekly_2026-06-26_1836_chain</code>, <code>matrix_mid_weekly_2026-06-26_1823_chain</code>. Recurrence tables below are filtered to filesystem-backed matrix run ids. ROI/gain figures in <code>index.db</code> are <strong>modeled gain-if-price-target-hits-at-expiry</strong>, not realized P&amp;L.</p>
+<table>
+<tr><th>Run type</th><th>Indexed count</th></tr>
+<tr><td>matrix</td><td>40</td></tr>
+<tr><td>screener</td><td>29</td></tr>
+</table>
+<h3>Most-recurring matrix tickers</h3>
+<table>
+<tr><th>Ticker</th><th>Distinct matrix runs</th><th>Tiers observed</th><th>PICK rows</th><th>VETOED rows</th></tr>
+<tr><td>ADI</td><td>9</td><td>A,VETO,C</td><td>5</td><td>4</td></tr>
+<tr><td>SNDK</td><td>8</td><td>VETO</td><td>0</td><td>8</td></tr>
+<tr><td>VIRT</td><td>7</td><td>C,B,VETO</td><td>5</td><td>2</td></tr>
+<tr><td>CRDO</td><td>7</td><td>VETO</td><td>0</td><td>7</td></tr>
+<tr><td>MU</td><td>7</td><td>VETO</td><td>0</td><td>7</td></tr>
+<tr><td>ROK</td><td>7</td><td>VETO</td><td>0</td><td>7</td></tr>
+<tr><td>AMZN</td><td>6</td><td>C,VETO,B</td><td>5</td><td>1</td></tr>
+<tr><td>KLIC</td><td>6</td><td>VETO,C</td><td>2</td><td>4</td></tr>
+<tr><td>TXN</td><td>6</td><td>VETO,A</td><td>1</td><td>5</td></tr>
+<tr><td>VNOM</td><td>5</td><td>VETO,A,C</td><td>4</td><td>1</td></tr>
+<tr><td>GS</td><td>5</td><td>VETO,A,C</td><td>3</td><td>2</td></tr>
+<tr><td>AVGO</td><td>5</td><td>VETO,C</td><td>1</td><td>4</td></tr>
+<tr><td>NUE</td><td>5</td><td>VETO,A</td><td>1</td><td>4</td></tr>
+<tr><td>MRVL</td><td>5</td><td>VETO</td><td>0</td><td>5</td></tr>
+<tr><td>WDC</td><td>5</td><td>VETO</td><td>0</td><td>5</td></tr>
+<tr><td>ARMK</td><td>4</td><td>B,C</td><td>4</td><td>0</td></tr>
+<tr><td>AROC</td><td>4</td><td>A,B,C</td><td>4</td><td>0</td></tr>
+<tr><td>FHB</td><td>4</td><td>B,A,C</td><td>4</td><td>0</td></tr>
+<tr><td>GOOGL</td><td>4</td><td>C</td><td>4</td><td>0</td></tr>
+<tr><td>CTRE</td><td>4</td><td>A,VETO</td><td>2</td><td>2</td></tr>
+<tr><td>RSI</td><td>4</td><td>C,VETO</td><td>2</td><td>1</td></tr>
+<tr><td>APH</td><td>4</td><td>C,VETO</td><td>1</td><td>3</td></tr>
+<tr><td>KALU</td><td>4</td><td>C,VETO</td><td>1</td><td>3</td></tr>
+<tr><td>SLAB</td><td>4</td><td>C,VETO</td><td>1</td><td>3</td></tr>
+<tr><td>TRGP</td><td>4</td><td>A,VETO</td><td>1</td><td>3</td></tr>
+</table>
+<h3>Per-tier count from <code>ticker_history</code> (filesystem-backed matrix ids)</h3>
+<table>
+<tr><th>Tier</th><th>Rows</th><th>PICK rows</th><th>VETOED rows</th></tr>
+<tr><td>A</td><td>25</td><td>25</td><td>0</td></tr>
+<tr><td>B</td><td>14</td><td>14</td><td>0</td></tr>
+<tr><td>C</td><td>67</td><td>67</td><td>0</td></tr>
+<tr><td>VETO</td><td>249</td><td>0</td><td>249</td></tr>
+<tr><td>None</td><td>3</td><td>0</td><td>0</td></tr>
+</table>
+<h2>Realized backtest findings (measured 2026-06-26)</h2>
+<p>These are <strong>realized</strong> option/backtest measurements, distinct from older modeled ROI fields in <code>index.db</code>. Sources: <code>runs/backtest_2026-06-26.json</code>, <code>runs/backtest_exits_2026-06-26.json</code>, and visual packet <code>runs/exit_discipline_packet_2026-06-26.html</code>.</p>
+<p>• Selection alone was approximately a coin flip: <strong>n=92</strong>, <strong>50% win rate</strong>, <strong>+0.7% median option ROI</strong> (<code>runs/backtest_2026-06-26.json</code>).</p>
+<p>• Exit discipline was the edge: exit at aggressive PT produced <strong>+13.8% median ROI</strong> and <strong>57% win rate</strong> vs hold median <strong>+0.7%</strong> (<code>runs/backtest_exits_2026-06-26.json</code>).</p>
+<table>
+<tr><th>Tier</th><th>n</th><th>Hold median ROI</th><th>Exit @ aggr PT median</th><th>Exit @ cons PT median</th><th>Half/discipline median</th></tr>
+<tr><td>A</td><td>22</td><td>-5.2%</td><td>19.0%</td><td>21.6%</td><td>20.2%</td></tr>
+<tr><td>B</td><td>13</td><td>15.2%</td><td>15.2%</td><td>0.0%</td><td>7.1%</td></tr>
+<tr><td>C</td><td>57</td><td>0.0%</td><td>12.5%</td><td>—</td><td>12.5%</td></tr>
+</table>
+<p>Interpretation: Tier A needed conservative-target selling (hold median −5.2% vs exit-at-cons +21.6%); Tier B was the group where letting winners run held up best (hold median +15.2%); Tier C benefited from trimming at aggressive PT (exit-at-aggr +12.5%).</p>
+<h2>Latest week spotlight — 2026-06-26</h2>
+<p>Across the 2026-06-26 mid/large/mega weekly matrix runs, the ledgers show <strong>3 picks / 12 vetoed</strong> over <strong>15 analyzed</strong>. Sources: <code>runs/matrix_large_weekly_2026-06-26_2126_chain/verdict_ledger.json</code>, <code>runs/matrix_mega_weekly_2026-06-26_2146_chain/verdict_ledger.json</code>, <code>runs/matrix_mid_weekly_2026-06-26_2103_chain/verdict_ledger.json</code>.</p>
+<table>
+<tr><th>Universe</th><th>Run id</th><th>Pick</th><th>Tier</th><th>Current price</th><th>Aggressive PT</th><th>Conservative PT</th></tr>
+<tr><td>large</td><td>matrix_large_weekly_2026-06-26_2126_chain</td><td>NUE</td><td>A</td><td>$239.78</td><td>$274.00</td><td>$274.00</td></tr>
+<tr><td>mega</td><td>matrix_mega_weekly_2026-06-26_2146_chain</td><td>ADI</td><td>C</td><td>$386.91</td><td>$470.00</td><td>—</td></tr>
+<tr><td>mid</td><td>matrix_mid_weekly_2026-06-26_2103_chain</td><td>KLIC</td><td>C</td><td>$125.22</td><td>$140.00</td><td>—</td></tr>
+</table>
+<h3>Rebuilt Δ0.55 long-call structures</h3>
+<table>
+<tr><th>Universe</th><th>Ticker</th><th>Tier</th><th>Mode</th><th>Expiration</th><th>Legs</th><th>Debit/contract</th><th>Breakeven</th><th>Source</th></tr>
+<tr><td>large</td><td>NUE</td><td>A</td><td>long-call</td><td>2026-12-18</td><td>long call 240 @ $26.37 (delta 0.57)</td><td>$2,637.00</td><td>$266.37</td><td><code>runs/matrix_large_weekly_2026-06-26_2126_chain/options_overlay.json</code></td></tr>
+<tr><td>mega</td><td>ADI</td><td>C</td><td>long-call</td><td>2026-12-18</td><td>long call 400 @ $55.36 (delta 0.54)</td><td>$5,536.00</td><td>$455.36</td><td><code>runs/matrix_mega_weekly_2026-06-26_2146_chain/options_overlay.json</code></td></tr>
+<tr><td>mid</td><td>KLIC</td><td>C</td><td>long-call</td><td>2027-01-15</td><td>long call 130 @ $27.13 (delta 0.58)</td><td>$2,713.00</td><td>$157.13</td><td><code>runs/matrix_mid_weekly_2026-06-26_2103_chain/options_overlay.json</code></td></tr>
+</table>
+<h2>Cross-run HTML reports</h2>
+<table>
+<tr><th>Report date</th><th>Directory</th><th>Path</th></tr>
+<tr><td>2026-05-01</td><td>cross_run_2026-05-01</td><td><code>runs/cross_run_2026-05-01/report.html</code></td></tr>
+<tr><td>2026-05-05</td><td>cross_run_2026-05-05</td><td><code>runs/cross_run_2026-05-05/report.html</code></td></tr>
+<tr><td>2026-05-06</td><td>cross_run_2026-05-06</td><td><code>runs/cross_run_2026-05-06/report.html</code></td></tr>
+<tr><td>2026-05-08</td><td>cross_run_2026-05-08</td><td><code>runs/cross_run_2026-05-08/report.html</code></td></tr>
+<tr><td>2026-05-09</td><td>cross_run_2026-05-09</td><td><code>runs/cross_run_2026-05-09/report.html</code></td></tr>
+<tr><td>2026-05-14</td><td>cross_run_2026-05-14</td><td><code>runs/cross_run_2026-05-14/report.html</code></td></tr>
+<tr><td>2026-05-15</td><td>cross_run_2026-05-15</td><td><code>runs/cross_run_2026-05-15/report.html</code></td></tr>
+<tr><td>2026-05-16</td><td>cross_run_2026-05-16</td><td><code>runs/cross_run_2026-05-16/report.html</code></td></tr>
+<tr><td>2026-05-22</td><td>cross_run_2026-05-22</td><td><code>runs/cross_run_2026-05-22/report.html</code></td></tr>
+<tr><td>2026-05-30</td><td>cross_run_2026-05-30</td><td><code>runs/cross_run_2026-05-30/report.html</code></td></tr>
+<tr><td>2026-06-06</td><td>cross_run_2026-06-06</td><td><code>runs/cross_run_2026-06-06/report.html</code></td></tr>
+<tr><td>2026-06-12</td><td>cross_run_2026-06-12</td><td><code>runs/cross_run_2026-06-12/report.html</code></td></tr>
+<tr><td>2026-06-26</td><td>cross_run_2026-06-26</td><td><code>runs/cross_run_2026-06-26/report.html</code></td></tr>
+</table>
+<h2>Caveats and data provenance</h2>
+<p>• Authoritative run facts come from <code>runs/&lt;id&gt;/screener.json</code>, <code>runs/&lt;id&gt;/top_tickers.txt</code>, <code>runs/&lt;id&gt;/verdict_ledger.json</code>, <code>runs/&lt;id&gt;/current_prices.json</code>, and <code>runs/&lt;id&gt;/options_overlay.json</code>.</p>
+<p>• Tier A/B/C is derived per row: non-PICK → VETO; PICK with no conservative PT → C; PICK with PT compression &lt; 5.0% → A; otherwise B.</p>
+<p>• <code>runs/index.db</code> is a derived catalog; it can be rebuilt and should not be treated as the authoritative artifact. Its ROI columns are modeled, not realized.</p>
+<p>• The realized backtest and exit-discipline numbers are from the 2026-06-26 backtest JSON files. All runs relied on real Polygon/market-data artifacts captured under <code>runs/</code>.</p>
+</main></body></html>
