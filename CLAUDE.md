@@ -392,6 +392,72 @@ done
 
 ---
 
+## LEAN execution integration (`lean/`)
+
+Turns approved weekly picks into automated long-call trades. The weekly run is
+the **brain** (slow, LLM-driven, picks names + targets); LEAN is the **hands**
+(deterministic entry + exit). They are decoupled and talk through ONE artifact:
+`lean/signals.json`. Never share a process between them.
+
+```
+Weekly run → scripts/export_lean_signals.py → lean/signals.json → LEAN algo → broker
+(brain)       (the bridge)                     (user approves)     (hands)     (paper→live)
+```
+
+**Why this exists — exit discipline is the edge, not selection.** The realized
+backtest (`runs/backtest_exits_2026-06-26.json`, n=92) showed buy-and-hold the
+picks ≈ a coin flip (50% win, ~+0.7% median option ROI), while selling into the
+aggressive PT lifts the median to **+13.8%** (57% win). The LEAN algo automates
+exactly that. Visual writeup: `runs/exit_discipline_packet_2026-06-26.html`.
+
+### The bridge: `scripts/export_lean_signals.py`
+Reads one or more matrix runs' `options_overlay.json` (+ `policy.json` for
+sizing) and emits `lean/signals.json`. Signals default `approved:false` — the
+user flips selected rows to `true` (the human-in-the-loop gate). Tier C nulls
+`cons_pt`. Field reference: `lean/signals.schema.md`. Run:
+```bash
+.venv/bin/python scripts/export_lean_signals.py \
+    --matrix-run runs/matrix_mid_weekly_<ts>_chain \
+    --matrix-run runs/matrix_large_weekly_<ts>_chain \
+    --output lean/signals.json
+```
+Tests: `tests/test_export_lean_signals.py` (`.venv/bin/python -m pytest tests/test_export_lean_signals.py -q`).
+
+### The algorithm: `lean/algorithm/`
+`TradingAgentsAlgorithm.py` (+ `SignalData.py`, `config.json`, local README).
+QC-Cloud-style multi-file. Loads `signals.json`, buys the Δ0.55 calls, and runs
+**tier-specific exit discipline** checked daily at close off the underlying's high:
+
+| Rule (by tier) | Behavior |
+|---|---|
+| `tier_a_take_profit` (A) | sell 50% at cons PT, remainder at aggr PT |
+| `tier_b_run` (B) | ignore cons PT; sell 100% at aggr PT (let winners run) |
+| `tier_c_trim` (C) | sell 100% at aggr PT |
+| universal (all) | stop at option premium −40%; time-stop at ≤21 DTE |
+
+These four rules are **canonical** and must match `export_lean_signals.py`'s
+rule mapping and `lean/signals.schema.md`. If you change a threshold, change all
+three together (same discipline as the tier-derivation four-way sync).
+
+### Deploying to Relay (self-hosted LEAN fleet)
+Live execution runs on the **Relay** repo (`~/Documents/GitHub/Relay`), not QC
+Cloud. Relay is **1 node = 1 single-file `main.py`**, so shipping there is a
+*port* of `lean/algorithm/` into one file under `strategies/<Name>/main.py`
+(Relay idiom: `from AlgorithmImports import *`, `STRATEGY_META`, `_tg_notify`,
+daily resolution), loading signals from `/LeanCLI/signals.json`. Node 1 (Aurora,
+`192.168.7.230`, IBKR) is the options/IBKR node. Deploy via
+`scripts/deploy.sh paper <Strategy>`; go-live is gated by Relay's Phase 8
+checklist. Full architecture, staging plan, and broker/infra notes: `lean/README.md`.
+
+### Don'ts
+- ❌ Don't let LEAN re-screen, re-rank, or bypass the weekly cadence — it only
+  executes `approved:true` rows.
+- ❌ Don't auto-flip `approved:false → true` in `signals.json` — that's the
+  user's explicit gate.
+- ❌ Don't let the bridge and the algo drift on the exit-rule names/semantics.
+
+---
+
 ## Quick lookup skills (`tradingagents-quick-*`)
 
 Five sibling skills wrap raw-signal dataflows so a future agent (or the
@@ -709,6 +775,7 @@ into the weekly tick without explicit confirmation.
 | `run_weekly_all_tiers.py` | Runs `weekly_workflow.py` sequentially across mid + large + mega tiers (Polygon free-tier is 5 req/min, so serializing is forced anyway). Default is screen-only — pass `--chain` to also matrix-run each tier's NEW list. |
 | `watch_pipeline.py` | Live TUI dashboard over a weekly / matrix log file (`runs/weekly_workflow_*.log`, `runs/matrix_<id>_*.log`, launchd's `runs/weekly_workflow.log`). Read-only. |
 | `smoke_structured_output.py` | End-to-end smoke for the three structured-output agents (Research Manager, Trader, Portfolio Manager) against a real LLM provider. Use to verify `json_schema` / `response_schema` / tool-use bindings before bumping a model. |
+| `export_lean_signals.py` | Flattens approved matrix picks into `lean/signals.json` for the LEAN execution integration (see the **LEAN execution integration** section). Pure file transform, no network. |
 
 ---
 
@@ -754,6 +821,10 @@ feeding a run artifact — don't replace those with the MCP. Rough split:
 - ❌ Don't quote live prices, greeks, or IV from memory. Route ad-hoc
   market-data lookups through the Massive MCP (`mcp__massive__*`). The
   `scripts/build_*` family stays the right tool for batch artifacts.
+- ❌ Don't let the LEAN integration bypass the human approval gate or the weekly
+  cadence — `lean/signals.json` rows default `approved:false`; only the user
+  flips them. Keep the exit-rule names/semantics in sync across
+  `scripts/export_lean_signals.py`, `lean/algorithm/`, and `lean/signals.schema.md`.
 
 ---
 
