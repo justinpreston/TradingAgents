@@ -14,7 +14,7 @@ from unittest import mock
 import pandas as pd
 import pytest
 
-from tradingagents.dataflows import stockstats_utils, interface
+from tradingagents.dataflows import interface, stockstats_utils
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.symbol_utils import NoMarketDataError
 
@@ -33,9 +33,9 @@ class TestLoadOhlcvNoPoison(unittest.TestCase):
 
     def test_empty_download_raises_and_does_not_cache(self):
         empty = pd.DataFrame()
-        with mock.patch.object(stockstats_utils.yf, "download", return_value=empty) as dl:
-            with self.assertRaises(NoMarketDataError):
-                stockstats_utils.load_ohlcv("FAKE", "2026-01-01")
+        with mock.patch.object(stockstats_utils.yf, "download", return_value=empty), \
+                self.assertRaises(NoMarketDataError):
+            stockstats_utils.load_ohlcv("FAKE", "2026-01-01")
         # Nothing should have been written to the cache.
         self.assertEqual(os.listdir(self._tmp), [])
 
@@ -48,6 +48,13 @@ class TestLoadOhlcvNoPoison(unittest.TestCase):
 
 @pytest.mark.unit
 class TestRouteToVendorSentinel(unittest.TestCase):
+    def setUp(self):
+        # These tests patch the yfinance/alpha_vantage impls and assert the
+        # no-data sentinel path. The fork defaults core_stock_apis to polygon,
+        # so configure the chain explicitly to the vendors under test rather
+        # than relying on the global default vendor.
+        set_config({"data_vendors": {"core_stock_apis": "yfinance,alpha_vantage"}})
+
     def test_no_data_from_all_vendors_returns_sentinel(self):
         def raises_no_data(symbol, *a, **k):
             raise NoMarketDataError(symbol, "GC=F", "no rows")

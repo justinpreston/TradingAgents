@@ -45,7 +45,8 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Callable, Optional, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
@@ -123,7 +124,7 @@ def _build_structured_twin(llm: Any) -> Any:
         return llm
 
 
-def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Optional[Any]:
+def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Any | None:
     """Return ``llm.with_structured_output(schema)`` or ``None`` if unsupported.
 
     For thinking-enabled Claude models, transparently builds a
@@ -145,7 +146,7 @@ def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Optional[Any]
 
 
 def invoke_structured_or_freetext(
-    structured_llm: Optional[Any],
+    structured_llm: Any | None,
     plain_llm: Any,
     prompt: Any,
     render: Callable[[T], str],
@@ -161,6 +162,11 @@ def invoke_structured_or_freetext(
     if structured_llm is not None:
         try:
             result = structured_llm.invoke(prompt)
+            if result is None:
+                # A thinking model can answer in plain text instead of calling
+                # the tool, leaving the parser with nothing to return. Treat it
+                # as a structured miss and fall back, with a clear reason.
+                raise ValueError("structured output returned no parsed result")
             return render(result)
         except Exception as exc:
             logger.warning(

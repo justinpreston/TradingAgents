@@ -22,8 +22,11 @@ from tradingagents.agents.utils.agent_utils import (
     get_income_statement,
     get_indicators,
     get_insider_transactions,
+    get_macro_indicators,
     get_news,
+    get_prediction_markets,
     get_stock_data,
+    get_verified_market_snapshot,
 )
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 
@@ -66,9 +69,15 @@ def test_each_analyst_node_has_expected_tools():
     assert _names(nodes["market"]) == {
         get_stock_data.name,
         get_indicators.name,
+        get_verified_market_snapshot.name,
     }
     assert _names(nodes["social"]) == {get_news.name}
-    assert _names(nodes["news"]) == {get_news.name, get_global_news.name}
+    assert _names(nodes["news"]) == {
+        get_news.name,
+        get_global_news.name,
+        get_macro_indicators.name,
+        get_prediction_markets.name,
+    }
     assert _names(nodes["fundamentals"]) == {
         get_fundamentals.name,
         get_balance_sheet.name,
