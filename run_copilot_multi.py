@@ -15,7 +15,7 @@ one ticker do NOT stop the batch — failures are recorded in the summary.
 Usage:
     python run_copilot_multi.py NVDA AAPL MSFT
     python run_copilot_multi.py --model gpt-5.5 NVDA AAPL MSFT
-    python run_copilot_multi.py --model claude-opus-4.7-xhigh --date 2024-05-10 NVDA AAPL
+    python run_copilot_multi.py --model claude-opus-4.8 --date 2024-05-10 NVDA AAPL
     python run_copilot_multi.py --quick gpt-5.4-mini --deep gpt-5.5 NVDA   # asymmetric
 """
 
@@ -48,7 +48,7 @@ load_dotenv()
 DEFAULT_TICKERS = ["NVDA", "AAPL", "MSFT"]
 # ``--date`` defaults to today's system date — see ``resolve_trade_date``.
 DEFAULT_DATE: str | None = None
-DEFAULT_MODEL = "claude-opus-4.7-xhigh"
+DEFAULT_MODEL = "claude-opus-4.8"
 
 # Suffixes that indicate the effort is already encoded in the model id
 # (Anthropic-on-Copilot convention). When the model id ends with one of these,
@@ -158,7 +158,7 @@ def _parse_args() -> argparse.Namespace:
         default=DEFAULT_MODEL,
         help=(
             f"Copilot model id used for BOTH quick + deep slots (default: {DEFAULT_MODEL}). "
-            "Examples: gpt-5.5, claude-opus-4.7-xhigh, claude-sonnet-4.6, gpt-5.4."
+            "Examples: gpt-5.5, claude-opus-4.8, claude-sonnet-4.6, gpt-5.4."
         ),
     )
     p.add_argument(
@@ -178,7 +178,7 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "Override reasoning effort for OpenAI-family models (gpt-5*). "
             "Auto-defaults to 'xhigh' when neither --quick nor --deep model id "
-            "carries an effort suffix (e.g. claude-opus-4.7-xhigh already encodes it)."
+            "carries an effort suffix (e.g. claude-opus-4.8 already encodes it)."
         ),
     )
     p.add_argument(

@@ -1,0 +1,19 @@
+{
+  "algorithm-language": "Python",
+  "algorithm-type-name": "TradingAgentsAlgorithm",
+  "algorithm-location": "TradingAgentsAlgorithm.py",
+  "parameters": {
+    "signals-path": "signals.json",
+    "stop-loss-pct": "-0.40",
+    "time-stop-dte": "21"
+  },
+  "description": "TradingAgents weekly long-call executor with tier-specific target exits.",
+  "cloud-id": 0,
+  "organization-id": "",
+  "python-venv": 1,
+  "backtest": {
+    "start-date": "2026-06-26",
+    "end-date": "2027-01-31",
+    "cash": 100000
+  }
+}

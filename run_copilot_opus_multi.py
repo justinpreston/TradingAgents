@@ -93,8 +93,8 @@ class _TeeStream(io.TextIOBase):
 def _build_config() -> dict:
     cfg = DEFAULT_CONFIG.copy()
     cfg["llm_provider"] = "copilot"
-    cfg["quick_think_llm"] = "claude-opus-4.7-xhigh"
-    cfg["deep_think_llm"] = "claude-opus-4.7-xhigh"
+    cfg["quick_think_llm"] = "claude-opus-4.8"
+    cfg["deep_think_llm"] = "claude-opus-4.8"
     cfg["max_debate_rounds"] = 1
     # Resume any single ticker from last successful node if a run is interrupted.
     cfg["checkpoint_enabled"] = True
@@ -142,7 +142,7 @@ def main() -> int:
     print(f"│ Tickers : {', '.join(tickers)}")
     print(f"│ System  : {system_date}")
     print(f"│ Date    : {trade_date}  ({date_label})")
-    print(f"│ Provider: copilot / claude-opus-4.7-xhigh")
+    print(f"│ Provider: copilot / claude-opus-4.8")
     print(f"│ Output  : {runs_dir.resolve()}")
     print(f"└────────────────────────────────────────────────────────\n")
 
@@ -213,7 +213,7 @@ def main() -> int:
         "",
         f"- **Date:** {trade_date}  ({date_label})",
         f"- **System date at run:** {system_date}",
-        f"- **Provider:** copilot / claude-opus-4.7-xhigh",
+        f"- **Provider:** copilot / claude-opus-4.8",
         f"- **Tickers:** {len(results)}",
         "",
         "| Ticker | Signal | Elapsed | Status |",

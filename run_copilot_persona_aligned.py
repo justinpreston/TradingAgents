@@ -65,7 +65,7 @@ DEFAULT_TICKERS = ["NVDA", "AAPL", "MSFT", "GOOGL"]
 # explicitly via ``--date 2024-05-10`` for the 3-way comparison.
 DEFAULT_DATE: str | None = None
 
-OPUS = "claude-opus-4.7-xhigh"
+OPUS = "claude-opus-4.8"
 GPT55 = "gpt-5.5"
 
 PERSONA_MODELS = {

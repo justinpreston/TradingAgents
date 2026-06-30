@@ -1,0 +1,95 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-06-28T11:07:25-04:00",
+  "source_run": "runs/matrix_mid_weekly_2026-06-26_2103_chain, runs/matrix_large_weekly_2026-06-26_2126_chain, runs/matrix_mega_weekly_2026-06-26_2146_chain",
+  "measure_date": "2026-06-27",
+  "signals": [
+    {
+      "id": "NUE-2026-06-27",
+      "ticker": "NUE",
+      "tier": "A",
+      "classification": "PICK",
+      "underlying_ref_price": 239.78,
+      "option": {
+        "right": "call",
+        "strike": 240,
+        "expiry": "2026-12-18",
+        "target_delta": 0.55,
+        "occ_symbol": "O:NUE261218C00240000",
+        "ref_premium_per_share": 26.37
+      },
+      "entry": {
+        "max_premium_per_share": 27.6885,
+        "size_pct": 0.04,
+        "max_size_pct": 0.06
+      },
+      "exits": {
+        "cons_pt": 274.0,
+        "aggr_pt": 274.0,
+        "rule": "tier_a_take_profit",
+        "stop_loss_premium_pct": -0.4,
+        "time_stop_dte": 21
+      },
+      "approved": false,
+      "notes": ""
+    },
+    {
+      "id": "ADI-2026-06-27",
+      "ticker": "ADI",
+      "tier": "C",
+      "classification": "PICK",
+      "underlying_ref_price": 386.91,
+      "option": {
+        "right": "call",
+        "strike": 400,
+        "expiry": "2026-12-18",
+        "target_delta": 0.55,
+        "occ_symbol": "O:ADI261218C00400000",
+        "ref_premium_per_share": 55.36
+      },
+      "entry": {
+        "max_premium_per_share": 58.128,
+        "size_pct": 0.02,
+        "max_size_pct": 0.04
+      },
+      "exits": {
+        "cons_pt": null,
+        "aggr_pt": 470.0,
+        "rule": "tier_c_trim",
+        "stop_loss_premium_pct": -0.4,
+        "time_stop_dte": 21
+      },
+      "approved": false,
+      "notes": ""
+    },
+    {
+      "id": "KLIC-2026-06-27",
+      "ticker": "KLIC",
+      "tier": "C",
+      "classification": "PICK",
+      "underlying_ref_price": 125.22,
+      "option": {
+        "right": "call",
+        "strike": 130,
+        "expiry": "2027-01-15",
+        "target_delta": 0.55,
+        "occ_symbol": "O:KLIC270115C00130000",
+        "ref_premium_per_share": 27.13
+      },
+      "entry": {
+        "max_premium_per_share": 28.4865,
+        "size_pct": 0.02,
+        "max_size_pct": 0.04
+      },
+      "exits": {
+        "cons_pt": null,
+        "aggr_pt": 140.0,
+        "rule": "tier_c_trim",
+        "stop_loss_premium_pct": -0.4,
+        "time_stop_dte": 21
+      },
+      "approved": false,
+      "notes": ""
+    }
+  ]
+}

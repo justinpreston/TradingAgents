@@ -85,7 +85,7 @@ load_dotenv()
 DEFAULT_TICKERS = ["NVDA", "AAPL", "MSFT", "GOOGL"]
 DEFAULT_DATE: str | None = None
 
-OPUS = "claude-opus-4.7-xhigh"
+OPUS = "claude-opus-4.8"
 GPT55 = "gpt-5.5"
 
 PERSONA_MODELS = {

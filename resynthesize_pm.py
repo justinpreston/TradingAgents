@@ -24,7 +24,7 @@ Usage
 
     python resynthesize_pm.py runs/persona_aligned_2026-04-30_top5 \\
         --risk-profile aggressive \\
-        --pm-model claude-opus-4.7-xhigh
+        --pm-model claude-opus-4.8
 
     # Operate on a subset:
     python resynthesize_pm.py runs/aggressive_aligned_2026-04-30_top5 \\
