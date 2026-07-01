@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ONE-SHOT dress rehearsal of the Friday pre-market cadence.
+
+  Fires once on July 2 (2026) at 06:30 local time — pinned to Month+Day, not
+  a weekday, so it cannot recur weekly. Identical invocation to the
+  production com.tradingagents.weekly job, but logs to
+  runs/weekly_workflow_test.log so the rehearsal is distinguishable.
+
+  Cleanup after the test (also handled by the scheduled check-in session):
+    launchctl unload ~/Library/LaunchAgents/com.tradingagents.weekly-test.plist
+    rm ~/Library/LaunchAgents/com.tradingagents.weekly-test.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tradingagents.weekly-test</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/jpp5q/Documents/GitHub/TradingAgents/.venv/bin/python</string>
+        <string>/Users/jpp5q/Documents/GitHub/TradingAgents/scripts/run_weekly_all_tiers.py</string>
+        <string>--top</string>
+        <string>25</string>
+        <string>--chain</string>
+        <string>--chain-top</string>
+        <string>5</string>
+        <string>--chain-max-parallel</string>
+        <string>5</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/jpp5q/Documents/GitHub/TradingAgents</string>
+
+    <!-- One shot: July 2 at 06:30 local -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Month</key>
+        <integer>7</integer>
+        <key>Day</key>
+        <integer>2</integer>
+        <key>Hour</key>
+        <integer>6</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jpp5q/Documents/GitHub/TradingAgents/runs/weekly_workflow_test.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jpp5q/Documents/GitHub/TradingAgents/runs/weekly_workflow_test.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>

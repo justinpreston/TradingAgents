@@ -3,9 +3,9 @@
 
 Each tier is a separate ``weekly_workflow.py`` invocation with its own
 mcap band, ADV floor, and tier-tagged screener/matrix run_ids. Tiers run
-sequentially (NOT in parallel) because Polygon's free-tier REST endpoints
-are rate-limited at 5 req/min, and three concurrent screeners would just
-serialize on the limiter anyway.
+sequentially — on the paid Polygon tier this is no longer a rate-limit
+necessity (screeners measure 0.4-2.9 min each), just simplicity; the
+matrix stage (~21 min/tier) is the actual critical path.
 
 Default behavior is screen-only across all three tiers (no chaining), which
 lets you review NEW lists across all caps before spending LLM cycles on
@@ -139,6 +139,27 @@ def main() -> int:
     _hr("All tiers complete")
     print(f"  Total elapsed: {elapsed.total_seconds():.0f}s "
           f"({elapsed.total_seconds() / 60:.1f} min)")
+
+    # With --chain, close the loop with one cross-tier dashboard over all of
+    # today's matrix runs (per-run report_<run_id>.html files already exist
+    # from each tier's auto-report). Best-effort: never fails the tick.
+    if args.chain and not args.dry_run:
+        _hr("Cross-tier combined report")
+        try:
+            from friday_options_refresh import (
+                RUNS_DIR,
+                build_combined_report_best_effort,
+                find_todays_matrix_runs,
+            )
+            today = datetime.now().date().isoformat()
+            todays_runs = find_todays_matrix_runs(RUNS_DIR, today)
+            if todays_runs:
+                build_combined_report_best_effort(todays_runs, today)
+            else:
+                print(f"  (no matrix runs with snapshot_date == {today} — skipped)")
+        except Exception as exc:  # noqa: BLE001 - best-effort by design
+            print(f"  ⚠ combined report skipped: {exc} (best-effort; not fatal)")
+
     if failures:
         print(f"  ⚠ Failed tiers: {', '.join(failures)}")
         return 1
@@ -151,12 +172,14 @@ def main() -> int:
     print("             --tickers <NEW1> <NEW2> ... \\")
     print("             --screener-run runs/screener_<tier>_<ts> \\")
     print("             --run-id matrix_<tier>_weekly_<ts>_chain")
-    print("    3. After matrix runs, build cross-tier HTML comparison:")
+    print("    3. After matrix runs, the cross-tier HTML comparison is auto-built")
+    print("       when --chain is set (runs/cross_run_<date>/report_combined.html);")
+    print("       manual form:")
     print("         .venv/bin/python scripts/build_html_report.py \\")
     print("             --runs runs/matrix_mid_*:mid \\")
     print("                    runs/matrix_large_*:large \\")
     print("                    runs/matrix_mega_*:mega \\")
-    print("             --output runs/cross_run_$(date +%Y-%m-%d)/report.html")
+    print("             --output runs/cross_run_$(date +%Y-%m-%d)/report_combined.html")
     return 0
 
 

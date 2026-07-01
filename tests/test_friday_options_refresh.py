@@ -274,3 +274,68 @@ class TestMainExitCode:
         )
         rc = refresh_mod.main()
         assert rc == 0
+
+
+# ---------------------------------------------------------------------------
+# Combined cross-tier report wiring
+# ---------------------------------------------------------------------------
+
+class TestCombinedReport:
+    def test_tier_label_extracts_tier_token(self, refresh_mod):
+        assert refresh_mod._tier_label(Path("matrix_mid_weekly_2026-07-02_0630_chain")) == "mid"
+        assert refresh_mod._tier_label(Path("matrix_large_weekly_x_chain")) == "large"
+        assert refresh_mod._tier_label(Path("matrix_mega_weekly_x_chain")) == "mega"
+
+    def test_tier_label_falls_back_to_run_name(self, refresh_mod):
+        assert refresh_mod._tier_label(Path("matrix_pipeline_test_abc")) == "matrix_pipeline_test_abc"
+
+    def test_argv_construction(self, refresh_mod, monkeypatch):
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            captured["stdin"] = kwargs.get("stdin")
+            class R:
+                returncode = 0
+            return R()
+
+        monkeypatch.setattr(refresh_mod.subprocess, "run", fake_run)
+        runs = [
+            refresh_mod.REPO_ROOT / "runs" / "matrix_mid_weekly_2026-07-02_0630_chain",
+            refresh_mod.REPO_ROOT / "runs" / "matrix_mega_weekly_2026-07-02_0710_chain",
+        ]
+        refresh_mod.build_combined_report_best_effort(runs, "2026-07-02")
+
+        cmd = captured["cmd"]
+        assert cmd[1].endswith("build_html_report.py")
+        specs = cmd[cmd.index("--runs") + 1 : cmd.index("--output")]
+        assert specs == [
+            "runs/matrix_mid_weekly_2026-07-02_0630_chain:mid",
+            "runs/matrix_mega_weekly_2026-07-02_0710_chain:mega",
+        ]
+        out = cmd[cmd.index("--output") + 1]
+        assert out.endswith("runs/cross_run_2026-07-02/report_combined.html")
+        # hard subprocess invariant
+        assert captured["stdin"] == refresh_mod.subprocess.DEVNULL
+
+    def test_dry_run_and_empty_runs_do_not_spawn(self, refresh_mod, monkeypatch):
+        def boom(*a, **k):
+            raise AssertionError("subprocess.run must not be called")
+
+        monkeypatch.setattr(refresh_mod.subprocess, "run", boom)
+        refresh_mod.build_combined_report_best_effort([], "2026-07-02")
+        refresh_mod.build_combined_report_best_effort(
+            [refresh_mod.REPO_ROOT / "runs" / "matrix_mid_x"], "2026-07-02", dry_run=True
+        )
+
+    def test_nonzero_exit_is_best_effort(self, refresh_mod, monkeypatch, capsys):
+        def fake_run(cmd, **kwargs):
+            class R:
+                returncode = 3
+            return R()
+
+        monkeypatch.setattr(refresh_mod.subprocess, "run", fake_run)
+        refresh_mod.build_combined_report_best_effort(
+            [refresh_mod.REPO_ROOT / "runs" / "matrix_mid_x"], "2026-07-02"
+        )  # must not raise
+        assert "exited 3" in capsys.readouterr().out

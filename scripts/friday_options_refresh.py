@@ -91,6 +91,65 @@ def _refresh_one(matrix_run: Path, strategy_mode: str, dry_run: bool) -> int:
     return completed.returncode
 
 
+_TIER_TOKENS = {"mid", "large", "mega"}
+
+
+def _tier_label(run_dir: Path) -> str:
+    """Derive the tier label from a run-id like matrix_mid_weekly_<ts>_chain."""
+    for tok in run_dir.name.split("_")[1:3]:
+        if tok in _TIER_TOKENS:
+            return tok
+    return run_dir.name
+
+
+def build_combined_report_best_effort(
+    matrix_runs: list[Path], target_date: str, dry_run: bool = False
+) -> None:
+    """Cross-tier HTML dashboard over all of the day's matrix runs.
+
+    Complements the per-run report_<run_id>.html files the matrix auto-report
+    writes: one page, all tiers. Best-effort — a failure here never fails the
+    refresh/chain (the packet is the decision-critical artifact).
+    """
+    if not matrix_runs:
+        return
+    # Derive the runs root from the runs themselves so a custom --runs-dir
+    # (and monkeypatched test roots) place the output correctly.
+    runs_root = matrix_runs[0].parent
+    out = runs_root / f"cross_run_{target_date}" / "report_combined.html"
+    specs = []
+    for r in matrix_runs:
+        try:
+            rel = r.relative_to(REPO_ROOT) if r.is_absolute() else r
+        except ValueError:
+            rel = r
+        specs.append(f"{rel}:{_tier_label(r)}")
+    cmd = [
+        sys.executable, str(REPO_ROOT / "scripts" / "build_html_report.py"),
+        "--runs", *specs,
+        "--output", str(out),
+        "--title", f"Weekly cross-tier report — {target_date}",
+    ]
+    print(f"  $ {' '.join(cmd)}")
+    if dry_run:
+        print("    (skipped: --dry-run)")
+        return
+    try:
+        rc = subprocess.run(
+            cmd, cwd=str(REPO_ROOT), stdin=subprocess.DEVNULL,
+        ).returncode
+        if rc != 0:
+            print(f"    ⚠ build_html_report.py exited {rc} (best-effort; not fatal)")
+        else:
+            try:
+                shown = out.relative_to(REPO_ROOT)
+            except ValueError:
+                shown = out
+            print(f"    ✅ {shown}")
+    except OSError as exc:
+        print(f"    ⚠ build_html_report.py failed to launch: {exc} (best-effort; not fatal)")
+
+
 def _run_friday_packet_best_effort(dry_run: bool) -> None:
     packet_script = REPO_ROOT / "scripts" / "build_friday_packet.py"
     if not packet_script.exists():
@@ -153,6 +212,9 @@ def main() -> int:
 
     print("\n→ Friday packet (best-effort)")
     _run_friday_packet_best_effort(args.dry_run)
+
+    print("\n→ Combined cross-tier report (best-effort)")
+    build_combined_report_best_effort(matrix_runs, target_date, args.dry_run)
 
     print()
     print(f"Summary: {len(matrix_runs) - len(failures)}/{len(matrix_runs)} refreshed successfully")
