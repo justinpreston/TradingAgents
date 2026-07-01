@@ -70,17 +70,23 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from dotenv import load_dotenv
-
-from tradingagents.dataflows.utils import resolve_trade_date
-
-load_dotenv()
-
-
 REPO_ROOT = Path(__file__).resolve().parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts._env import load_repo_env  # noqa: E402
+
+from tradingagents.dataflows.utils import resolve_trade_date  # noqa: E402
+
+load_repo_env()
 
 PROFILES_DEFAULT = ("aggressive", "conservative")
-SUB_RUNNER = "run_copilot_aggressive_aligned.py"
+# run_copilot_persona_aligned.py folds in the former standalone
+# run_copilot_aggressive_aligned.py (now a thin back-compat shim). The
+# matrix always selects the aggressive-aligned persona → model routing
+# table via --persona-routing to preserve its historical cell behavior.
+SUB_RUNNER = "run_copilot_persona_aligned.py"
+SUB_RUNNER_PERSONA_ROUTING = "aggressive-aligned"
 
 # ADI-pattern thresholds: aggressive verdict that counts as a green light
 PROMOTE_RATINGS = {"Overweight", "Buy"}
@@ -99,6 +105,7 @@ class CellResult:
     error: Optional[str] = None
     cell_dir: Optional[str] = None
     log_size: Optional[int] = None
+    attempt: int = 1  # 1 = first try; 2 = succeeded/recorded after one auto-retry
 
 
 # ---------------------------------------------------------------------------
@@ -158,14 +165,20 @@ def _extract_from_state(state_path: Path) -> tuple[Optional[str], Optional[str]]
             pt.group(1) if pt else None)
 
 
-def _run_cell(
+def _run_cell_once(
     ticker: str,
     profile: str,
     trade_date: str,
     matrix_dir: Path,
     env: dict,
     no_dashboard: bool,
+    attempt: int = 1,
 ) -> CellResult:
+    """Run a single (ticker, profile) cell exactly once — no retry logic.
+
+    ``_run_cell`` (below) wraps this with a one-shot auto-retry. Kept as a
+    separate function so tests can drive individual attempts deterministically.
+    """
     cell_dir = matrix_dir / "cells" / profile / ticker
     cell_dir.mkdir(parents=True, exist_ok=True)
 
@@ -181,15 +194,20 @@ def _run_cell(
                 rating=rating, price_target=pt, elapsed_s=0.0,
                 cell_dir=str(cell_dir),
                 log_size=(log_file.stat().st_size if log_file.exists() else 0),
+                attempt=attempt,
             )
 
-    # Build the sub-runner command. We re-use run_copilot_aggressive_aligned.py
-    # with --run-id pointing inside the matrix dir so its outputs land in cell_dir.
+    # Build the sub-runner command. We re-use run_copilot_persona_aligned.py
+    # (which folds in the former standalone run_copilot_aggressive_aligned.py)
+    # with --run-id pointing inside the matrix dir so its outputs land in
+    # cell_dir, and --persona-routing pinned to aggressive-aligned to
+    # preserve the matrix's historical per-cell model routing.
     sub_run_id = f"{matrix_dir.name}/cells/{profile}/{ticker}"
     cmd = [
         sys.executable, SUB_RUNNER,
         "--date", trade_date,
         "--run-id", sub_run_id,
+        "--persona-routing", SUB_RUNNER_PERSONA_ROUTING,
     ]
     # 'neutral' is a valid sub-runner choice; it injects no addendum.
     cmd += ["--risk-profile", profile]
@@ -219,6 +237,7 @@ def _run_cell(
             error=f"subprocess failed: {exc}",
             elapsed_s=time.time() - started,
             cell_dir=str(cell_dir),
+            attempt=attempt,
         )
     elapsed = time.time() - started
 
@@ -240,6 +259,7 @@ def _run_cell(
             elapsed_s=elapsed,
             cell_dir=str(cell_dir),
             log_size=(log_file.stat().st_size if log_file.exists() else 0),
+            attempt=attempt,
         )
 
     rating, pt = _extract_from_state(state_file)
@@ -251,7 +271,45 @@ def _run_cell(
         cell_dir=str(cell_dir),
         log_size=(log_file.stat().st_size if log_file.exists() else 0),
         error=None if rating else "rating not parseable from state.json",
+        attempt=attempt,
     )
+
+
+def _run_cell(
+    ticker: str,
+    profile: str,
+    trade_date: str,
+    matrix_dir: Path,
+    env: dict,
+    no_dashboard: bool,
+    writer: "Optional[_LiveWriter]" = None,
+    stage: str = "",
+) -> CellResult:
+    """Run a (ticker, profile) cell, auto-retrying ONCE (fresh subprocess,
+    same args) when the first attempt exits nonzero or produces no
+    parseable rating in state.json.
+
+    Rationale: on 2026-06-26 all 15 Stage-A cells failed systemically with
+    no retry, killing the whole window. A single retry pass — a fresh
+    subprocess with identical args — would likely have recovered from a
+    transient failure (rate limit, flaky Copilot backend, etc.) without
+    materially increasing cost on the common (already-succeeding) path.
+
+    When ``writer`` is provided, the failed first attempt is logged to
+    events.jsonl (stage label suffixed with "-retry") before the retry runs,
+    so the retry is visible in the event stream even though only the final
+    result is recorded in the cell/matrix reports.
+    """
+    result = _run_cell_once(ticker, profile, trade_date, matrix_dir, env, no_dashboard, attempt=1)
+
+    needs_retry = result.status == "error" and result.rating is None
+    if not needs_retry:
+        return result
+
+    if writer is not None:
+        writer.append(result, stage=f"{stage}-retry" if stage else "retry")
+
+    return _run_cell_once(ticker, profile, trade_date, matrix_dir, env, no_dashboard, attempt=2)
 
 
 # ---------------------------------------------------------------------------
@@ -472,7 +530,8 @@ def _run_stage(
 
     with ThreadPoolExecutor(max_workers=max_parallel) as pool:
         futures = {
-            pool.submit(_run_cell, t, profile, trade_date, matrix_dir, env, no_dashboard): t
+            pool.submit(_run_cell, t, profile, trade_date, matrix_dir, env, no_dashboard,
+                        writer, stage_label): t
             for t in tickers
         }
         try:
@@ -737,9 +796,17 @@ def _run_auto_report(matrix_dir: Path, long_call_delta: float,
 
     # HTML report — always single-run for the matrix that just completed.
     # Cross-run aggregation is a separate manual concern.
+    #
+    # Filename is per-run (report_<run_id>.html), NOT the shared
+    # report.html — multiple tiers auto-reporting on the same calendar day
+    # (mid/large/mega, all via run_weekly_all_tiers.py) would otherwise
+    # clobber each other's cross_run_<date>/report.html, leaving only the
+    # last tier's report on disk. Manual multi-run invocations of
+    # build_html_report.py (e.g. combining all three tiers into one
+    # dashboard) are unaffected — they pass --output explicitly.
     today = datetime.now().strftime("%Y-%m-%d")
     html_dir = REPO_ROOT / "runs" / f"cross_run_{today}"
-    html_path = html_dir / "report.html"
+    html_path = html_dir / f"report_{matrix_dir.name}.html"
     label = matrix_dir.name.replace("matrix_", "").replace("_", "-") or "run"
     sys.stdout.write(f"  → html-report → {html_path.relative_to(REPO_ROOT)}…\n")
     rc = subprocess.run(

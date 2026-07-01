@@ -29,6 +29,8 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from tradingagents.tiers import tier_for_row, tier_rank
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PORTFOLIO_DIR = REPO_ROOT / "runs" / "portfolio"
 RUNS_DIR = REPO_ROOT / "runs"
@@ -131,6 +133,12 @@ def find_latest_matrix_run(runs_dir: Path = RUNS_DIR) -> Path | None:
 
     Detection mirrors scripts/index_runs.py — we check for verdict_ledger.json
     rather than directory naming, so custom run-ids work.
+
+    NOTE: this is mtime-based and kept only for back-compat / single-run
+    callers. Prefer :func:`find_matrix_runs_for_latest_trade_date`, which is
+    content-based (immune to a Saturday overlay re-run reshuffling "latest",
+    and correctly unions the mid/large/mega tier runs that now all land the
+    same Friday).
     """
     if not runs_dir.exists():
         return None
@@ -141,6 +149,69 @@ def find_latest_matrix_run(runs_dir: Path = RUNS_DIR) -> Path | None:
     if not candidates:
         return None
     return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
+def _matrix_run_trade_date(run_path: Path) -> str | None:
+    """Best-effort content-based trade date for a matrix run directory.
+
+    Prefers manifest.json::trade_date (explicit, set at launch time), falls
+    back to verdict_ledger.json::snapshot_date. Returns None if neither is
+    present/parseable — such runs are excluded from trade-date grouping.
+    """
+    manifest_path = run_path / "manifest.json"
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text())
+        except json.JSONDecodeError:
+            manifest = {}
+        trade_date = manifest.get("trade_date")
+        if trade_date:
+            return str(trade_date)
+
+    verdict_path = run_path / "verdict_ledger.json"
+    if verdict_path.exists():
+        try:
+            verdict = json.loads(verdict_path.read_text())
+        except json.JSONDecodeError:
+            verdict = {}
+        snapshot_date = verdict.get("snapshot_date")
+        if snapshot_date:
+            return str(snapshot_date)
+
+    return None
+
+
+def find_matrix_runs_for_latest_trade_date(runs_dir: Path | None = None) -> list[Path]:
+    """Discover ALL matrix runs sharing the most recent trade date.
+
+    Trade date is determined from run *content* (manifest.json::trade_date,
+    falling back to verdict_ledger.json::snapshot_date) — NOT directory mtime.
+    This is what makes multi-tier Fridays (mid/large/mega matrix runs, all
+    dated the same trade_date) join correctly, and keeps a same-day overlay
+    re-run (which bumps mtime but not trade_date) from reshuffling "latest".
+
+    Runs without a resolvable trade date are excluded. Returns paths sorted
+    by run_id for determinism (not by mtime).
+
+    ``runs_dir`` defaults to the module-level :data:`RUNS_DIR`, resolved at
+    call time (not def-time) so tests can monkeypatch it.
+    """
+    if runs_dir is None:
+        runs_dir = RUNS_DIR
+    if not runs_dir.exists():
+        return []
+    dated: list[tuple[str, Path]] = []
+    for p in runs_dir.iterdir():
+        if not p.is_dir() or not (p / "verdict_ledger.json").exists():
+            continue
+        trade_date = _matrix_run_trade_date(p)
+        if trade_date is None:
+            continue
+        dated.append((trade_date, p))
+    if not dated:
+        return []
+    latest_date = max(td for td, _ in dated)
+    return sorted((p for td, p in dated if td == latest_date), key=lambda p: p.name)
 
 
 def load_matrix_run(run_path: Path) -> dict[str, Any]:
@@ -163,11 +234,113 @@ def load_matrix_run(run_path: Path) -> dict[str, Any]:
 
     return {
         "run_id": verdict.get("run_id", run_path.name),
+        "run_path": str(run_path),
         "snapshot_date": verdict.get("snapshot_date"),
         "generated_at": verdict.get("generated_at"),
         "rows_by_ticker": {row["ticker"]: row for row in verdict.get("rows", [])},
         "overlays_by_ticker": {ov["ticker"]: ov for ov in overlays},
         "prices": prices,
+    }
+
+
+def _row_tier(row: dict[str, Any] | None) -> str | None:
+    """Derive tier from a verdict_ledger row. Delegates to
+    tradingagents.tiers.tier_for_row (canonical source of truth)."""
+    if row is None:
+        return None
+    return tier_for_row(row, suspect_caps_a=False)
+
+
+def load_matrix_runs(run_paths: list[Path]) -> dict[str, Any]:
+    """Union multiple matrix runs into one matrix context, per-ticker deduped.
+
+    On a ticker collision (the same ticker appears in more than one tier
+    run — e.g. a name that straddled the mid/large mcap boundary and got
+    screened twice), the row/overlay from the run whose *tier is higher*
+    wins (rank ladder VETO=0, "—"/None=1, C=2, B=3, A=4 — mirrors
+    ``_tier_rank``). Tier is read from the overlay's ``tier`` field when
+    present (authoritative, written by build_options_overlay.py), else
+    derived from the verdict_ledger row via ``_row_tier``.
+
+    Prices are merged (later runs don't overwrite earlier ones unless the
+    ticker collides and wins on tier, in which case its run's price wins
+    too, keeping price/row/overlay consistent for that ticker).
+    """
+    if not run_paths:
+        return {
+            "run_id": None,
+            "run_ids": [],
+            "run_paths": [],
+            "snapshot_date": None,
+            "generated_at": None,
+            "rows_by_ticker": {},
+            "overlays_by_ticker": {},
+            "prices": {},
+        }
+
+    loaded = [load_matrix_run(p) for p in run_paths]
+
+    rows_by_ticker: dict[str, Any] = {}
+    overlays_by_ticker: dict[str, Any] = {}
+    prices: dict[str, Any] = {}
+    winning_run_by_ticker: dict[str, str] = {}
+
+    for run in loaded:
+        run_id = run["run_id"]
+        all_tickers = set(run["rows_by_ticker"]) | set(run["overlays_by_ticker"])
+        for ticker in all_tickers:
+            row = run["rows_by_ticker"].get(ticker)
+            overlay = run["overlays_by_ticker"].get(ticker)
+
+            candidate_tier = (overlay.get("tier") if overlay else None) or _row_tier(row)
+
+            if ticker not in rows_by_ticker and ticker not in overlays_by_ticker:
+                incumbent_tier = None
+            else:
+                incumbent_row = rows_by_ticker.get(ticker)
+                incumbent_overlay = overlays_by_ticker.get(ticker)
+                incumbent_tier = (
+                    incumbent_overlay.get("tier") if incumbent_overlay else None
+                ) or _row_tier(incumbent_row)
+
+            if ticker not in winning_run_by_ticker or _tier_rank(candidate_tier) >= _tier_rank(
+                incumbent_tier
+            ):
+                if row is not None:
+                    rows_by_ticker[ticker] = row
+                if overlay is not None:
+                    overlays_by_ticker[ticker] = overlay
+                if ticker in run["prices"]:
+                    prices[ticker] = run["prices"][ticker]
+                winning_run_by_ticker[ticker] = run_id
+            else:
+                # Losing run still fills price gaps if the winner lacks one.
+                if ticker not in prices and ticker in run["prices"]:
+                    prices[ticker] = run["prices"][ticker]
+
+        # current_prices.json commonly carries prices for tickers with no
+        # ledger row/overlay at all (e.g. a held position that isn't a pick
+        # this week but whose price got fetched anyway). Backfill those so
+        # a held ticker's price isn't silently dropped just because it
+        # never appears in rows_by_ticker/overlays_by_ticker.
+        for ticker, price in run["prices"].items():
+            if ticker not in prices:
+                prices[ticker] = price
+
+    # snapshot_date / generated_at: prefer the newest across contributing runs.
+    snapshot_dates = [r["snapshot_date"] for r in loaded if r.get("snapshot_date")]
+    generated_ats = [r["generated_at"] for r in loaded if r.get("generated_at")]
+
+    return {
+        "run_id": loaded[0]["run_id"] if len(loaded) == 1 else None,
+        "run_ids": [r["run_id"] for r in loaded],
+        "run_paths": [r["run_path"] for r in loaded],
+        "snapshot_date": max(snapshot_dates) if snapshot_dates else None,
+        "generated_at": max(generated_ats) if generated_ats else None,
+        "rows_by_ticker": rows_by_ticker,
+        "overlays_by_ticker": overlays_by_ticker,
+        "prices": prices,
+        "winning_run_by_ticker": winning_run_by_ticker,
     }
 
 
@@ -286,8 +459,9 @@ def validate_positions(book: dict[str, Any], strict: bool = False) -> Validation
 
 
 def _tier_rank(tier: str | None) -> int:
-    """Mirror compare_insider_ablation.py ladder: VETO < — < C < B < A."""
-    return {"VETO": 0, "—": 1, None: 1, "C": 2, "B": 3, "A": 4}.get(tier, 1)
+    """Mirror compare_insider_ablation.py ladder: VETO < — < C < B < A.
+    Delegates to tradingagents.tiers.tier_rank."""
+    return tier_rank(tier)
 
 
 def _safe_div(num: float | None, den: float | None) -> float | None:
@@ -499,28 +673,57 @@ def compute_flags(positions: list[dict[str, Any]], policy: dict[str, Any]) -> li
 # Main
 
 
+def _resolve_matrix_run_paths(
+    matrix_run_path: Path | list[Path] | None,
+) -> list[Path]:
+    """Normalize the ``matrix_run_path`` override into a list of run dirs.
+
+    - ``None`` → content-based discovery of every run sharing the most
+      recent trade date (:func:`find_matrix_runs_for_latest_trade_date`).
+    - a single ``Path`` → back-compat: exactly that one run (mirrors the
+      old single-run behavior/signature used by existing callers/tests).
+    - a ``list[Path]`` → explicit override (mirrors export_lean_signals.py's
+      repeatable ``--matrix-run``): use exactly those runs, in the order
+      given.
+    """
+    if matrix_run_path is None:
+        return find_matrix_runs_for_latest_trade_date()
+    if isinstance(matrix_run_path, (list, tuple)):
+        return list(matrix_run_path)
+    return [matrix_run_path]
+
+
 def build_context(
     positions_path: Path = DEFAULT_POSITIONS,
     policy_path: Path = DEFAULT_POLICY,
-    matrix_run_path: Path | None = None,
+    matrix_run_path: Path | list[Path] | None = None,
     trades_log_path: Path = DEFAULT_TRADES_LOG,
 ) -> dict[str, Any]:
     book = load_positions(positions_path)
     policy = load_policy(policy_path)
     trades_log = load_trades_log(trades_log_path)
 
-    if matrix_run_path is None:
-        matrix_run_path = find_latest_matrix_run()
-    if matrix_run_path is None:
-        matrix = {
-            "run_id": None,
-            "snapshot_date": None,
-            "rows_by_ticker": {},
-            "overlays_by_ticker": {},
-            "prices": {},
-        }
+    run_paths = _resolve_matrix_run_paths(matrix_run_path)
+    matrix = load_matrix_runs(run_paths)
+
+    # Back-compat single-path handle: consumers (portfolio_trade_tickets.py,
+    # portfolio_allocation.py) re-read <path>/options_overlay.json directly
+    # off ctx["latest_matrix_run"]. With >1 contributing run we still expose
+    # one representative path (the run with the most ledger rows — usually
+    # the most informative single tier) so those direct re-reads keep
+    # working; ctx["contributing_matrix_runs"] carries the full list for
+    # anything that wants the union.
+    if not run_paths:
+        primary_run_path = None
+    elif len(run_paths) == 1:
+        primary_run_path = run_paths[0]
     else:
-        matrix = load_matrix_run(matrix_run_path)
+        primary_run_path = max(
+            run_paths,
+            key=lambda p: len(json.loads((p / "verdict_ledger.json").read_text()).get("rows", []))
+            if (p / "verdict_ledger.json").exists()
+            else 0,
+        )
 
     asof_str = book.get("as_of") or matrix.get("snapshot_date") or date.today().isoformat()
     asof = datetime.fromisoformat(asof_str).date()
@@ -542,13 +745,26 @@ def build_context(
         "n_high_severity_flags": sum(1 for f in flags if f["severity"] == "high"),
     }
 
+    primary_run_id = None
+    if primary_run_path is not None:
+        primary_run_id = next(
+            (rid for rid, p in zip(matrix.get("run_ids", []), run_paths) if p == primary_run_path),
+            matrix.get("run_id"),
+        )
+
     return {
         "as_of": asof.isoformat(),
         "positions_file": str(positions_path),
         "policy_file": str(policy_path),
-        "latest_matrix_run": str(matrix_run_path) if matrix_run_path else None,
-        "matrix_run_id": matrix.get("run_id"),
+        # Back-compat single-path handle (see _resolve_matrix_run_paths note
+        # above) — one representative contributing run.
+        "latest_matrix_run": str(primary_run_path) if primary_run_path else None,
+        "matrix_run_id": primary_run_id,
         "matrix_snapshot_date": matrix.get("snapshot_date"),
+        # Full union metadata — every run that fed positions/flags below.
+        "contributing_matrix_runs": [str(p) for p in run_paths],
+        "contributing_matrix_run_ids": matrix.get("run_ids", []),
+        "winning_run_by_ticker": matrix.get("winning_run_by_ticker", {}),
         "policy": policy,
         "positions": enriched,
         "flags": flags,
@@ -563,6 +779,10 @@ def render_markdown(ctx: dict[str, Any]) -> str:
     lines.append(f"# Portfolio context — as of {ctx['as_of']}")
     lines.append("")
     lines.append(f"- **Latest matrix run:** `{ctx.get('matrix_run_id') or '(none)'}`")
+    contributing_ids = ctx.get("contributing_matrix_run_ids") or []
+    if len(contributing_ids) > 1:
+        lines.append(f"- **Contributing matrix runs ({len(contributing_ids)}):** " +
+                     ", ".join(f"`{rid}`" for rid in contributing_ids))
     lines.append(f"- **Matrix snapshot date:** {ctx.get('matrix_snapshot_date') or '(none)'}")
     lines.append(f"- **Positions file:** `{ctx['positions_file']}`")
     lines.append("")
@@ -617,8 +837,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--positions-file", type=Path, default=DEFAULT_POSITIONS)
     parser.add_argument("--policy-file", type=Path, default=DEFAULT_POLICY)
-    parser.add_argument("--matrix-run", type=Path, default=None,
-                        help="Override the matrix run path (default: latest detected)")
+    parser.add_argument("--matrix-run", type=Path, action="append", default=None,
+                        help="Matrix run directory to include; repeat to merge multiple tier "
+                             "runs (mirrors export_lean_signals.py). Default: content-based "
+                             "discovery of every matrix run sharing the most recent trade date.")
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of markdown")
     parser.add_argument("--validate", action="store_true",
                         help="Validate positions.json and exit (non-zero on errors)")

@@ -11,27 +11,33 @@ on 2024-05-10 (see ``runs/comparison_2024-05-10.md``):
     writes 270-char market reports but 3-4× longer narrative syntheses,
     steps Buy → Hold when the bear case has merit.
 
-Persona alignment:
+Two persona → model routing tables are available via ``--persona-routing``:
 
-  * Data layer (analysts, trader, bull, aggressive risk, PM)  → GPT-5.5
-    — fills the structured fields, produces executable directives.
-  * Synthesis / "wait for evidence" roles (bear, research manager,
-    neutral & conservative risk analysts)                    → Opus
-    — natural skeptic voice, calibrated middle, ledger-style adjudication.
+  * ``persona-aligned`` (default) — data layer (analysts, trader, bull,
+    aggressive risk, PM) → GPT-5.5; synthesis / "wait for evidence" roles
+    (bear, research manager, neutral & conservative risk analysts) → Opus.
+  * ``aggressive-aligned`` — inverts bull_researcher/aggressive_analyst to
+    Opus (deeper bull synthesis) and bear_researcher/research_manager/
+    neutral_analyst/conservative_analyst to GPT-5.5 (shorter, more
+    rebuttable bear case; rubric verdict without Buy→Hold drift). Built in
+    response to: the persona-aligned config tilts toward Hold/Underweight
+    on early-cycle screener picks — this dials up the bull/aggressive
+    voice. This is the table ``run_copilot_matrix.py`` uses for every
+    matrix cell (formerly served by the now-retired standalone
+    ``run_copilot_aggressive_aligned.py`` script, folded in here).
 
-Portfolio Manager is GPT-5.5 in this configuration: the goal is to land a
-clean ``**Price Target** / **Time Horizon** / **Rating**`` rubric in the
-final output, not a 7K-char narrative essay. The bear/RM/neutral nodes
-upstream still surface skeptic reasoning that the GPT-5.5 PM weighs.
+Portfolio Manager is GPT-5.5 in both tables: the goal is to land a clean
+``**Price Target** / **Time Horizon** / **Rating**`` rubric in the final
+output, not a narrative essay.
 
-Output goes to ``runs/persona_aligned_<date>/`` so neither prior batch
-(``runs/mega_ai_2024-05-10`` Opus, ``runs/gpt55_2024-05-10`` GPT-5.5)
-is overwritten — the three runs are directly comparable on the same
-4 tickers / same date / same Path D PIT-corrected fundamentals.
+Output goes to ``runs/persona_aligned_<date>/`` (or
+``runs/aggressive_aligned_<date>/`` under ``--persona-routing
+aggressive-aligned``) so batches under different routings don't collide.
 
 Usage:
     python run_copilot_persona_aligned.py
     python run_copilot_persona_aligned.py --date 2024-05-10 NVDA AAPL MSFT GOOGL
+    python run_copilot_persona_aligned.py --persona-routing aggressive-aligned ABNB TVTX DAR
 """
 
 from __future__ import annotations
@@ -49,14 +55,18 @@ from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime
 from pathlib import Path
 
-from dotenv import load_dotenv
+_REPO_ROOT = Path(__file__).resolve().parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.graph.trading_graph import TradingAgentsGraph
-from tradingagents.dataflows.utils import resolve_trade_date
-from tradingagents.ui import RunDashboard, TokenToolCallbackHandler
+from scripts._env import load_repo_env  # noqa: E402
 
-load_dotenv()
+from tradingagents.default_config import DEFAULT_CONFIG  # noqa: E402
+from tradingagents.graph.trading_graph import TradingAgentsGraph  # noqa: E402
+from tradingagents.dataflows.utils import resolve_trade_date  # noqa: E402
+from tradingagents.ui import RunDashboard, TokenToolCallbackHandler  # noqa: E402
+
+load_repo_env()
 
 
 DEFAULT_TICKERS = ["NVDA", "AAPL", "MSFT", "GOOGL"]
@@ -81,6 +91,33 @@ PERSONA_MODELS = {
     "neutral_analyst":        OPUS,
     "conservative_analyst":   OPUS,
     "portfolio_manager":      GPT55,
+}
+
+# "aggressive-aligned" routing (formerly the standalone
+# run_copilot_aggressive_aligned.py script — folded in here, see module
+# docstring). Flips bull_researcher/aggressive_analyst to Opus (deeper bull
+# synthesis) and bear_researcher/research_manager/neutral_analyst/
+# conservative_analyst to GPT-5.5 (shorter, more rebuttable bear case;
+# rubric verdict without Buy→Hold drift). This is the table
+# run_copilot_matrix.py selects via --persona-routing aggressive-aligned.
+AGGRESSIVE_PERSONA_MODELS = {
+    "market_analyst":         GPT55,
+    "social_analyst":         GPT55,
+    "news_analyst":           GPT55,
+    "fundamentals_analyst":   GPT55,
+    "bull_researcher":        OPUS,    # ← flipped from GPT55: deeper bull synthesis
+    "bear_researcher":        GPT55,   # ← flipped from OPUS: shorter, more rebuttable bear
+    "research_manager":       GPT55,   # ← flipped from OPUS: rubric verdict, no Buy→Hold drift
+    "trader":                 GPT55,
+    "aggressive_analyst":     OPUS,    # ← flipped from GPT55: deepest aggressive synthesis
+    "neutral_analyst":        GPT55,   # ← flipped from OPUS: aggressive-crowner disposition
+    "conservative_analyst":   GPT55,   # ← flipped from OPUS: capital pres but rebuttable
+    "portfolio_manager":      GPT55,
+}
+
+PERSONA_ROUTING_TABLES = {
+    "persona-aligned": PERSONA_MODELS,
+    "aggressive-aligned": AGGRESSIVE_PERSONA_MODELS,
 }
 
 
@@ -123,7 +160,8 @@ class _TeeStream(io.TextIOBase):
                 pass
 
 
-def _build_config(risk_profile: str | None = None) -> dict:
+def _build_config(risk_profile: str | None = None,
+                  persona_models: dict | None = None) -> dict:
     cfg = DEFAULT_CONFIG.copy()
     cfg["llm_provider"] = "copilot"
     # quick / deep fall-throughs for any role NOT in persona_models. With the
@@ -133,7 +171,7 @@ def _build_config(risk_profile: str | None = None) -> dict:
     cfg["deep_think_llm"] = OPUS
     cfg["max_debate_rounds"] = 1
     cfg["checkpoint_enabled"] = True
-    cfg["persona_models"] = PERSONA_MODELS
+    cfg["persona_models"] = persona_models or PERSONA_MODELS
     if risk_profile:
         cfg["risk_profile"] = risk_profile
     return cfg
@@ -192,6 +230,15 @@ def _parse_args() -> argparse.Namespace:
              "investor's risk tolerance. Default: no addendum (neutral synthesis).",
     )
     p.add_argument(
+        "--persona-routing",
+        choices=list(PERSONA_ROUTING_TABLES.keys()),
+        default="persona-aligned",
+        help="Which persona → model routing table to use (default: "
+             "persona-aligned). 'aggressive-aligned' dials up the "
+             "bull/aggressive voice — see module docstring. "
+             "run_copilot_matrix.py always passes aggressive-aligned.",
+    )
+    p.add_argument(
         "--news-enrichment",
         default=None,
         help="Path to a news_enrichment.json file. When set, the news "
@@ -218,7 +265,10 @@ def main() -> int:
         sys.stderr.write(f"❌ {exc}\n")
         return 2
     system_date = datetime.now().date().isoformat()
-    run_id = args.run_id or f"persona_aligned_{trade_date}"
+    routing = args.persona_routing
+    persona_models = PERSONA_ROUTING_TABLES[routing]
+    run_id_prefix = "aggressive_aligned" if routing == "aggressive-aligned" else "persona_aligned"
+    run_id = args.run_id or f"{run_id_prefix}_{trade_date}"
 
     os.environ["GITHUB_TOKEN"] = _resolve_github_token()
     if args.news_enrichment:
@@ -233,7 +283,7 @@ def main() -> int:
             sys.stderr.write(f"⚠ --earnings-calendar path not found: {ec_path} (continuing without)\n")
         else:
             os.environ["TRADINGAGENTS_EARNINGS_CALENDAR_PATH"] = str(ec_path)
-    config = _build_config(risk_profile=args.risk_profile)
+    config = _build_config(risk_profile=args.risk_profile, persona_models=persona_models)
 
     runs_dir = Path("runs") / run_id
     runs_dir.mkdir(parents=True, exist_ok=True)
@@ -246,6 +296,7 @@ def main() -> int:
     # so the comparative analysis later doesn't have to grep through code.
     manifest = {
         "run_id": run_id,
+        "persona_routing": routing,
         "risk_profile": args.risk_profile,
         "trade_date": trade_date,
         "trade_date_label": date_label,
@@ -253,11 +304,13 @@ def main() -> int:
         "provider": "copilot",
         "max_debate_rounds": 1,
         "pit_fundamentals_fix": "Path D (yf_pit_derivations) — landed 2026-04-29",
-        "persona_models": PERSONA_MODELS,
+        "persona_models": persona_models,
         "tickers": tickers,
         "started_at": datetime.now().isoformat(timespec="seconds"),
         "dashboard": use_dashboard,
     }
+    if routing == "aggressive-aligned":
+        manifest["alignment"] = "aggressive"
     (runs_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     real_stdout, real_stderr = sys.stdout, sys.stderr
@@ -268,16 +321,21 @@ def main() -> int:
     real_stdout.write(f"Trade date  : {trade_date}  ({date_label})\n")
     real_stdout.flush()
 
+    banner_title = (
+        "Aggressive-aligned multi-ticker batch"
+        if routing == "aggressive-aligned" else "Persona-aligned multi-ticker batch"
+    )
     if not use_dashboard:
         # Legacy banner — only when the dashboard isn't going to draw one.
-        real_stdout.write(f"┌─ Persona-aligned multi-ticker batch ──────────────────────\n")
+        real_stdout.write(f"┌─ {banner_title} ──────────────────────\n")
         real_stdout.write(f"│ Tickers   : {', '.join(tickers)}\n")
         real_stdout.write(f"│ Date      : {trade_date}\n")
+        real_stdout.write(f"│ Routing   : {routing}\n")
         real_stdout.write(f"│ PIT fix   : Path D (yf_pit_derivations) active\n")
         real_stdout.write(f"│ PM model  : GPT-5.5  (operational rubric output)\n")
         real_stdout.write(f"│ Output    : {runs_dir.resolve()}\n")
         real_stdout.write(f"└────────────────────────────────────────────────────────────\n")
-        for role, model in PERSONA_MODELS.items():
+        for role, model in persona_models.items():
             tag = "GPT-5.5" if model == GPT55 else "Opus 4.7"
             real_stdout.write(f"   {role:<22} → {tag}\n")
         real_stdout.write("\n")
@@ -288,7 +346,7 @@ def main() -> int:
             tickers=tickers,
             trade_date=trade_date,
             run_id=run_id,
-            title="TradingAgents · persona-aligned",
+            title=f"TradingAgents · {routing}",
             system_date=system_date,
         )
         if use_dashboard
@@ -383,21 +441,23 @@ def main() -> int:
 
     summary_json.write_text(
         json.dumps(
-            {"run_id": run_id, "trade_date": trade_date,
+            {"run_id": run_id, "persona_routing": routing,
+             "trade_date": trade_date,
              "trade_date_label": date_label,
              "system_date_at_run": system_date,
-             "persona_models": PERSONA_MODELS, "results": results},
+             "persona_models": persona_models, "results": results},
             indent=2,
         ),
         encoding="utf-8",
     )
 
     md_lines = [
-        f"# TradingAgents persona-aligned batch — {run_id}",
+        f"# TradingAgents {routing} batch — {run_id}",
         "",
         f"- **Date:** {trade_date}  ({date_label})",
         f"- **System date at run:** {system_date}",
         f"- **Provider:** copilot",
+        f"- **Routing:** {routing}",
         f"- **PIT fix:** Path D (yf_pit_derivations) active",
         f"- **PM model:** GPT-5.5",
         f"- **Tickers:** {len(results)}",
@@ -407,7 +467,7 @@ def main() -> int:
         "| Role | Model |",
         "|---|---|",
     ]
-    for role, model in PERSONA_MODELS.items():
+    for role, model in persona_models.items():
         tag = "GPT-5.5" if model == GPT55 else "Opus 4.7 xhigh"
         md_lines.append(f"| `{role}` | {tag} |")
     md_lines += [

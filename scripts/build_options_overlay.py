@@ -49,7 +49,7 @@ import math
 import re
 import sys
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -62,10 +62,16 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(REPO_ROOT / ".env")
 
 from tradingagents.dataflows.polygon_common import _make_request  # noqa: E402
+from tradingagents.dataflows.polygon_options import (  # noqa: E402
+    _is_auth_blip_error,
+    _is_rate_limit_error,
+    fetch_chain as _fetch_chain,
+)
 from tradingagents.dataflows.volatility_context import (  # noqa: E402
     compute_vol_context,
     render_vol_advisory,
 )
+from tradingagents.tiers import tier_for_row  # noqa: E402
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -73,15 +79,12 @@ from tradingagents.dataflows.volatility_context import (  # noqa: E402
 # ──────────────────────────────────────────────────────────────────────
 
 def _tier(row: dict) -> str:
+    """Delegates to tradingagents.tiers.tier_for_row (canonical source of
+    truth). Note: unlike the shared canonical rule, this site historically
+    returns '—' (not 'VETO') for VETOED rows — preserved here."""
     if row.get("classification") != "PICK":
         return "—"
-    comp = row.get("pt_compression_pct")
-    if row.get("conservative_pt") is None:
-        return "C"
-    suspect_flags = row.get("pt_quality_flags") or []
-    if comp is not None and comp < 5.0 and not suspect_flags:
-        return "A"
-    return "B"
+    return tier_for_row(row, suspect_caps_a=True)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -184,36 +187,10 @@ def _bs_put(S: float, K: float, T: float, r: float, sigma: float) -> float:
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Polygon chain fetch
+# Polygon chain fetch — relocated to tradingagents.dataflows.polygon_options
+# (imported above as _fetch_chain / _is_rate_limit_error / _is_auth_blip_error
+# for backward compatibility with any code importing these names from here).
 # ──────────────────────────────────────────────────────────────────────
-
-def _fetch_chain(ticker: str, contract_type: str,
-                 strike_min: float, strike_max: float,
-                 exp_min: str, exp_max: str,
-                 limit: int = 250, max_retries: int = 3) -> tuple[list[dict], str | None]:
-    """Returns (contracts, error_msg). Empty list with error_msg means real failure;
-    empty list with None means simply no contracts in window."""
-    params = {
-        "contract_type": contract_type,
-        "strike_price.gte": strike_min,
-        "strike_price.lte": strike_max,
-        "expiration_date.gte": exp_min,
-        "expiration_date.lte": exp_max,
-        "limit": limit,
-    }
-    last_err = None
-    for attempt in range(max_retries):
-        try:
-            r = _make_request(f"/v3/snapshot/options/{ticker}", params)
-            return (r.get("results", []) or []), None
-        except Exception as e:  # noqa: BLE001
-            last_err = str(e)
-            msg = last_err.lower()
-            if ("rate" in msg or "429" in msg) and attempt < max_retries - 1:
-                time.sleep(70)
-                continue
-            return [], last_err
-    return [], last_err
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -950,15 +927,20 @@ def main():
     out_json = matrix_run / "options_overlay.json"
     out_md = matrix_run / "options_overlay.md"
 
+    picks_analyzed = len(overlays)
+    strategies_built = sum(1 for o in overlays if "strategy" in o and "error" not in o)
+    generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
     out_json.write_text(json.dumps({
         "matrix_run": matrix_run.name,
+        "generated_at": generated_at,
         "snapshot_date": today.isoformat(),
         "risk_free_rate": args.risk_free,
         "min_open_interest": args.min_oi,
         "strategy_mode": args.strategy_mode,
         "long_call_delta_target": args.long_call_delta if args.strategy_mode == "long-call" else None,
-        "picks_analyzed": len(overlays),
-        "strategies_built": sum(1 for o in overlays if "strategy" in o and "error" not in o),
+        "picks_analyzed": picks_analyzed,
+        "strategies_built": strategies_built,
         "overlays": overlays,
     }, indent=2, default=str))
 
@@ -969,6 +951,16 @@ def main():
     print()
     print(f"  ✅ {out_json}")
     print(f"  ✅ {out_md}")
+
+    # Critical: a total-failure run (every pick's chain fetch failed, e.g. a
+    # Polygon outage) must not exit 0 — the matrix auto-report only surfaces
+    # a warning line for nonzero exit codes (run_copilot_matrix.py's
+    # _run_auto_report), so silently exiting 0 here made the 2026-06-26
+    # failure invisible until someone manually opened the file.
+    if picks_analyzed > 0 and strategies_built == 0:
+        print(f"  ❌ 0/{picks_analyzed} strategies built — every pick's chain fetch "
+              f"failed. Exiting nonzero so the caller notices.", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

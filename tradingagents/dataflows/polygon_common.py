@@ -31,6 +31,8 @@ from typing import Any
 
 import requests
 
+from .errors import VendorError, VendorRateLimitError
+
 API_BASE_URL = "https://api.polygon.io"
 
 _TRANSIENT_HTTP_STATUSES = {429, 500, 502, 503, 504}
@@ -40,11 +42,20 @@ _BACKOFF_SCHEDULE = (1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
 _RETRY_AFTER_CAP_S = 120.0
 
 
-class PolygonError(Exception):
-    """Base error class for Polygon REST failures."""
+class PolygonError(VendorError):
+    """Base error class for Polygon REST failures.
+
+    Subclasses the shared :class:`~tradingagents.dataflows.errors.VendorError`
+    taxonomy so generic ``except VendorError`` handlers (if any are added
+    later) catch Polygon failures too. The vendor router in ``interface.py``
+    catches ``(PolygonRateLimitError, PolygonError)`` explicitly *before*
+    the generic ``VendorRateLimitError``/``VendorNotConfiguredError``
+    clauses, so this ancestry change is purely additive — existing
+    ``except PolygonError`` call sites are unaffected.
+    """
 
 
-class PolygonRateLimitError(PolygonError):
+class PolygonRateLimitError(PolygonError, VendorRateLimitError):
     """Raised when Polygon returns 429 or signals rate limit exhaustion.
 
     Mirrors :class:`AlphaVantageRateLimitError` so the vendor router can

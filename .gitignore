@@ -227,3 +227,7 @@ runs/
 # Enterprise env file (secrets) and generated run reports
 .env.enterprise
 reports/
+
+# LEAN live signal/approval state (user-private; signals.example.json stays tracked)
+lean/signals.json
+lean/approvals_log.jsonl

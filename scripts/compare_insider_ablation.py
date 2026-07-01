@@ -20,20 +20,13 @@ import argparse
 import json
 from pathlib import Path
 
+from tradingagents.tiers import tier_for_row, tier_rank
+
 
 def _tier(row: dict) -> str:
-    cls = row.get("classification") or ""
-    if cls == "VETOED":
-        return "VETO"
-    if cls != "PICK":
-        return "—"
-    cons = row.get("conservative_pt")
-    cp = row.get("pt_compression_pct")
-    if cons is None:
-        return "C"
-    if cp is not None and cp < 5.0:
-        return "A"
-    return "B"
+    """Delegates to tradingagents.tiers.tier_for_row (canonical source of
+    truth)."""
+    return tier_for_row(row, suspect_caps_a=False)
 
 
 def _load_rows(run_dir: Path) -> dict[str, dict]:
@@ -50,9 +43,9 @@ def _tier_rank(tier: str) -> int:
 
     VETO < — < C < B < A. Used to quantify "did this ticker move *up*
     the conviction ladder" (any upgrade counts as a revert, not just
-    pick-status flips).
+    pick-status flips). Delegates to tradingagents.tiers.tier_rank.
     """
-    return {"VETO": 0, "—": 1, "C": 2, "B": 3, "A": 4}.get(tier, 1)
+    return tier_rank(tier)
 
 
 def _is_pick(tier: str) -> bool:

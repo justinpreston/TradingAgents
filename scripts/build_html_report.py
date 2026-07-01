@@ -16,21 +16,19 @@ import html
 from datetime import datetime
 from pathlib import Path
 
+from tradingagents.tiers import tier_for_row
+
 
 # ──────────────────────────────────────────────────────────────────────
 # Data assembly
 # ──────────────────────────────────────────────────────────────────────
 
 def _tier(row: dict) -> str:
-    if row.get("classification") != "PICK":
-        return "—"
-    comp = row.get("pt_compression_pct")
-    if row.get("conservative_pt") is None:
-        return "C"
-    suspect_flags = row.get("pt_quality_flags") or []
-    if comp is not None and comp < 5.0 and not suspect_flags:
-        return "A"
-    return "B"
+    """Delegates to tradingagents.tiers.tier_for_row (canonical source of
+    truth). This site DOES cap Tier A on pt_quality_flags: the pre-delegation
+    HTML report used `comp < 5.0 and not suspect_flags` (a suspect PT could
+    not reach Tier A), so we pass suspect_caps_a=True to preserve that."""
+    return tier_for_row(row, suspect_caps_a=True)
 
 
 def _score(row: dict, cross_band_set: set[str]) -> float:

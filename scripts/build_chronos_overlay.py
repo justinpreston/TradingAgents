@@ -74,6 +74,7 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(REPO_ROOT / ".env")
 
 from tradingagents.dataflows.volatility_context import _fetch_daily_aggs  # noqa: E402
+from tradingagents.tiers import tier_for_row  # noqa: E402
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -81,17 +82,9 @@ from tradingagents.dataflows.volatility_context import _fetch_daily_aggs  # noqa
 # ──────────────────────────────────────────────────────────────────────
 
 def _tier(row: dict) -> str:
-    if row.get("classification") == "VETOED":
-        return "VETO"
-    if row.get("classification") != "PICK":
-        return "—"
-    comp = row.get("pt_compression_pct")
-    if row.get("conservative_pt") is None:
-        return "C"
-    suspect_flags = row.get("pt_quality_flags") or []
-    if comp is not None and comp < 5.0 and not suspect_flags:
-        return "A"
-    return "B"
+    """Delegates to tradingagents.tiers.tier_for_row (canonical source of
+    truth)."""
+    return tier_for_row(row, suspect_caps_a=True)
 
 
 # ──────────────────────────────────────────────────────────────────────

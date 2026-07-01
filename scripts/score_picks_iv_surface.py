@@ -84,7 +84,7 @@ load_dotenv(REPO_ROOT / ".env")
 
 import numpy as np  # noqa: E402
 
-from scripts.build_options_overlay import _fetch_chain  # noqa: E402
+from tradingagents.dataflows.polygon_options import fetch_chain as _fetch_chain  # noqa: E402
 
 
 SCHEMA_VERSION = 1

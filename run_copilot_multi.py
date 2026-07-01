@@ -36,13 +36,17 @@ from pathlib import Path
 
 from typing import Optional
 
-from dotenv import load_dotenv
+_REPO_ROOT = Path(__file__).resolve().parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.graph.trading_graph import TradingAgentsGraph
-from tradingagents.dataflows.utils import resolve_trade_date
+from scripts._env import load_repo_env  # noqa: E402
 
-load_dotenv()
+from tradingagents.default_config import DEFAULT_CONFIG  # noqa: E402
+from tradingagents.graph.trading_graph import TradingAgentsGraph  # noqa: E402
+from tradingagents.dataflows.utils import resolve_trade_date  # noqa: E402
+
+load_repo_env()
 
 
 DEFAULT_TICKERS = ["NVDA", "AAPL", "MSFT"]

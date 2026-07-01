@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Friday 14:00 ET same-day options refresh.
+
+  Installs a launchd job that runs scripts/friday_options_refresh.py every
+  Friday at 14:00 local time — after the 06:30 pre-market weekly matrix
+  cadence (com.tradingagents.weekly.plist) has had all morning to complete,
+  and while the market is still open for same-day entry. Re-pulls the
+  options chain for every matrix run built for today's trade date (matched
+  via verdict_ledger.json's snapshot_date, not directory mtime) so strikes,
+  IV, and net-debit are fresh right before you place a trade.
+
+  Does NOT touch lean/signals.json — that stays gated behind the user's
+  manual approved:true flips.
+
+  Install:
+    cp scripts/launchd/com.tradingagents.friday-refresh.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.tradingagents.friday-refresh.plist
+    launchctl start com.tradingagents.friday-refresh   # test it once
+
+  Inspect:
+    launchctl list | grep tradingagents
+    tail -f /Users/jpp5q/Documents/GitHub/TradingAgents/runs/friday_refresh.log
+
+  Disable:
+    launchctl unload ~/Library/LaunchAgents/com.tradingagents.friday-refresh.plist
+
+  EDIT THE PATHS BELOW if you cloned the repo elsewhere or use a different
+  username / venv location.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tradingagents.friday-refresh</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/jpp5q/Documents/GitHub/TradingAgents/.venv/bin/python</string>
+        <string>/Users/jpp5q/Documents/GitHub/TradingAgents/scripts/friday_options_refresh.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/jpp5q/Documents/GitHub/TradingAgents</string>
+
+    <!-- Friday at 14:00 local time -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>5</integer>
+        <key>Hour</key>
+        <integer>14</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- Don't auto-restart on failure (one shot per scheduled fire) -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jpp5q/Documents/GitHub/TradingAgents/runs/friday_refresh.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jpp5q/Documents/GitHub/TradingAgents/runs/friday_refresh.log</string>
+
+    <!-- Environment: ensure .env vars are loaded by the script's own load_dotenv() -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>

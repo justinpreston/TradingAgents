@@ -1,17 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Weekly Friday EOD TradingAgents cadence — ALL TIERS.
+  Weekly Friday pre-market TradingAgents cadence — ALL TIERS, auto-chained.
 
   Installs a launchd job that runs scripts/run_weekly_all_tiers.py every
-  Friday at 17:00 local time (after US market close at 16:00 ET, with
-  buffer for Polygon EOD aggs to settle). The wrapper sequentially runs
-  the screener + indexer + diff for mid-cap, large-cap, and mega-cap
-  bands, but does NOT auto-chain the matrix (you should review each
-  tier's NEW ticker list before spending the LLM cycles).
+  Friday at 06:30 local time (pre-market, well ahead of the 09:30 ET open),
+  with --chain enabled so picks are matrix-run and tradeable the same
+  Friday. The wrapper sequentially runs the screener + indexer + diff for
+  mid-cap, large-cap, and mega-cap bands, then auto-launches the matrix on
+  the top-5 NEW tickers in each tier.
 
-  Sequential (not parallel) by design: Polygon's free-tier REST is
-  rate-limited at 5 req/min, so three concurrent screeners would just
-  serialize on the limiter. ~12-18 min per tier × 3 tiers ≈ 45 min total.
+  Sequential (not parallel) by design — on the paid Polygon tier this is no
+  longer a rate-limit necessity, just simplicity: each tier's screener
+  measured 0.4-2.9 min, and the matrix stage (~21 min/tier) is the actual
+  critical path, so 3 tiers chained end-to-end land comfortably before the
+  market open even before the 14:00 options-refresh job runs same-day.
 
   Install:
     cp scripts/launchd/com.tradingagents.weekly.plist ~/Library/LaunchAgents/
@@ -40,20 +42,25 @@
         <string>/Users/jpp5q/Documents/GitHub/TradingAgents/scripts/run_weekly_all_tiers.py</string>
         <string>--top</string>
         <string>25</string>
+        <string>--chain</string>
+        <string>--chain-top</string>
+        <string>5</string>
+        <string>--chain-max-parallel</string>
+        <string>5</string>
     </array>
 
     <key>WorkingDirectory</key>
     <string>/Users/jpp5q/Documents/GitHub/TradingAgents</string>
 
-    <!-- Friday at 17:00 local time -->
+    <!-- Friday at 06:30 local time -->
     <key>StartCalendarInterval</key>
     <dict>
         <key>Weekday</key>
         <integer>5</integer>
         <key>Hour</key>
-        <integer>17</integer>
+        <integer>6</integer>
         <key>Minute</key>
-        <integer>0</integer>
+        <integer>30</integer>
     </dict>
 
     <!-- Don't auto-restart on failure (one shot per scheduled fire) -->

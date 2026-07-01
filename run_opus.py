@@ -12,12 +12,19 @@ with significant context accumulation. Budget accordingly.
 """
 
 import os
-from dotenv import load_dotenv
+import sys
+from pathlib import Path
 
-from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.graph.trading_graph import TradingAgentsGraph
+_REPO_ROOT = Path(__file__).resolve().parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-load_dotenv()
+from scripts._env import load_repo_env  # noqa: E402
+
+from tradingagents.default_config import DEFAULT_CONFIG  # noqa: E402
+from tradingagents.graph.trading_graph import TradingAgentsGraph  # noqa: E402
+
+load_repo_env()
 
 if not os.environ.get("ANTHROPIC_API_KEY"):
     raise SystemExit(

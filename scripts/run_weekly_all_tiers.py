@@ -75,6 +75,8 @@ def _run_tier(tier: str, args: argparse.Namespace) -> int:
                 "--chain-max-parallel", str(args.chain_max_parallel)]
     if args.min_request_interval is not None:
         cmd += ["--min-request-interval", str(args.min_request_interval)]
+    if not args.enrich_earnings:
+        cmd += ["--no-enrich-earnings"]
     if args.dry_run:
         cmd += ["--dry-run"]
 
@@ -102,6 +104,15 @@ def main() -> int:
                    help="Min seconds between Polygon REST calls per tier "
                         "(default: screener decides). Use 0.38 if you hit "
                         "rate-limit warnings during screener phase 2.")
+    p.add_argument("--enrich-earnings", dest="enrich_earnings",
+                   action="store_true", default=True,
+                   help="Pass through Phase 2.6 earnings-calendar enrichment "
+                        "to each tier's weekly_workflow.py invocation. "
+                        "Default: ON (matches weekly_workflow.py's default).")
+    p.add_argument("--no-enrich-earnings", dest="enrich_earnings",
+                   action="store_false",
+                   help="Disable Phase 2.6 earnings-calendar enrichment for "
+                        "every tier (passes --no-enrich-earnings through).")
     p.add_argument("--dry-run", action="store_true",
                    help="Print commands without executing")
     args = p.parse_args()

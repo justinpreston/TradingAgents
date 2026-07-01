@@ -59,6 +59,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from tradingagents.tiers import tier_for_row
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
     run_id           TEXT PRIMARY KEY,
@@ -240,25 +242,24 @@ def _classify_run(run_dir: Path) -> str | None:
 
 
 def _classification_to_tier(row: dict) -> str | None:
-    """Derive A/B/C tier from a verdict_ledger row, matching the same
-    convention used by build_options_overlay._tier().
+    """Derive A/B/C tier from a verdict_ledger row. Delegates to
+    tradingagents.tiers.tier_for_row (canonical source of truth), matching
+    the same convention used by build_options_overlay._tier().
 
     Grounded-pipeline guardrail: a PICK with any ``pt_quality_flags`` is
     capped at Tier B regardless of compression — a SUSPECT PT (>50% from
     current price, likely hallucinated) cannot drive a Tier A allocation.
+
+    Note: unlike the shared canonical rule (which returns '—' for
+    non-PICK/non-VETOED rows), this site returns None — preserved here.
     """
     cls = (row.get("classification") or "").strip()
     if cls == "VETOED":
         return "VETO"
     if cls != "PICK":
         return None
-    comp = row.get("pt_compression_pct")
-    if row.get("conservative_pt") is None:
-        return "C"
-    suspect_flags = row.get("pt_quality_flags") or []
-    if comp is not None and comp < 5.0 and not suspect_flags:
-        return "A"
-    return "B"
+    row = {**row, "classification": cls}
+    return tier_for_row(row, suspect_caps_a=True)
 
 
 def index_screener_run(conn: sqlite3.Connection, run_dir: Path,

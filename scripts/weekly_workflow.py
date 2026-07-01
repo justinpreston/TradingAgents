@@ -653,14 +653,21 @@ def main() -> int:
                         "forces zero-dep mode. 'both' runs them side-by-side.")
     p.add_argument("--news-lookback-days", type=int, default=30,
                    help="How far back to pull headlines for --enrich-news (default 30)")
-    # Optional Phase 2.6 — earnings calendar artifact
-    p.add_argument("--enrich-earnings", action="store_true",
+    # Phase 2.6 — earnings calendar artifact. Default ON: the 2026-06-26
+    # Friday run had this off, which left the earnings-inside-expiry guard
+    # in build_options_overlay.py dead (no earnings_calendar.json to read).
+    # Pass --no-enrich-earnings to opt back out.
+    p.add_argument("--enrich-earnings", dest="enrich_earnings",
+                   action="store_true", default=True,
                    help="Run Phase 2.6 to write earnings_calendar.json next to "
                         "the screener run. yfinance-backed (free, fail-soft). "
                         "Used by the options overlay to push expiry past "
                         "earnings when horizon is long, by build_html_report.py "
                         "for the 📅 chip, and as a one-line prefix to the news "
-                        "analyst's pre-computed context.")
+                        "analyst's pre-computed context. Default: ON.")
+    p.add_argument("--no-enrich-earnings", dest="enrich_earnings",
+                   action="store_false",
+                   help="Disable Phase 2.6 earnings-calendar enrichment.")
     p.add_argument("--earnings-history-quarters", type=int, default=8,
                    help="How many past quarters of EPS surprises to capture "
                         "for beat-rate calculation (default 8)")

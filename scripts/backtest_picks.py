@@ -34,12 +34,15 @@ import json
 import os
 import sqlite3
 import sys
-import time
-import urllib.request
-import urllib.error
 from datetime import datetime, date
+from pathlib import Path
 
-POLY = "https://api.polygon.io"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tradingagents.dataflows.polygon_bars import fetch_daily_bars, occ_ticker  # noqa: E402
+from tradingagents.dataflows.polygon_common import min_request_interval  # noqa: E402
 
 
 def _api_key() -> str:
@@ -49,38 +52,21 @@ def _api_key() -> str:
     return k
 
 
-def _get(url: str, pace: float, tries: int = 4):
-    """GET with light retry/backoff on 429. Returns parsed JSON or None."""
-    for attempt in range(tries):
-        try:
-            with urllib.request.urlopen(url, timeout=30) as r:
-                time.sleep(pace)
-                return json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
-                time.sleep(2 ** attempt)
-                continue
-            if e.code in (401, 403):
-                return {"_auth_error": e.code}
-            return None
-        except Exception:
-            time.sleep(1)
-    return None
-
-
 def _occ_ticker(under: str, expiration: str, strike: float, opt_type: str = "C") -> str:
-    yymmdd = datetime.strptime(expiration, "%Y-%m-%d").strftime("%y%m%d")
-    strike_int = int(round(float(strike) * 1000))
-    return f"O:{under}{yymmdd}{opt_type}{strike_int:08d}"
+    return occ_ticker(under, expiration, strike, opt_type)
 
 
 def _daily_bars(ticker: str, dfrom: str, dto: str, key: str, pace: float):
-    url = (f"{POLY}/v2/aggs/ticker/{ticker}/range/1/day/{dfrom}/{dto}"
-           f"?adjusted=true&sort=asc&limit=5000&apiKey={key}")
-    j = _get(url, pace)
-    if not j or j.get("_auth_error"):
-        return None, (j or {}).get("_auth_error")
-    return j.get("results") or [], None
+    """Fetch daily bars via the shared polygon_bars helper, preserving this
+    script's (bars, auth_error_code) return contract. ``key`` is accepted
+    for backward compatibility but unused — polygon_common resolves
+    POLYGON_API_KEY from the environment itself. ``pace`` is applied via the
+    process-wide pacer (see main()) rather than an unconditional sleep here."""
+    bars, err = fetch_daily_bars(ticker, dfrom, dto)
+    if bars is None:
+        auth_code = int(err) if err in ("401", "403") else None
+        return None, auth_code
+    return bars, None
 
 
 def _run_date(run_id: str) -> str | None:
@@ -289,7 +275,8 @@ def main():
           f"{' (deduped)' if args.dedupe else ''} from {args.db}")
     print(f"Measurement date: {args.measure_date}\n")
 
-    results = backtest(picks, args.measure_date, key, args.pace)
+    with min_request_interval(args.pace):
+        results = backtest(picks, args.measure_date, key, args.pace)
     summary = aggregate(results)
 
     if args.json:

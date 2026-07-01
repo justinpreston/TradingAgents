@@ -64,6 +64,7 @@ from tradingagents.dataflows.analyst_pt_consensus import (  # noqa: E402
 from tradingagents.dataflows.tool_errors import (  # noqa: E402
     extract_tool_errors,
 )
+from tradingagents.tiers import tier_for_row  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -287,18 +288,15 @@ def _score_ticker(
 
 
 def _tier_for_row(row: dict) -> Optional[str]:
+    """Delegates to tradingagents.tiers.tier_for_row (canonical source of
+    truth). Note: unlike the shared canonical rule (which returns '—' for
+    non-PICK/non-VETOED rows), this site returns None — preserved here."""
     cls = row.get("classification")
     if cls == "VETOED":
         return "VETO"
     if cls != "PICK":
         return None
-    if row.get("conservative_pt") is None:
-        return "C"
-    suspect = row.get("pt_quality_flags") or []
-    comp = row.get("pt_compression_pct")
-    if comp is not None and comp < 5.0 and not suspect:
-        return "A"
-    return "B"
+    return tier_for_row(row, suspect_caps_a=True)
 
 
 def audit_matrix_run(

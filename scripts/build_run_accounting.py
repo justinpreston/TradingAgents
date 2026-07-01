@@ -108,12 +108,12 @@ def _pt_quality(pt: Optional[float], current_price: Optional[float]) -> tuple[st
 
 def _fetch_prices(tickers: list[str], pace: float = 1.4, retry_sleep: float = 70.0) -> dict[str, float]:
     """Fetch previous-day close for each ticker via Polygon REST."""
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
     try:
-        from dotenv import load_dotenv
-        load_dotenv(".env")
+        from scripts._env import load_repo_env
+        load_repo_env()
     except Exception:
         pass
-    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
     from tradingagents.dataflows.polygon_common import _make_request  # type: ignore
 
     out: dict[str, float] = {}
@@ -407,7 +407,8 @@ def _readme_md(run_id: str, screener_run: Optional[str], picks: list[dict], veto
 ```bash
 # Single-ticker retry (force regeneration)
 rm -rf {run_id}/cells/conservative/<TICKER>
-.venv/bin/python run_copilot_aggressive_aligned.py \\
+.venv/bin/python run_copilot_persona_aligned.py \\
+  --persona-routing aggressive-aligned \\
   --risk-profile conservative \\
   --run-id {run_id}/cells/conservative/<TICKER> \\
   --no-dashboard <TICKER>
@@ -471,12 +472,12 @@ def main() -> int:
     tickers_missing_sector = [t for t in tickers if not candidates.get(t, {}).get("sector_sic")]
     if tickers_missing_sector:
         print(f"[accounting] fetching SIC sectors for {len(tickers_missing_sector)} tickers from Polygon...")
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
         try:
-            from dotenv import load_dotenv
-            load_dotenv(".env")
+            from scripts._env import load_repo_env
+            load_repo_env()
         except Exception:
             pass
-        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
         from tradingagents.dataflows.polygon_common import _make_request, PolygonError  # type: ignore
         for t in tickers_missing_sector:
             try:

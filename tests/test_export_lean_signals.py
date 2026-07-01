@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.export_lean_signals import build_manifest, main
+from scripts.export_lean_signals import build_manifest, load_existing_signals, main, write_manifest
 
 
 @pytest.fixture
@@ -168,6 +168,221 @@ def test_cli_override_stop_time_and_approve_all(tmp_path: Path, policy, syntheti
     assert signal["approved"] is True
     assert signal["exits"]["stop_loss_premium_pct"] == -0.5
     assert signal["exits"]["time_stop_dte"] == 10
+
+
+# ---------------------------------------------------------------------------
+# Mixed snapshot_date: warn (default) vs --strict
+
+
+@pytest.fixture
+def mismatched_date_runs(tmp_path: Path) -> tuple[Path, Path]:
+    run1 = tmp_path / "matrix_a"
+    run2 = tmp_path / "matrix_b"
+    run1.mkdir()
+    run2.mkdir()
+    (run1 / "options_overlay.json").write_text(json.dumps({
+        "snapshot_date": "2026-05-08",
+        "overlays": [{
+            "ticker": "AAA", "tier": "A", "current_price_usd": 10.0,
+            "aggressive_pt": 12.0, "conservative_pt": 12.0,
+            "legs": [{"symbol": "O:AAA", "strike": 10, "expiration": "2026-10-16", "price": 1.0}],
+        }],
+    }))
+    (run2 / "options_overlay.json").write_text(json.dumps({
+        "snapshot_date": "2026-05-09",  # different date — a Saturday overlay re-run
+        "overlays": [{
+            "ticker": "BBB", "tier": "B", "current_price_usd": 20.0,
+            "aggressive_pt": 25.0, "conservative_pt": 22.0,
+            "legs": [{"symbol": "O:BBB", "strike": 20, "expiration": "2026-10-16", "price": 2.0}],
+        }],
+    }))
+    return run1, run2
+
+
+def test_mismatched_snapshot_date_warns_by_default(policy, mismatched_date_runs):
+    manifest = build_manifest(list(mismatched_date_runs), policy)
+    assert len(manifest["signals"]) == 2  # both runs still contribute
+    assert manifest["measure_date"] == "2026-05-09"  # most recent of the two
+    assert any("snapshot_date" in w for w in manifest["warnings"])
+
+
+def test_mismatched_snapshot_date_raises_with_strict(policy, mismatched_date_runs):
+    with pytest.raises(ValueError, match="snapshot_date"):
+        build_manifest(list(mismatched_date_runs), policy, strict=True)
+
+
+def test_matching_snapshot_date_has_no_warning(policy, synthetic_runs):
+    manifest = build_manifest(list(synthetic_runs), policy)
+    assert manifest["warnings"] == []
+
+
+# ---------------------------------------------------------------------------
+# Missing legs: skip with warning, export healthy rows
+
+
+@pytest.fixture
+def missing_legs_run(tmp_path: Path) -> Path:
+    run = tmp_path / "matrix_missing_legs"
+    run.mkdir()
+    (run / "options_overlay.json").write_text(json.dumps({
+        "snapshot_date": "2026-05-08",
+        "overlays": [
+            {
+                "ticker": "GOOD", "tier": "A", "current_price_usd": 41.6,
+                "aggressive_pt": 45.0, "conservative_pt": 45.0,
+                "legs": [{"symbol": "O:GOOD", "strike": 40.0, "expiration": "2026-10-16", "price": 2.30}],
+            },
+            {
+                "ticker": "NOLEGS", "tier": "B", "current_price_usd": 50.0,
+                "aggressive_pt": 60.0, "conservative_pt": 55.0,
+                "legs": [],  # simulates a broken overlay row
+            },
+        ],
+    }))
+    return run
+
+
+def test_missing_legs_row_skipped_with_warning(policy, missing_legs_run):
+    manifest = build_manifest([missing_legs_run], policy)
+    assert {s["ticker"] for s in manifest["signals"]} == {"GOOD"}
+    assert any("NOLEGS" in w and "no option legs" in w for w in manifest["warnings"])
+
+
+def test_missing_legs_row_does_not_raise(policy, missing_legs_run):
+    # Old behavior raised ValueError here; new behavior must not.
+    manifest = build_manifest([missing_legs_run], policy)
+    assert manifest is not None
+
+
+# ---------------------------------------------------------------------------
+# Approval carry-forward on regeneration
+
+
+def test_carry_forward_preserves_approved_true(policy, synthetic_runs):
+    first = build_manifest(list(synthetic_runs), policy)
+    ctre = next(s for s in first["signals"] if s["ticker"] == "CTRE")
+    ctre["approved"] = True
+    ctre["notes_user"] = "Confirmed fill, sizing up"
+    existing = {s["id"]: s for s in first["signals"]}
+
+    second = build_manifest(list(synthetic_runs), policy, existing_signals=existing)
+    ctre2 = next(s for s in second["signals"] if s["ticker"] == "CTRE")
+    assert ctre2["approved"] is True
+    assert ctre2["notes_user"] == "Confirmed fill, sizing up"
+    # Untouched signal stays unapproved.
+    adi2 = next(s for s in second["signals"] if s["ticker"] == "ADI")
+    assert adi2["approved"] is False
+
+
+def test_carry_forward_new_signal_defaults_unapproved(policy, synthetic_runs):
+    first = build_manifest(list(synthetic_runs), policy)
+    existing = {s["id"]: s for s in first["signals"]}
+    # Re-export against the same runs: same ids as before, nothing new.
+    second = build_manifest(list(synthetic_runs), policy, existing_signals=existing)
+    assert second["n_new_signals"] == 0
+    assert second["n_carried_forward_approvals"] == 0  # none were approved yet
+
+
+def test_carry_forward_genuinely_new_ticker_counts_as_new(policy, synthetic_runs, missing_legs_run):
+    first = build_manifest(list(synthetic_runs), policy)
+    existing = {s["id"]: s for s in first["signals"]}
+    # Second export adds a brand-new run (GOOD ticker) not present in `existing`.
+    second = build_manifest(list(synthetic_runs) + [missing_legs_run], policy, existing_signals=existing)
+    assert second["n_new_signals"] == 1
+    good = next(s for s in second["signals"] if s["ticker"] == "GOOD")
+    assert good["approved"] is False
+
+
+def test_carry_forward_counts_new_vs_carried(policy, synthetic_runs):
+    first = build_manifest(list(synthetic_runs), policy)
+    for s in first["signals"]:
+        s["approved"] = True
+    existing = {s["id"]: s for s in first["signals"]}
+    second = build_manifest(list(synthetic_runs), policy, existing_signals=existing)
+    assert second["n_carried_forward_approvals"] == len(second["signals"])
+    assert second["n_new_signals"] == 0
+
+
+def test_approve_all_overrides_carry_forward(policy, synthetic_runs):
+    # If a prior run had approved:false but --approve-all is passed this
+    # time, approve_all should still win (it's an explicit override).
+    first = build_manifest(list(synthetic_runs), policy)
+    existing = {s["id"]: s for s in first["signals"]}
+    second = build_manifest(list(synthetic_runs), policy, existing_signals=existing, approve_all=True)
+    assert all(s["approved"] for s in second["signals"])
+
+
+def test_write_manifest_strips_transient_keys(tmp_path: Path, policy, synthetic_runs):
+    manifest = build_manifest(list(synthetic_runs), policy)
+    out = tmp_path / "signals.json"
+    write_manifest(out, manifest)
+    doc = json.loads(out.read_text())
+    assert "warnings" not in doc
+    assert "n_new_signals" not in doc
+    assert "n_carried_forward_approvals" not in doc
+    assert set(doc.keys()) == {"schema_version", "generated_at", "source_run", "measure_date", "signals"}
+
+
+def test_load_existing_signals_missing_file_returns_empty(tmp_path: Path):
+    assert load_existing_signals(tmp_path / "nope.json") == {}
+
+
+def test_load_existing_signals_malformed_returns_empty(tmp_path: Path):
+    p = tmp_path / "bad.json"
+    p.write_text("not json")
+    assert load_existing_signals(p) == {}
+
+
+def test_cli_regeneration_carries_forward_approval(tmp_path: Path, policy, synthetic_runs):
+    policy_path = tmp_path / "policy.json"
+    output = tmp_path / "signals.json"
+    policy_path.write_text(json.dumps(policy))
+
+    # First export + manual approval (simulating approve_lean_signal.py).
+    rc = main([
+        "--matrix-run", str(synthetic_runs[0]),
+        "--matrix-run", str(synthetic_runs[1]),
+        "--policy-file", str(policy_path),
+        "--output", str(output),
+    ])
+    assert rc == 0
+    doc = json.loads(output.read_text())
+    for s in doc["signals"]:
+        if s["ticker"] == "CTRE":
+            s["approved"] = True
+    output.write_text(json.dumps(doc, indent=2) + "\n")
+
+    # Re-export (Friday refresh) — approval should survive.
+    rc = main([
+        "--matrix-run", str(synthetic_runs[0]),
+        "--matrix-run", str(synthetic_runs[1]),
+        "--policy-file", str(policy_path),
+        "--output", str(output),
+    ])
+    assert rc == 0
+    doc2 = json.loads(output.read_text())
+    ctre = next(s for s in doc2["signals"] if s["ticker"] == "CTRE")
+    assert ctre["approved"] is True
+    adi = next(s for s in doc2["signals"] if s["ticker"] == "ADI")
+    assert adi["approved"] is False
+
+
+def test_cli_strict_flag_raises_on_mismatched_dates(tmp_path: Path, policy, mismatched_date_runs):
+    policy_path = tmp_path / "policy.json"
+    output = tmp_path / "signals.json"
+    policy_path.write_text(json.dumps(policy))
+
+    # build_manifest raises ValueError under --strict; main() does not catch
+    # it (matches the script's pre-existing behavior for its other
+    # ValueError-raising paths, e.g. missing --matrix-run).
+    with pytest.raises(ValueError, match="snapshot_date"):
+        main([
+            "--matrix-run", str(mismatched_date_runs[0]),
+            "--matrix-run", str(mismatched_date_runs[1]),
+            "--policy-file", str(policy_path),
+            "--output", str(output),
+            "--strict",
+        ])
 
 
 def test_real_2026_06_26_overlays_if_present():

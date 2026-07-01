@@ -23,12 +23,12 @@ def main() -> int:
                         help="Skip insider transactions section")
     args = parser.parse_args()
 
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
     try:
-        from dotenv import load_dotenv
-        load_dotenv(".env")
+        from scripts._env import load_repo_env
+        load_repo_env()
     except Exception:
         pass
-    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
     from tradingagents.dataflows.polygon_finance import get_fundamentals
 

@@ -49,12 +49,16 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from dotenv import load_dotenv
+_REPO_ROOT = Path(__file__).resolve().parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-from tradingagents.agents.managers.portfolio_manager import create_portfolio_manager
-from tradingagents.llm_clients import create_llm_client
+from scripts._env import load_repo_env  # noqa: E402
 
-load_dotenv()
+from tradingagents.agents.managers.portfolio_manager import create_portfolio_manager  # noqa: E402
+from tradingagents.llm_clients import create_llm_client  # noqa: E402
+
+load_repo_env()
 
 
 DEFAULT_PM_MODEL = "gpt-5.5"

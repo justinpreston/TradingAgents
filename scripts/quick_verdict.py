@@ -23,21 +23,18 @@ import subprocess
 import sys
 from datetime import datetime
 
+from tradingagents.tiers import tier_for_row
+
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 def _tier(row: dict) -> str:
-    """Canonical tier rule. Must stay in sync with build_options_overlay,
-    build_chronos_overlay, build_html_report, index_runs."""
-    if row.get("classification") != "PICK":
-        return "VETO" if row.get("classification") == "VETOED" else "—"
-    if row.get("conservative_pt") in (None, ""):
-        return "C"
-    comp = row.get("pt_compression_pct")
-    if comp is not None and comp < 5.0:
-        return "A"
-    return "B"
+    """Canonical tier rule. Delegates to tradingagents.tiers.tier_for_row.
+    Note: treats conservative_pt == "" the same as None — preserved here."""
+    if row.get("conservative_pt") == "":
+        row = {**row, "conservative_pt": None}
+    return tier_for_row(row, suspect_caps_a=False)
 
 
 def _fmt(v, prefix: str = "$") -> str:

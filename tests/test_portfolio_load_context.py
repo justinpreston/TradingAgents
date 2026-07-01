@@ -16,12 +16,15 @@ from scripts.portfolio_load_context import (
     build_context,
     compute_flags,
     enrich_position,
+    find_matrix_runs_for_latest_trade_date,
     load_matrix_run,
+    load_matrix_runs,
     load_policy,
     load_positions,
     load_trades_log,
     recent_actions_for_position,
     validate_positions,
+    _matrix_run_trade_date,
     _strip_help_keys,
     _tier_rank,
 )
@@ -427,3 +430,241 @@ def test_build_context_attaches_recent_actions(tmp_book, tmp_policy, tmp_matrix_
     assert actions[0]["action"] == "TRIM"
     assert actions[0]["notes"] == "Test trim"
     assert ctx["trades_log_entries"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Multi-run union — content-based trade-date discovery, mtime trap,
+# tier-collision dedupe
+
+
+def _make_matrix_run(
+    tmp_path: Path,
+    name: str,
+    *,
+    trade_date: str,
+    overlays: list[dict],
+    ledger_rows: list[dict],
+    prices: dict[str, float],
+) -> Path:
+    d = tmp_path / name
+    d.mkdir()
+    (d / "manifest.json").write_text(json.dumps({"run_id": name, "trade_date": trade_date}))
+    (d / "verdict_ledger.json").write_text(json.dumps({
+        "run_id": name, "snapshot_date": trade_date,
+        "generated_at": trade_date + "T23:00:00Z", "rows": ledger_rows,
+    }))
+    (d / "options_overlay.json").write_text(json.dumps({
+        "matrix_run": name, "snapshot_date": trade_date, "overlays": overlays,
+    }))
+    (d / "current_prices.json").write_text(json.dumps({"prices_usd": prices}))
+    return d
+
+
+@pytest.fixture
+def two_tier_runs_same_date(tmp_path: Path) -> tuple[Path, Path]:
+    mid = _make_matrix_run(
+        tmp_path, "matrix_mid_weekly_2026-06-26_2103_chain",
+        trade_date="2026-06-26",
+        overlays=[{
+            "ticker": "CTRE", "tier": "A", "current_price_usd": 41.6,
+            "aggressive_pt": 45.0, "conservative_pt": 45.0,
+            "legs": [{"strike": 40.0, "expiration": "2026-10-16", "price": 2.30}],
+        }],
+        ledger_rows=[{"ticker": "CTRE", "classification": "PICK",
+                      "aggressive_pt": 45.0, "conservative_pt": 45.0, "pt_compression_pct": 0.0}],
+        prices={"CTRE": 41.6},
+    )
+    large = _make_matrix_run(
+        tmp_path, "matrix_large_weekly_2026-06-26_2126_chain",
+        trade_date="2026-06-26",
+        overlays=[{
+            "ticker": "ADI", "tier": "C", "current_price_usd": 386.91,
+            "aggressive_pt": 470.0, "conservative_pt": 410.0,
+            "legs": [{"strike": 400.0, "expiration": "2026-12-18", "price": 55.36}],
+        }],
+        ledger_rows=[{"ticker": "ADI", "classification": "PICK",
+                      "aggressive_pt": 470.0, "conservative_pt": 410.0, "pt_compression_pct": 15.2}],
+        prices={"ADI": 386.91},
+    )
+    return mid, large
+
+
+@pytest.fixture
+def older_run_mtime_trap(tmp_path: Path) -> Path:
+    """Older trade_date but artificially newer mtime — the exact scenario
+    that broke mtime-based find_latest_matrix_run (a Saturday overlay
+    re-run reshuffling "latest")."""
+    d = _make_matrix_run(
+        tmp_path, "matrix_mid_weekly_2026-06-19_1200_chain",
+        trade_date="2026-06-19",
+        overlays=[{
+            "ticker": "OLD", "tier": "B", "current_price_usd": 10.0,
+            "aggressive_pt": 12.0, "conservative_pt": 11.0,
+            "legs": [{"strike": 10.0, "expiration": "2026-09-18", "price": 1.0}],
+        }],
+        ledger_rows=[{"ticker": "OLD", "classification": "PICK",
+                      "aggressive_pt": 12.0, "conservative_pt": 11.0, "pt_compression_pct": 8.3}],
+        prices={"OLD": 10.0},
+    )
+    import os
+    import time
+    future = time.time() + 100000
+    for p in [d, d / "verdict_ledger.json", d / "manifest.json", d / "options_overlay.json"]:
+        os.utime(p, (future, future))
+    return d
+
+
+def test_matrix_run_trade_date_prefers_manifest(tmp_path: Path):
+    d = tmp_path / "run"
+    d.mkdir()
+    (d / "manifest.json").write_text(json.dumps({"trade_date": "2026-06-26"}))
+    (d / "verdict_ledger.json").write_text(json.dumps({"snapshot_date": "2026-06-25"}))
+    assert _matrix_run_trade_date(d) == "2026-06-26"
+
+
+def test_matrix_run_trade_date_falls_back_to_snapshot_date(tmp_path: Path):
+    d = tmp_path / "run"
+    d.mkdir()
+    (d / "verdict_ledger.json").write_text(json.dumps({"snapshot_date": "2026-06-25"}))
+    assert _matrix_run_trade_date(d) == "2026-06-25"
+
+
+def test_matrix_run_trade_date_none_when_unresolvable(tmp_path: Path):
+    d = tmp_path / "run"
+    d.mkdir()
+    (d / "verdict_ledger.json").write_text(json.dumps({}))
+    assert _matrix_run_trade_date(d) is None
+
+
+def test_find_matrix_runs_for_latest_trade_date_unions_same_date(tmp_path: Path, two_tier_runs_same_date):
+    found = find_matrix_runs_for_latest_trade_date(tmp_path)
+    names = {p.name for p in found}
+    assert names == {"matrix_mid_weekly_2026-06-26_2103_chain", "matrix_large_weekly_2026-06-26_2126_chain"}
+
+
+def test_find_matrix_runs_excludes_older_trade_date(tmp_path: Path, two_tier_runs_same_date, older_run_mtime_trap):
+    # older_run_mtime_trap has a NEWER mtime than the current-week runs, but
+    # content-based discovery must exclude it because its trade_date is older.
+    found = find_matrix_runs_for_latest_trade_date(tmp_path)
+    names = {p.name for p in found}
+    assert "matrix_mid_weekly_2026-06-19_1200_chain" not in names
+    assert len(found) == 2
+
+
+def test_load_matrix_runs_unions_rows_overlays_prices(tmp_path: Path, two_tier_runs_same_date):
+    mid, large = two_tier_runs_same_date
+    matrix = load_matrix_runs([mid, large])
+    assert set(matrix["rows_by_ticker"]) == {"CTRE", "ADI"}
+    assert set(matrix["overlays_by_ticker"]) == {"CTRE", "ADI"}
+    assert matrix["prices"] == {"CTRE": 41.6, "ADI": 386.91}
+    assert set(matrix["run_ids"]) == {
+        "matrix_mid_weekly_2026-06-26_2103_chain", "matrix_large_weekly_2026-06-26_2126_chain",
+    }
+
+
+def test_load_matrix_runs_empty_list_returns_empty_shape():
+    matrix = load_matrix_runs([])
+    assert matrix["rows_by_ticker"] == {}
+    assert matrix["overlays_by_ticker"] == {}
+    assert matrix["prices"] == {}
+    assert matrix["run_ids"] == []
+
+
+def test_load_matrix_runs_tier_collision_higher_tier_wins(tmp_path: Path):
+    # Same ticker appears in both runs — a name that straddled the
+    # mid/large mcap boundary. Run A rates it tier C, run B rates it tier A
+    # (higher on the rank ladder). The tier-A row/overlay must win.
+    run_c = _make_matrix_run(
+        tmp_path, "matrix_mid", trade_date="2026-06-26",
+        overlays=[{
+            "ticker": "DUAL", "tier": "C", "current_price_usd": 100.0,
+            "aggressive_pt": 110.0, "conservative_pt": None,
+            "legs": [{"strike": 100.0, "expiration": "2026-10-16", "price": 5.0}],
+        }],
+        ledger_rows=[{"ticker": "DUAL", "classification": "PICK",
+                      "aggressive_pt": 110.0, "conservative_pt": None, "pt_compression_pct": None}],
+        prices={"DUAL": 99.0},
+    )
+    run_a = _make_matrix_run(
+        tmp_path, "matrix_large", trade_date="2026-06-26",
+        overlays=[{
+            "ticker": "DUAL", "tier": "A", "current_price_usd": 101.0,
+            "aggressive_pt": 108.0, "conservative_pt": 107.0,
+            "legs": [{"strike": 100.0, "expiration": "2026-10-16", "price": 5.5}],
+        }],
+        ledger_rows=[{"ticker": "DUAL", "classification": "PICK",
+                      "aggressive_pt": 108.0, "conservative_pt": 107.0, "pt_compression_pct": 0.9}],
+        prices={"DUAL": 101.0},
+    )
+    matrix = load_matrix_runs([run_c, run_a])
+    assert matrix["overlays_by_ticker"]["DUAL"]["tier"] == "A"
+    assert matrix["rows_by_ticker"]["DUAL"]["conservative_pt"] == 107.0
+    assert matrix["prices"]["DUAL"] == 101.0  # winning run's price wins too
+    assert matrix["winning_run_by_ticker"]["DUAL"] == "matrix_large"
+
+    # Order-independence: same result regardless of which run is processed first.
+    matrix2 = load_matrix_runs([run_a, run_c])
+    assert matrix2["overlays_by_ticker"]["DUAL"]["tier"] == "A"
+    assert matrix2["winning_run_by_ticker"]["DUAL"] == "matrix_large"
+
+
+def test_load_matrix_runs_backfills_price_for_ticker_with_no_row_or_overlay(tmp_path: Path):
+    # A held ticker (e.g. AAPL) may have a price fetched without any
+    # ledger row or overlay entry — must not be dropped from the union.
+    run = _make_matrix_run(
+        tmp_path, "matrix_one", trade_date="2026-06-26",
+        overlays=[{
+            "ticker": "CTRE", "tier": "A", "current_price_usd": 41.6,
+            "aggressive_pt": 45.0, "conservative_pt": 45.0,
+            "legs": [{"strike": 40.0, "expiration": "2026-10-16", "price": 2.30}],
+        }],
+        ledger_rows=[{"ticker": "CTRE", "classification": "PICK",
+                      "aggressive_pt": 45.0, "conservative_pt": 45.0, "pt_compression_pct": 0.0}],
+        prices={"CTRE": 41.6, "AAPL": 220.0},
+    )
+    matrix = load_matrix_runs([run])
+    assert matrix["prices"]["AAPL"] == 220.0
+
+
+def test_build_context_default_discovers_multi_run_union(tmp_path: Path, tmp_policy, two_tier_runs_same_date, monkeypatch):
+    import scripts.portfolio_load_context as plc
+    monkeypatch.setattr(plc, "RUNS_DIR", tmp_path)
+
+    book = {
+        "as_of": "2026-06-26", "base_currency": "USD", "account_value": None,
+        "positions": [
+            {"id": "CTRE-c", "ticker": "CTRE", "instrument": "long_call", "qty": 1,
+             "underlying_cost_basis_at_entry": 40.0,
+             "option": {"strike": 40, "expiry": "2026-10-16", "premium_paid_per_share": 2.0},
+             "entry_date": "2026-06-01", "thesis_tier_at_entry": "A"},
+            {"id": "ADI-c", "ticker": "ADI", "instrument": "long_call", "qty": 1,
+             "underlying_cost_basis_at_entry": 380.0,
+             "option": {"strike": 400, "expiry": "2026-12-18", "premium_paid_per_share": 50.0},
+             "entry_date": "2026-06-01", "thesis_tier_at_entry": "C"},
+        ],
+    }
+    book_path = tmp_path / "positions.json"
+    book_path.write_text(json.dumps(book))
+
+    ctx = build_context(book_path, tmp_policy, matrix_run_path=None)
+    ctre = next(p for p in ctx["positions"] if p["ticker"] == "CTRE")
+    adi = next(p for p in ctx["positions"] if p["ticker"] == "ADI")
+    assert ctre["live"]["in_latest_matrix"] is True
+    assert adi["live"]["in_latest_matrix"] is True
+    assert len(ctx["contributing_matrix_runs"]) == 2
+
+
+def test_build_context_explicit_matrix_run_list_override(tmp_book, tmp_policy, two_tier_runs_same_date):
+    mid, large = two_tier_runs_same_date
+    ctx = build_context(tmp_book, tmp_policy, [mid, large])
+    assert len(ctx["contributing_matrix_runs"]) == 2
+    assert set(ctx["contributing_matrix_run_ids"]) == {
+        "matrix_mid_weekly_2026-06-26_2103_chain", "matrix_large_weekly_2026-06-26_2126_chain",
+    }
+
+
+def test_build_context_single_path_still_backward_compatible(tmp_book, tmp_policy, tmp_matrix_run):
+    # Passing a bare Path (not a list) must keep working exactly as before.
+    ctx = build_context(tmp_book, tmp_policy, tmp_matrix_run)
+    assert ctx["contributing_matrix_runs"] == [str(tmp_matrix_run)]
+    assert ctx["latest_matrix_run"] == str(tmp_matrix_run)
