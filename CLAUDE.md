@@ -27,9 +27,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Auto-launch matrix on the NEW tickers only (skips wasteful re-screening)
 .venv/bin/python scripts/weekly_workflow.py --top 25 --chain --chain-top 5
 
-# Same-day options refresh before any entry
+# Same-day options refresh before any entry (auto-run Fridays 14:00 via launchd;
+# manual form below). Refreshes ALL of today's matrix runs + rebuilds the packet:
+.venv/bin/python scripts/friday_options_refresh.py
+# Single-run manual form:
 .venv/bin/python scripts/build_options_overlay.py \
     --matrix-run runs/<matrix_id> --strategy-mode long-call
+
+# Friday decision packet — one-page ranked tickets across all of today's tier runs
+.venv/bin/python scripts/build_friday_packet.py --date <YYYY-MM-DD>
+
+# Approve a LEAN signal (the ONLY sanctioned way to flip approved:true)
+.venv/bin/python scripts/approve_lean_signal.py --list
+.venv/bin/python scripts/approve_lean_signal.py --id <TICKER-YYYY-MM-DD>
 
 # Optional: news enrichment (sentiment + theme tags) on the screener output
 # Default scorer is now FinBERT (~3× more discriminating than keyword on real
@@ -55,33 +65,41 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
-## The locked-in cadence
+## The locked-in cadence (revised 2026-07-01 — Friday pre-market)
 
-User's explicit instruction (do not re-litigate without confirmation):
+User's explicit decision (confirmed 2026-07-01; do not re-litigate without
+confirmation): **picks must exist early enough to trade the same Friday, at
+the user's discretion (Friday or Monday entry).** The old Friday-17:00
+post-close schedule made Friday entries impossible and conferred zero data
+advantage — the screener provably consumes Thursday EOD bars either way
+(`screener/universe.py::latest_trading_day()` = yesterday).
 
-> *"For your current workflow (long calls, multi-month tenors), a weekly
-> Friday screener + on-demand matrix on new names + same-day options refresh
-> before entry is the right rhythm."*
-
-| When | What | How |
+| When (ET) | What | How |
 |---|---|---|
-| **Weekly, Friday EOD** | Run the screener | `scripts/weekly_workflow.py --top 25` |
-| **On-demand** | Matrix-run only NEW tickers (diff vs catalog) | `--chain --chain-top N` (or copy-paste from Phase 5 output) |
-| **Same-day, before entry** | Refresh options overlay | `scripts/build_options_overlay.py --matrix-run runs/<id> --strategy-mode long-call` |
+| **Friday 06:30** | Full auto-chain: screen all tiers → diff → matrix NEW tickers → overlays | launchd `com.tradingagents.weekly.plist` → `run_weekly_all_tiers.py --top 25 --chain --chain-top 5 --chain-max-parallel 5` |
+| **Friday ~07:45–09:10** | Review the Friday decision packet | `scripts/build_friday_packet.py` output in `runs/friday_packet_<date>/` |
+| **Friday 14:00** | Same-day options refresh (all of today's matrix runs) + packet rebuild | launchd `com.tradingagents.friday-refresh.plist` → `scripts/friday_options_refresh.py` |
+| **Friday afternoon / Monday** | User approves signals + executes at discretion | `scripts/approve_lean_signal.py --id <TICKER-DATE>`; manual Fidelity or LEAN paper |
 
 **Override triggers** (re-run outside cadence):
 - Earnings on an active pick → re-matrix that single ticker.
 - VIX > 25 or SPX −5%/week → full re-screen (regime shift).
 - Quarter-end → full refresh (screen + matrix + options).
 
-A launchd plist for Friday 17:00 local exists at
-`scripts/launchd/com.tradingagents.weekly.plist`. Install with:
+Install/refresh both launchd jobs with:
 ```bash
 cp scripts/launchd/com.tradingagents.weekly.plist ~/Library/LaunchAgents/
+cp scripts/launchd/com.tradingagents.friday-refresh.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.tradingagents.weekly.plist
+launchctl load ~/Library/LaunchAgents/com.tradingagents.friday-refresh.plist
 ```
-The launchd job intentionally does **not** auto-chain matrix runs — review the
-NEW ticker list before spending LLM cycles on it.
+The morning job **does** auto-chain (user decision 2026-07-01: "auto-chain,
+review after" — LLM spend is bounded at `--chain-top 5` per tier). Measured
+wall-clock (2026-06-26 logs): screeners 0.4–2.9 min/tier; matrix ~21 min/tier
+(**~9 min median per cell**, not the 3–5 min previously claimed here); all
+post-matrix overlays combined < 60s/tier. Fresh 3-tier end-to-end ≈ 72 min.
+Market holidays: the job fires anyway and consumes the prior session's bars —
+harmless, but no fresh picks materialize on an exchange holiday.
 
 ---
 
@@ -117,13 +135,17 @@ scripts/index_runs.py  →  runs/index.db                     ← SQLite catalog
 scripts/weekly_workflow.py  →  orchestrates SCREEN → INDEX → DIFF → CHAIN → REPORT
 ```
 
-`run_copilot_persona_aligned.py` is the per-ticker subrunner each matrix cell
-shells out to — also runnable directly for a quick single-stage analysis on
-one or more tickers (produces flat `<T>.state.json` files; **does not**
-produce the `verdict_ledger.json` + `cells/` structure that
+`run_copilot_persona_aligned.py` is the per-ticker sub-runner each matrix cell
+shells out to (with `--persona-routing aggressive-aligned` pinned — the
+matrix's historical persona→model table; the flag's default `persona-aligned`
+is the standalone behavior). Also runnable directly for a quick single-stage
+analysis (produces flat `<T>.state.json` files; **does not** produce the
+`verdict_ledger.json` + `cells/` structure that
 `build_options_overlay.py`/`build_run_accounting.py` consume — for that you
-need `run_copilot_matrix.py`). See the **Top-level runners** section below
-for how the half-dozen `run_*.py` shims at repo root relate to the cadence.
+need `run_copilot_matrix.py`). Matrix cells auto-retry once on failure
+(`attempt` field + `"<stage>-retry"` events in `events.jsonl`). See the
+**Top-level runners** section below for how the `run_*.py` shims relate to
+the cadence.
 
 `scripts/weekly_workflow.py --chain` defaults to `--chain-runner run_copilot_matrix.py`
 for exactly this reason — feed it any other runner and Phase 4 will warn that
@@ -146,8 +168,8 @@ fresh agent should not promote them into the rhythm without confirmation.
 |---|---|---|
 | `run_screener.py` | **Cadence.** Tier-aware universe screen. | Driven by `weekly_workflow.py`. |
 | `run_copilot_matrix.py` | **Cadence.** Dual-persona Stage-A → Stage-B matrix; the only runner whose output the rest of the pipeline ingests. | `weekly_workflow.py --chain`; one-off matrix runs. |
-| `run_copilot_persona_aligned.py` | Per-ticker subrunner (matrix shells out to it). Also runnable standalone for a single-stage view — but does **not** write `verdict_ledger.json`. | Ad-hoc single-ticker checks. |
-| `run_copilot_aggressive_aligned.py` | Aggressive-persona only (no Stage B). | Experimental / ad-hoc. |
+| `run_copilot_persona_aligned.py` | **Cadence.** The per-ticker sub-runner every matrix cell shells out to (`SUB_RUNNER`), invoked with `--persona-routing aggressive-aligned` (the matrix's historical persona→model table). Also runnable standalone (default routing `persona-aligned`) — but does **not** write `verdict_ledger.json`. | Matrix cells; ad-hoc single-ticker checks. |
+| `run_copilot_aggressive_aligned.py` | Deprecated back-compat shim — `os.execv`s into `run_copilot_persona_aligned.py --persona-routing aggressive-aligned`. | Don't use in new work. |
 | `run_copilot_multi.py` | Sequential multi-ticker via Copilot Chat API (any model). | Ad-hoc batches. |
 | `run_copilot_opus.py`, `run_copilot_opus_multi.py` | Legacy Opus-via-Copilot launchers. | Kept for back-compat; new work should use the multi variant. |
 | `run_opus.py` | Direct Anthropic API (no Copilot proxy). Premium-cost. | Ad-hoc Opus runs with a raw key. |
@@ -199,14 +221,17 @@ def _tier(row):
     return 'B'       # cons engaged but skeptical
 ```
 
-Implementations that must stay in sync (all four use the same `< 5.0`
-compression threshold and the same `conservative_pt is None → C` rule):
-- `scripts/build_options_overlay.py::_tier()`
-- `scripts/build_chronos_overlay.py::_tier()`
-- `scripts/build_html_report.py::_tier()`
-- `scripts/index_runs.py::_classification_to_tier()`
-
-If the 5.0 threshold ever changes, all four files must change together.
+**Single source of truth (since 2026-07-01): `tradingagents/tiers.py`** —
+`tier_for_row()` + `TIER_RANK`/`tier_rank()`. All eight call sites
+(`build_options_overlay`, `build_chronos_overlay`, `build_html_report`,
+`index_runs`, `quick_verdict`, `compare_insider_ablation`, `grounding_audit`,
+`portfolio_load_context`) delegate via thin wrappers that preserve per-site
+return quirks (`—` vs `None` vs `VETO` for non-picks). Change the threshold in
+ONE place. Note: `tier_for_row(suspect_caps_a=True)` additionally caps Tier A
+→ B when `pt_quality_flags` is non-empty — five sites use it (overlay,
+chronos, indexer, grounding audit, html report); three display/compare sites
+don't (quick_verdict, compare_insider_ablation, portfolio_load_context).
+`tests/test_tiers.py` enforces wrapper parity.
 
 **Empirical context** (cross-run, indexed in `runs/index.db`):
 
@@ -215,6 +240,41 @@ If the 5.0 threshold ever changes, all four files must change together.
 | A | **−35%** | "Equity only" — 5–7% modeled upside doesn't clear long-call premium. |
 | B | **+108%** ⭐ | Cons engaged but skeptical → wider modeled aggressive PT, premium clears it. |
 | C | **+41%** | Aggressive-only thesis. Stay at starter size. |
+
+---
+
+## Empirical signal findings (realized backtest, n=92, measured 2026-06-26)
+
+From joining `runs/backtest_exits_2026-06-26.json` to the pre-trade signals in
+`runs/index.db`. Regenerate with `scripts/backtest_signal_report.py` whenever a
+new backtest lands; the standing writeup lives in `docs/RUNS_HISTORY.md`
+("Empirical signal correlations"). Medians are realized option ROI. **One
+measurement date, ~20-30 per bucket — treat as codified hypotheses under
+measurement, re-verify after each backtest cycle.**
+
+**Stronger findings (act on these):**
+
+| Signal | Finding |
+|---|---|
+| Market-cap tier | Monotonic (Spearman −0.30): mid <10B hold-median +3.5% / 59% win; large +1.6% / 50%; mega >200B **−35.6% / 42%**. The mid-cap screener default is vindicated; haircut mega-tier position sizes. |
+| Tenor | 90–180 DTE exit-median **+21.3%**, PT-hit 40% vs >180 DTE +1.3%, PT-hit 26%. Prefer ~3–6 month tenors; long-dated premium wasn't earned back. |
+| Exit discipline | Selection alone ≈ coin flip (50% win, +0.7% median hold); selling into the aggressive PT lifts to +13.8% median / 57% win. Already automated in the LEAN exit rules. |
+
+**Weaker findings (tracked hypotheses, don't size on them yet):**
+
+- **Recurrence is a caution flag, not a conviction bonus.** Tickers PICKed in
+  3+ matrix runs: hold-median −19.6%, 43% win vs seen-once +0.9% / 50% (+18.9%
+  on exit). Repeat appearances have marked underperformers.
+- **Chronos `agent_pt_quantile` predicts PT-hit rates monotonically** (q<0.6 →
+  42% of aggressive PTs hit; q>0.8 → 24%) — use it to calibrate exit-rule
+  expectations. On ROI it is non-monotonic: the q0.6–0.8 band was the worst
+  bucket (32% win, −35.7% hold-median); agreement (q<0.6) and
+  far-above-cone (q>0.8) both did fine.
+- **Modeled upside has zero correlation with realized ROI** (pearson +0.04).
+- **Screener composite score does not rank outcomes** (Spearman −0.20 to
+  −0.30, non-monotonic terciles). It is a candidate-generation filter only.
+- **Weekly veto rate** climbed ~55–60% (late Apr) → 83–93% (late May–June);
+  track as a gate-tightness regime metric.
 
 ---
 
@@ -413,8 +473,17 @@ exactly that. Visual writeup: `runs/exit_discipline_packet_2026-06-26.html`.
 ### The bridge: `scripts/export_lean_signals.py`
 Reads one or more matrix runs' `options_overlay.json` (+ `policy.json` for
 sizing) and emits `lean/signals.json`. Signals default `approved:false` — the
-user flips selected rows to `true` (the human-in-the-loop gate). Tier C nulls
-`cons_pt`. Field reference: `lean/signals.schema.md`. Run:
+user flips selected rows to `true` (the human-in-the-loop gate) via
+`scripts/approve_lean_signal.py` (the ONLY sanctioned flip path; appends an
+audit record to `lean/approvals_log.jsonl`). Regeneration **carries forward**
+`approved:true` for matching signal ids **only when the contract is unchanged**
+(`occ_symbol` equality) — if an intraday refresh rolled the strike/expiry, the
+signal resets to `approved:false` with a warning, so an approval never
+silently transfers to a contract the user hasn't reviewed. Mixed snapshot dates across runs warn-and-proceed
+(`--strict` restores hard-fail); overlay rows missing legs are skipped with a
+warning. `lean/signals.json` and the approvals log are **gitignored** (live
+user state; `signals.example.json` stays tracked). Tier C nulls `cons_pt`.
+Field reference: `lean/signals.schema.md`. Run:
 ```bash
 .venv/bin/python scripts/export_lean_signals.py \
     --matrix-run runs/matrix_mid_weekly_<ts>_chain \
@@ -545,7 +614,8 @@ stay local). `.env` is also gitignored.
 ## Testing
 
 ```bash
-# Full suite (baseline: 535 pass, 41 subtests, ~16s)
+# Full suite (baseline 2026-07-01 post-cadence-restructure: 1227 pass,
+# 2 env-gated skips, ~2min; deselect the polygon_pacer flake under load)
 .venv/bin/python -m pytest tests/ -x -q
 
 # Single test file
@@ -755,6 +825,31 @@ starter sizing from policy), `--json`.
 `--premium`, `--underlying`, `--strike`, `--expiry`, `--notes`, `--source`,
 `--ts`, `--log-file`.
 
+`scripts/backtest_signal_report.py`: `--backtest` (required, realized-backtest
+JSON), `--db` (default `runs/index.db`, opened read-only), `--output`
+(markdown, default `backtest_signal_report.md` next to the backtest JSON),
+`--json-output` (default same stem `.json`).
+
+`scripts/build_friday_packet.py`: `--date` (default today), `--runs-dir`,
+`--positions-file`, `--policy-file`, `--skip-live` (no network; gap column
+shows "—").
+
+`scripts/approve_lean_signal.py`: `--id` (repeatable), `--unapprove`,
+`--list`, `--signals-file`, `--approvals-log`.
+
+`scripts/friday_options_refresh.py`: no required args; discovers today's
+matrix runs by ledger date.
+
+`scripts/export_lean_signals.py`: `--matrix-run` (repeatable), `--output`,
+`--strict` (hard-fail on mixed snapshot dates; default warns and proceeds).
+
+`run_copilot_persona_aligned.py` (updated): `<tickers>...`, `--run-id`,
+`--date`, `--risk-profile`, `--persona-routing {persona-aligned,aggressive-aligned}`,
+`--news-enrichment`.
+
+`scripts/weekly_workflow.py` (updated): earnings enrichment is **default ON**;
+opt out with `--no-enrich-earnings`. `--enrich-news` remains opt-in.
+
 ---
 
 ## Support scripts (not part of the cadence)
@@ -775,6 +870,12 @@ into the weekly tick without explicit confirmation.
 | `run_weekly_all_tiers.py` | Runs `weekly_workflow.py` sequentially across mid + large + mega tiers (Polygon free-tier is 5 req/min, so serializing is forced anyway). Default is screen-only — pass `--chain` to also matrix-run each tier's NEW list. |
 | `watch_pipeline.py` | Live TUI dashboard over a weekly / matrix log file (`runs/weekly_workflow_*.log`, `runs/matrix_<id>_*.log`, launchd's `runs/weekly_workflow.log`). Read-only. |
 | `smoke_structured_output.py` | End-to-end smoke for the three structured-output agents (Research Manager, Trader, Portfolio Manager) against a real LLM provider. Use to verify `json_schema` / `response_schema` / tool-use bindings before bumping a model. |
+| `backtest_signal_report.py` | Joins a realized-backtest JSON to `runs/index.db` and emits signal-vs-outcome correlations + bucket cross-tabs (cap tier, tenor, Chronos quantile, recurrence, score). Source of the "Empirical signal findings" section above — re-run after every backtest cycle. Read-only on the db. |
+| `backtest_picks.py` | **The realized backtest.** Queries `index.db` for historical PICKs + option legs, fetches Polygon daily bars (underlying + OCC option tickers via `dataflows/polygon_bars.py`), computes realized hold ROI / PT-hit per pick. Produced `runs/backtest_<date>.json`. |
+| `backtest_exit_rules.py` | Exit-discipline simulation on the same picks (hold vs exit-at-cons vs exit-at-aggr vs half). Produced `runs/backtest_exits_<date>.json` — the empirical basis for the LEAN exit rules. |
+| `build_friday_packet.py` | **Friday decision packet** — one-page md+html in `runs/friday_packet_<date>/`: go/no-go banner, ranked tickets (B→A→C) with OCC contract / limit / qty / exits, live-vs-anchor gap check, freshness footer, approval checklist. Reads all matrix runs sharing the trade date (content-based, not mtime). |
+| `friday_options_refresh.py` | Same-day 14:00 refresh: discovers today's matrix runs by ledger date, re-runs the options overlay on each, rebuilds the packet. Never touches `lean/signals.json`. Driven by `com.tradingagents.friday-refresh.plist`. |
+| `approve_lean_signal.py` | The only sanctioned way to flip `approved` in `lean/signals.json`. `--list`, `--id <TICKER-DATE>` (repeatable), `--unapprove`; audit-logs to `lean/approvals_log.jsonl`. |
 | `export_lean_signals.py` | Flattens approved matrix picks into `lean/signals.json` for the LEAN execution integration (see the **LEAN execution integration** section). Pure file transform, no network. |
 
 ---
@@ -821,6 +922,10 @@ feeding a run artifact — don't replace those with the MCP. Rough split:
 - ❌ Don't quote live prices, greeks, or IV from memory. Route ad-hoc
   market-data lookups through the Massive MCP (`mcp__massive__*`). The
   `scripts/build_*` family stays the right tool for batch artifacts.
+- ❌ Don't size positions by modeled upside or rank entries by screener
+  composite score. Both have ~zero (or mildly negative) correlation with
+  realized ROI — see "Empirical signal findings". Upside magnitude is
+  narrative, not signal; the composite score is a candidate filter only.
 - ❌ Don't let the LEAN integration bypass the human approval gate or the weekly
   cadence — `lean/signals.json` rows default `approved:false`; only the user
   flips them. Keep the exit-rule names/semantics in sync across

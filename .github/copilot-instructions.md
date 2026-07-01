@@ -10,11 +10,14 @@
 ## Critical must-knows (do not violate)
 
 ### 1. The cadence is locked-in — don't reinvent it
-Weekly Friday screener + on-demand matrix on **NEW tickers only** + same-day
-options refresh before entry. Run `scripts/weekly_workflow.py --top 25` and
-follow its Phase 5 next-step commands. The Phase 3 SQLite-driven diff is the
-whole point — never re-run matrix on REPEAT tickers whose verdicts are still
-valid.
+**Friday 06:30 ET pre-market auto-chain** (screen all tiers → diff → matrix
+NEW tickers only → overlays), Friday decision packet review, **Friday 14:00
+options refresh** (`scripts/friday_options_refresh.py`), then user-discretion
+entry Friday or Monday (approve via `scripts/approve_lean_signal.py`). Both
+launchd plists live in `scripts/launchd/`. The Phase 3 SQLite-driven diff is
+the whole point — never re-run matrix on REPEAT tickers whose verdicts are
+still valid. (Revised from Friday-17:00 post-close on 2026-07-01 — the
+screener uses Thursday EOD bars either way; see CLAUDE.md.)
 
 ### 2. Long calls are the default options strategy
 User preference: *"I generally prefer long calls for ease of trading."*
@@ -35,11 +38,11 @@ The `classification` column in `verdict_ledger.json` only takes `PICK` or
 - `pt_compression_pct < 5.0` → **A** (tight dual-frame agreement)
 - otherwise → **B** (cons engaged but skeptical)
 
-Four implementations must stay in sync if you change the threshold:
-`scripts/build_options_overlay.py::_tier()`,
-`scripts/build_chronos_overlay.py::_tier()`,
-`scripts/build_html_report.py::_tier()`, and
-`scripts/index_runs.py::_classification_to_tier()`.
+Single source of truth: `tradingagents/tiers.py::tier_for_row()` — all eight
+call sites delegate through thin wrappers (parity enforced by
+`tests/test_tiers.py`). Change the threshold in ONE place. The
+`suspect_caps_a` flag (caps A→B on non-empty `pt_quality_flags`) is used by
+the four grounded-pipeline sites only.
 
 ### 5. Subprocess invariants (each has historically broken matrix runs)
 - `stdin=subprocess.DEVNULL` on every child process call (commit `50b41e4`).
