@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from scripts.build_friday_packet import (
+    _upside_pct,
     build_packet,
     build_tickets,
     fetch_live_prices,
@@ -550,3 +551,156 @@ def test_render_html_is_self_contained_and_escapes(runs_dir, two_tier_runs, poli
     assert "<script src=" not in doc  # no external assets
     assert "<link " not in doc
     assert "VIRT" in doc
+
+
+# ---------------------------------------------------------------------------
+# Unit disambiguation: option premium vs underlying price target
+#
+# Regression guard for a real misread: the packet used to render an option
+# premium ("Limit", per-share) directly beside an underlying price target
+# ("Aggr PT"), so a $21.46 premium next to a $220.00 target looked like a 10x.
+# They are different instruments and the ratio between them is meaningless.
+
+
+def test_upside_pct_measures_underlying_move_not_premium_ratio():
+    # ANET 2026-08-12: spot 197.85, aggressive PT 220.00 -> +11.2%, NOT 10x
+    assert _upside_pct(220.0, 197.85) == pytest.approx(11.2, abs=0.1)
+    # Dividing the PT by the option premium would have implied ~925%.
+    assert _upside_pct(220.0, 197.85) < 100.0
+
+
+def test_upside_pct_handles_missing_and_degenerate_inputs():
+    assert _upside_pct(None, 100.0) is None
+    assert _upside_pct(100.0, None) is None
+    assert _upside_pct(100.0, 0.0) is None
+    assert _upside_pct(100.0, -5.0) is None
+
+
+def test_upside_pct_negative_when_target_below_spot():
+    assert _upside_pct(90.0, 100.0) == pytest.approx(-10.0, abs=0.01)
+
+
+def test_render_markdown_labels_price_and_premium_columns_distinctly(
+    runs_dir, two_tier_runs, policy_file
+):
+    packet = build_packet(
+        trade_date="2026-06-26", runs_dir=runs_dir,
+        positions_path=None, policy_path=policy_file, skip_live=True,
+    )
+    md = render_markdown(
+        trade_date=packet["trade_date"], run_artifacts=packet["run_artifacts"],
+        tickets=packet["tickets"], banner_problems=packet["banner_problems"],
+        macro_snapshot=packet["macro_snapshot"], skip_live=packet["skip_live"],
+        portfolio_ctx=packet["portfolio_ctx"], generated_at=packet["generated_at"],
+    )
+    # Premium column must name its unit; PT columns must name theirs.
+    assert "Opt limit $/sh" in md
+    assert "Aggr PT (stock)" in md
+    assert "Cons PT (stock)" in md
+    assert "Aggr upside" in md
+    # The bare, ambiguous headers must be gone.
+    assert "| Limit |" not in md
+    assert "| Aggr PT |" not in md
+    # Explicit units legend is present.
+    assert "different instruments" in md
+
+
+def test_render_html_labels_price_and_premium_columns_distinctly(
+    runs_dir, two_tier_runs, policy_file
+):
+    packet = build_packet(
+        trade_date="2026-06-26", runs_dir=runs_dir,
+        positions_path=None, policy_path=policy_file, skip_live=True,
+    )
+    doc = render_html(
+        trade_date=packet["trade_date"], run_artifacts=packet["run_artifacts"],
+        tickets=packet["tickets"], banner_problems=packet["banner_problems"],
+        macro_snapshot=packet["macro_snapshot"], skip_live=packet["skip_live"],
+        portfolio_ctx=packet["portfolio_ctx"], generated_at=packet["generated_at"],
+    )
+    assert "<th>Opt limit $/sh</th>" in doc
+    assert "<th>Aggr PT (stock)</th>" in doc
+    assert "<th>Aggr upside</th>" in doc
+    assert "<th>Limit</th>" not in doc
+    assert "<th>Aggr PT</th>" not in doc
+
+
+# ---------------------------------------------------------------------------
+# Option price provenance — Polygon's basic plan withholds options quotes, so
+# the overlay silently falls back to Black-Scholes. The packet must say so.
+
+
+def _pricing_run(runs_dir, name, price_source):
+    leg = {"symbol": "O:X261218C00100000", "strike": 100.0,
+           "expiration": "2026-12-18", "price": 5.0, "open_interest": 500}
+    if price_source is not None:
+        leg["price_source"] = price_source
+    return _write_run(
+        runs_dir, name, trade_date="2026-06-26",
+        overlays=[{"ticker": "X", "tier": "A", "current_price_usd": 95.0,
+                   "aggressive_pt": 110.0, "conservative_pt": 105.0, "legs": [leg]}],
+        ledger_rows=[{"ticker": "X", "classification": "PICK", "current_price": 95.0,
+                      "aggressive_pt": 110.0, "conservative_pt": 105.0,
+                      "pt_compression_pct": 1.0,
+                      "aggressive_executive_summary": "thesis"}],
+    )
+
+
+def _one_ticket(runs_dir, name, price_source):
+    d = _pricing_run(runs_dir, name, price_source)
+    tickets = build_tickets([load_run_artifacts(d)], "2026-06-26", account_value=None,
+                            policy={}, live_prices={}, skip_live=True)
+    return next(t for t in tickets if t["ticker"] == "X")
+
+
+def test_modeled_price_source_raises_pricing_flag(runs_dir):
+    t = _one_ticket(runs_dir, "matrix_bs_priced", "bs")
+    assert t["price_source"] == "bs"
+    assert t["pricing_flag"] is not None
+    assert "modeled price" in t["pricing_flag"]
+    assert "'bs'" in t["pricing_flag"]
+
+
+def test_unknown_price_source_raises_pricing_flag(runs_dir):
+    # A leg with no price_source at all must not be treated as a market quote.
+    t = _one_ticket(runs_dir, "matrix_no_source", None)
+    assert t["price_source"] is None
+    assert t["pricing_flag"] is not None
+    assert "unknown" in t["pricing_flag"]
+
+
+@pytest.mark.parametrize("source", ["mid", "last"])
+def test_real_market_price_sources_raise_no_pricing_flag(runs_dir, source):
+    t = _one_ticket(runs_dir, f"matrix_{source}_priced", source)
+    assert t["price_source"] == source
+    assert t["pricing_flag"] is None
+
+
+def test_markdown_surfaces_modeled_price_warning(runs_dir, policy_file):
+    _pricing_run(runs_dir, "matrix_md_bs", "bs")
+    packet = build_packet(
+        trade_date="2026-06-26", runs_dir=runs_dir,
+        positions_path=None, policy_path=policy_file, skip_live=True,
+    )
+    md = render_markdown(
+        trade_date=packet["trade_date"], run_artifacts=packet["run_artifacts"],
+        tickets=packet["tickets"], banner_problems=packet["banner_problems"],
+        macro_snapshot=packet["macro_snapshot"], skip_live=packet["skip_live"],
+        portfolio_ctx=packet["portfolio_ctx"], generated_at=packet["generated_at"],
+    )
+    assert "modeled price" in md
+
+
+def test_html_surfaces_modeled_price_warning(runs_dir, policy_file):
+    _pricing_run(runs_dir, "matrix_html_bs", "bs")
+    packet = build_packet(
+        trade_date="2026-06-26", runs_dir=runs_dir,
+        positions_path=None, policy_path=policy_file, skip_live=True,
+    )
+    html = render_html(
+        trade_date=packet["trade_date"], run_artifacts=packet["run_artifacts"],
+        tickets=packet["tickets"], banner_problems=packet["banner_problems"],
+        macro_snapshot=packet["macro_snapshot"], skip_live=packet["skip_live"],
+        portfolio_ctx=packet["portfolio_ctx"], generated_at=packet["generated_at"],
+    )
+    assert "modeled price" in html
