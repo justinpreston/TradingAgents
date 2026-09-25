@@ -1,0 +1,21 @@
+# agnix config — see https://github.com/agent-sh/agnix
+#
+# `.copilot/skills/` holds GitHub Copilot skills, which are plain markdown
+# with an H1 title and no YAML frontmatter. A claude-code-targeted lint
+# should not police another vendor's format. This repo has no
+# `.claude/skills/` directory.
+#
+# XML-001 fires on `<path>` placeholders inside prose and code spans in
+# CLAUDE.md — false positives.
+target = "ClaudeCode"
+exclude = [
+  "node_modules/**",
+  ".git/**",
+  "target/**",
+  ".copilot/**",
+  "**/._*",
+]
+
+[[overrides]]
+paths = ["CLAUDE.md"]
+disabled_rules = ["XML-001"]
