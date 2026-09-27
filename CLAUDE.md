@@ -591,6 +591,29 @@ runs/matrix_2026-05-01_top25/
 
 ---
 
+## Upstream sync (TauricResearch/TradingAgents)
+
+Remote `upstream`; synced through **v0.5.1** (2026-09-27, branch
+`port/upstream-v0.5.1`, merged tag-by-tag v0.4.0 → v0.5.0 → v0.5.1). Merge
+upstream a release tag at a time and run the full suite after each. Fork seams
+to re-check on every sync:
+
+- `dataflows/router.py` — Polygon registered in `VENDOR_LIST`/`VENDOR_METHODS`;
+  `PolygonError` falls through as "unavailable".
+- `dataflows/vendors/yahoo/fundamentals.py::get_fundamentals` — past dates get
+  upstream's withheld notice (#1300) **plus** the fork's PIT reconstruction.
+- `dataflows/vendors/yahoo/ohlcv.py::load_ohlcv` — Polygon bar dispatch.
+- `agents/analysts/fundamentals_analyst.py` — binds a dynamic subset
+  (`TRADINGAGENTS_DISABLE_INSIDER_TXNS`), not the module `TOOLS` tuple.
+- `agents/analysts/sentiment_analyst.py` — `_MIN_INFORMATIVE_CHARS` gate;
+  placeholder detection is structural (`<…>` lines + router sentinels).
+- `graph/trading_graph.py` — `progress_listener`, `persona_models`,
+  `assert_analyst_grounding`; `graph/setup.py` — `persona_llms`, `risk_profile`.
+- `llm_clients/openai_client.py` (Copilot headers), `llm_clients/factory.py`
+  (Copilot `reasoning_effort`).
+
+---
+
 ## Setup / first-run
 
 ```bash
@@ -614,7 +637,7 @@ stay local). `.env` is also gitignored.
 ## Testing
 
 ```bash
-# Full suite (baseline 2026-07-01 post-cadence-restructure: 1227 pass,
+# Full suite (baseline 2026-09-27 after the upstream v0.5.1 port: 1749 pass,
 # 2 env-gated skips, ~2min; deselect the polygon_pacer flake under load)
 .venv/bin/python -m pytest tests/ -x -q
 
@@ -630,7 +653,7 @@ stay local). `.env` is also gitignored.
 .venv/bin/python -m pytest -m integration -x -q # needs external services
 ```
 
-Known flake: `tests/test_polygon_pacer.py::test_retry_after_seconds_is_honored`
+Known flake: `tests/test_polygon_pacer.py::TestMakeRequestRetry::test_retry_after_seconds_is_honored`
 is timing-sensitive — deselect if a parallel run perturbs sleep budgets.
 
 ---
@@ -645,45 +668,56 @@ runs it to a terminal node that returns a portfolio decision.
 tradingagents/
 ├── graph/                        ← LangGraph wiring
 │   ├── trading_graph.py          ← TradingAgentsGraph (main class, builds the graph)
-│   ├── setup.py                  ← GraphSetup: node/edge registration
+│   ├── setup.py                  ← GraphSetup: node/edge registration (+ fork persona_llms / risk_profile)
+│   ├── analyst_execution.py      ← ANALYST_NODE_SPECS: each analyst's tool node built from its module's TOOLS
 │   ├── propagation.py            ← Propagator: initial state + graph invoke
 │   ├── conditional_logic.py      ← Edge predicates (debate rounds, risk discussion)
-│   ├── signal_processing.py      ← Post-run signal extraction
+│   ├── settlement.py             ← Settles past decisions (returns, alpha, reflection) into the decision log
 │   ├── reflection.py             ← Cross-run memory reflection (decision log)
 │   └── checkpointer.py           ← LangGraph checkpoint resume (opt-in)
 │
 ├── agents/                       ← Node implementations (each is a LangGraph node)
-│   ├── analysts/                 ← Four analyst nodes (fundamentals, market, news, social_media)
+│   ├── analysts/                 ← Four analyst nodes (fundamentals, market, news, sentiment); each declares TOOLS
 │   ├── researchers/              ← Bull/bear researchers (structured debate)
-│   ├── managers/                 ← Research manager + portfolio manager (structured output)
+│   ├── managers/                 ← Research manager + portfolio manager (+ fork _risk_profile.py addenda)
 │   ├── trader/                   ← Trader node (structured output: Buy/Sell/Hold)
 │   ├── risk_mgmt/                ← Risk discussion nodes
 │   ├── schemas.py                ← Pydantic schemas for structured-output agents
-│   └── utils/
-│       ├── agent_states.py       ← AgentState, InvestDebateState, RiskDebateState TypedDicts
-│       ├── agent_utils.py        ← Abstract tool functions (get_stock_data, get_news, etc.)
-│       └── memory.py             ← TradingMemoryLog (decision log persistence)
+│   ├── structured.py             ← Provider-native structured output + free-text fallback
+│   ├── state.py                  ← AgentState, InvestDebateState, RiskDebateState TypedDicts
+│   ├── tools.py                  ← LangChain tool functions (get_stock_data, get_news, …) → dataflows.router
+│   ├── context.py                ← Instrument context + language instruction helpers
+│   ├── rating.py                 ← parse_rating / REVIEW for unparseable decisions
+│   └── post_screen.py            ← Optional Jev screening of social posts (TypeSafe key)
 │
 ├── dataflows/                    ← Data vendor abstraction layer
-│   ├── interface.py              ← Vendor-agnostic tool interface
-│   ├── config.py                 ← set_config() wires DEFAULT_CONFIG → vendor routing
-│   ├── polygon_*.py              ← Polygon.io implementations
-│   ├── alpha_vantage*.py         ← Alpha Vantage implementations
-│   ├── y_finance.py              ← yfinance implementations
-│   └── news_enrichment_loader.py ← Loads pre-computed news enrichment from env var
+│   ├── router.py                 ← Vendor routing + fallback (route_to_vendor, VENDOR_METHODS)
+│   ├── config.py                 ← set_config()/run_config() wire DEFAULT_CONFIG → vendor routing
+│   ├── date_window.py            ← Point-in-time guards, get_current_date, resolve_trade_date (fork)
+│   ├── symbols.py, errors.py, net.py
+│   ├── vendors/
+│   │   ├── polygon/              ← (fork) common, bars, finance, news, options, shorts
+│   │   ├── yahoo/                ← market, fundamentals (+ fork PIT reconstruction), news, ohlcv, pit_derivations
+│   │   ├── alpha_vantage/, sec_edgar.py, fred.py, polymarket.py, reddit.py, stocktwits.py
+│   ├── tool_errors.py            ← (fork) [[TOOL_ERROR:…]] markers + data-gaps section
+│   └── news_enrichment_loader.py ← (fork) Loads pre-computed news enrichment from env var
 │
+├── decision_log.py               ← TradingMemoryLog (decision log persistence)
 ├── llm_clients/                  ← Provider abstraction
-│   ├── factory.py                ← create_llm_client(provider, model) → LangChain LLM
+│   ├── factory.py                ← create_llm_client(provider, model), build_llm_kwargs(config)
 │   ├── model_catalog.py          ← Canonical model names per provider
-│   ├── openai_client.py, anthropic_client.py, google_client.py, azure_client.py
+│   ├── openai_client.py (+ fork Copilot headers), anthropic_client.py, google_client.py, …
 │   └── base_client.py            ← Base class for provider clients
 │
 ├── default_config.py             ← DEFAULT_CONFIG dict (LLM, vendors, debate rounds)
-├── screener/                     ← Universe screening (technical + fundamental scoring)
+├── grounding/                    ← (fork) Grounding contract + runtime assertion
+├── screener/                     ← (fork) Universe screening (technical + fundamental scoring)
+├── tiers.py                      ← (fork) Tier A/B/C single source of truth
 └── ui/                           ← Rich terminal UI components
 
 cli/                              ← Interactive CLI (`tradingagents` entry point)
     └── main.py                   ← Typer app; `python -m cli.main` or `tradingagents`
+                                    (upstream split: cli/run.py, cli/display.py, cli/prompts.py)
 ```
 
 **Graph flow**: Analysts → Research Manager → Bull/Bear Debate (N rounds) →
@@ -869,9 +903,8 @@ into the weekly tick without explicit confirmation.
 | `grounding_audit.py` | Deterministic per-ticker grounding-risk score over a completed matrix run; flags fabrication risk in researcher / risk-debate / PM nodes that lack grounding tools. |
 | `run_weekly_all_tiers.py` | Runs `weekly_workflow.py` sequentially across mid + large + mega tiers (Polygon free-tier is 5 req/min, so serializing is forced anyway). Default is screen-only — pass `--chain` to also matrix-run each tier's NEW list. |
 | `watch_pipeline.py` | Live TUI dashboard over a weekly / matrix log file (`runs/weekly_workflow_*.log`, `runs/matrix_<id>_*.log`, launchd's `runs/weekly_workflow.log`). Read-only. |
-| `smoke_structured_output.py` | End-to-end smoke for the three structured-output agents (Research Manager, Trader, Portfolio Manager) against a real LLM provider. Use to verify `json_schema` / `response_schema` / tool-use bindings before bumping a model. |
 | `backtest_signal_report.py` | Joins a realized-backtest JSON to `runs/index.db` and emits signal-vs-outcome correlations + bucket cross-tabs (cap tier, tenor, Chronos quantile, recurrence, score). Source of the "Empirical signal findings" section above — re-run after every backtest cycle. Read-only on the db. |
-| `backtest_picks.py` | **The realized backtest.** Queries `index.db` for historical PICKs + option legs, fetches Polygon daily bars (underlying + OCC option tickers via `dataflows/polygon_bars.py`), computes realized hold ROI / PT-hit per pick. Produced `runs/backtest_<date>.json`. |
+| `backtest_picks.py` | **The realized backtest.** Queries `index.db` for historical PICKs + option legs, fetches Polygon daily bars (underlying + OCC option tickers via `dataflows/vendors/polygon/bars.py`), computes realized hold ROI / PT-hit per pick. Produced `runs/backtest_<date>.json`. |
 | `backtest_exit_rules.py` | Exit-discipline simulation on the same picks (hold vs exit-at-cons vs exit-at-aggr vs half). Produced `runs/backtest_exits_<date>.json` — the empirical basis for the LEAN exit rules. |
 | `build_friday_packet.py` | **Friday decision packet** — one-page md+html in `runs/friday_packet_<date>/`: go/no-go banner, ranked tickets (B→A→C) with OCC contract / limit / qty / exits, live-vs-anchor gap check, freshness footer, approval checklist. Reads all matrix runs sharing the trade date (content-based, not mtime). |
 | `friday_options_refresh.py` | Same-day 14:00 refresh: discovers today's matrix runs by ledger date, re-runs the options overlay on each, rebuilds the packet. Never touches `lean/signals.json`. Driven by `com.tradingagents.friday-refresh.plist`. |
