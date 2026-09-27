@@ -85,8 +85,12 @@ def create_sentiment_analyst(llm):
         # returns a string (no exceptions surface from here), so the LLM
         # always sees something — either real data or a clear placeholder.
         news_block = get_news.func(ticker, start_date, end_date)
-        stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
-        reddit_block = fetch_reddit_posts(ticker)
+        # Pass the analysis window so a historical run trims social posts to it
+        # instead of leaking today's chatter into a backtest (#1220).
+        stocktwits_block = fetch_stocktwits_messages(
+            ticker, limit=30, start_date=start_date, end_date=end_date
+        )
+        reddit_block = fetch_reddit_posts(ticker, start_date=start_date, end_date=end_date)
 
         # Grounding hard-block. If every source came back as a placeholder
         # or a tool error, invoking the LLM would invite it to confabulate
