@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Iterable
 
-from tradingagents.dataflows.polygon_common import (
+from tradingagents.dataflows.vendors.polygon.common import (
     PolygonNotFoundError,
     _make_request,
 )

@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
-from .polygon_common import _make_request, PolygonError
+from .vendors.polygon.common import PolygonError, _make_request
 
 
 def fetch_daily_closes(

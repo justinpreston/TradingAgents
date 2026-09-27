@@ -30,7 +30,7 @@ def main() -> int:
     except Exception:
         pass
 
-    from tradingagents.dataflows.polygon_finance import get_fundamentals
+    from tradingagents.dataflows.vendors.polygon.finance import get_fundamentals
 
     ticker = args.ticker.upper()
     curr_date = args.date or datetime.utcnow().strftime("%Y-%m-%d")
@@ -40,7 +40,7 @@ def main() -> int:
 
     if not args.no_insider:
         # Insider transactions route to yfinance/AV per default_config.tool_vendors
-        from tradingagents.dataflows.interface import route_to_vendor
+        from tradingagents.dataflows.router import route_to_vendor
         print("\n## Insider transactions (last quarter)\n")
         try:
             print(route_to_vendor("get_insider_transactions", ticker))

@@ -30,7 +30,7 @@ import logging
 from dataclasses import asdict, dataclass, field, fields
 
 from tradingagents.dataflows._disk_cache import DiskCache
-from tradingagents.dataflows.polygon_common import (
+from tradingagents.dataflows.vendors.polygon.common import (
     PolygonNotFoundError,
     paginated_results,
 )

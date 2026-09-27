@@ -294,7 +294,7 @@ def fetch_live_prices(tickers: list[str], *, pace: float = 0.3, retries: int = 2
     except Exception:
         pass
     try:
-        from tradingagents.dataflows.polygon_common import _make_request
+        from tradingagents.dataflows.vendors.polygon.common import _make_request
     except Exception:
         return {}
 

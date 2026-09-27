@@ -35,7 +35,7 @@ from datetime import date, timedelta
 from typing import Sequence
 
 from tradingagents.dataflows._disk_cache import DiskCache
-from tradingagents.dataflows.polygon_common import _make_request
+from tradingagents.dataflows.vendors.polygon.common import _make_request
 
 log = logging.getLogger(__name__)
 

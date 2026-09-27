@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from tradingagents.dataflows import y_finance
+from tradingagents.dataflows.vendors.yahoo import fundamentals as y_finance
 
 
 # A representative subset of the live-snapshot field labels the function
@@ -230,7 +230,7 @@ def test_historical_curr_date_reconstructs_pit_snapshot():
 def test_historical_uses_only_quarters_at_or_before_curr_date():
     """Reconstructed TTM Revenue must equal the sum of the 4 quarters ending
     on or before curr_date, never including any later filing."""
-    from tradingagents.dataflows.yf_pit_derivations import derive_pit_fundamentals
+    from tradingagents.dataflows.vendors.yahoo.pit_derivations import derive_pit_fundamentals
 
     fake_ticker = MagicMock()
     fake_ticker.info = _fake_info()
@@ -256,7 +256,7 @@ def test_historical_uses_only_quarters_at_or_before_curr_date():
 def test_historical_market_cap_uses_close_at_curr_date_not_live():
     """Reconstructed Market Cap must = close[curr_date] × shares_outstanding[curr_date],
     not the live info snapshot."""
-    from tradingagents.dataflows.yf_pit_derivations import derive_pit_fundamentals
+    from tradingagents.dataflows.vendors.yahoo.pit_derivations import derive_pit_fundamentals
 
     fake_ticker = MagicMock()
     fake_ticker.info = _fake_info()
@@ -281,7 +281,7 @@ def test_historical_market_cap_uses_close_at_curr_date_not_live():
 @pytest.mark.unit
 def test_historical_52_week_range_from_history_window():
     """52-week H/L must derive from the 365-day window ending at curr_date."""
-    from tradingagents.dataflows.yf_pit_derivations import derive_pit_fundamentals
+    from tradingagents.dataflows.vendors.yahoo.pit_derivations import derive_pit_fundamentals
 
     fake_ticker = MagicMock()
     fake_ticker.info = _fake_info()
@@ -311,7 +311,7 @@ def test_historical_52_week_range_from_history_window():
 def test_historical_sparse_quarters_omit_ttm_gracefully():
     """If fewer than 4 quarters are available ≤ curr_date, TTM fields are omitted
     rather than a partial sum being published as if it were full-year data."""
-    from tradingagents.dataflows.yf_pit_derivations import derive_pit_fundamentals
+    from tradingagents.dataflows.vendors.yahoo.pit_derivations import derive_pit_fundamentals
 
     sparse_income = pd.DataFrame({
         pd.Timestamp("2024-04-30"): [26_000_000_000, 18_000_000_000, 16_000_000_000, 14_500_000_000],
@@ -341,7 +341,7 @@ def test_historical_sparse_quarters_omit_ttm_gracefully():
 @pytest.mark.unit
 def test_historical_dividend_yield_uses_ttm_dividends_in_window():
     """Dividend yield = sum of dividends paid in the trailing 365 days ÷ close at curr_date."""
-    from tradingagents.dataflows.yf_pit_derivations import derive_pit_fundamentals
+    from tradingagents.dataflows.vendors.yahoo.pit_derivations import derive_pit_fundamentals
 
     div_dates = [
         pd.Timestamp("2024-03-15"),
@@ -371,7 +371,7 @@ def test_historical_dividend_yield_uses_ttm_dividends_in_window():
 @pytest.mark.unit
 def test_historical_no_dividend_history_omits_yield():
     """A ticker with no dividends in the trailing window does not emit Dividend Yield."""
-    from tradingagents.dataflows.yf_pit_derivations import derive_pit_fundamentals
+    from tradingagents.dataflows.vendors.yahoo.pit_derivations import derive_pit_fundamentals
 
     fake_ticker = MagicMock()
     fake_ticker.info = _fake_info()
@@ -471,8 +471,12 @@ def test_empty_info_payload():
     emit a single ``NO_DATA_AVAILABLE`` sentinel instead of a vendor-specific
     string the agent might fabricate around.
     """
-    from tradingagents.dataflows.symbol_utils import NoMarketDataError
+    from tradingagents.dataflows.errors import NoMarketDataError
 
-    with _patch_ticker({}):
+    from tradingagents.dataflows.vendors.yahoo import ohlcv
+
+    # An empty payload probes Yahoo to tell "no data" from an outage; keep the
+    # probe offline and report the vendor as up.
+    with _patch_ticker({}), patch.object(ohlcv, "vendor_reachable", lambda *a, **k: True):
         with pytest.raises(NoMarketDataError):
             y_finance.get_fundamentals("NVDA", curr_date=None)

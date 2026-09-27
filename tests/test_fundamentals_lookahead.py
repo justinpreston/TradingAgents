@@ -19,7 +19,12 @@ from unittest import mock
 
 import pytest
 
-from tradingagents.dataflows import alpha_vantage_fundamentals as av, date_window, y_finance
+from tradingagents.dataflows import date_window
+from tradingagents.dataflows.vendors.alpha_vantage import fundamentals as av
+from tradingagents.dataflows.vendors.yahoo import (
+    fundamentals as yahoo_fundamentals,
+    market as yahoo_market,
+)
 
 _TODAY = "2026-09-07"
 _PAST = "2024-05-10"
@@ -42,9 +47,9 @@ _LEAKY = ("3500000000000", "34.2", "260.1", "391000000000",
 
 def _yf(curr_date, info=_INFO, today=_TODAY):
     with mock.patch.object(date_window, "get_current_date", return_value=today), \
-         mock.patch.object(y_finance, "yf_retry", lambda fn: info), \
-         mock.patch.object(y_finance.yf, "Ticker"):
-        return y_finance.get_fundamentals("AAPL", curr_date)
+         mock.patch.object(yahoo_fundamentals, "yf_retry", lambda fn: info), \
+         mock.patch.object(yahoo_market.yf, "Ticker"):
+        return yahoo_fundamentals.get_fundamentals("AAPL", curr_date)
 
 
 def _av(curr_date, today=_TODAY):
@@ -68,7 +73,7 @@ class TestYFinanceHistoricalRun:
         out = _yf(_PAST)
         assert f"Point-in-time as of: {_PAST}" in out
         assert "withheld" in out
-        assert _PAST in out and _TODAY in out
+        assert _PAST in out and _TODAY not in out
 
     def test_no_wall_clock_retrieval_stamp(self):
         # The old header stamped datetime.now(), which is what surfaced the leak.
@@ -81,9 +86,9 @@ class TestYFinanceHistoricalRun:
         # statements and bars, but ``.info`` is never read.)
         info = mock.PropertyMock(return_value=_INFO)
         with mock.patch.object(date_window, "get_current_date", return_value=_TODAY), \
-             mock.patch.object(y_finance.yf, "Ticker") as tk:
+             mock.patch.object(yahoo_market.yf, "Ticker") as tk:
             type(tk.return_value).info = info
-            y_finance.get_fundamentals("AAPL", _PAST)
+            yahoo_fundamentals.get_fundamentals("AAPL", _PAST)
         info.assert_not_called()
 
 
@@ -114,7 +119,6 @@ class TestLiveRunUnchanged:
         out = _yf(_TODAY)
         for value in _LEAKY:
             assert value in out
-        assert "Data retrieved on:" in out
         assert "withheld" not in out
 
     def test_yfinance_absent_curr_date_returns_the_full_profile(self):
@@ -128,7 +132,7 @@ class TestNoUsableFieldsStillRaises:
     def test_stub_payload_raises_no_market_data(self):
         # yfinance returns {"trailingPegRatio": None} for unknown symbols; on a
         # live run that must stay a hard "no data", not a bare header.
-        from tradingagents.dataflows.symbol_utils import NoMarketDataError
+        from tradingagents.dataflows.errors import NoMarketDataError
 
         with pytest.raises(NoMarketDataError):
             _yf(_TODAY, info={"trailingPegRatio": None})

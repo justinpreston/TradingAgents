@@ -3,21 +3,29 @@ import os
 from langchain_core.messages import ToolMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-from tradingagents.agents.utils.agent_utils import (
+from tradingagents.agents.context import get_instrument_context_from_state, get_language_instruction
+from tradingagents.agents.tools import (
     get_balance_sheet,
     get_cashflow,
     get_fundamentals,
     get_income_statement,
     get_insider_transactions,
-    get_instrument_context_from_state,
-    get_language_instruction,
 )
-from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.tool_errors import (
     build_data_gaps_section,
     extract_tool_errors,
 )
 
+# The tools this analyst is offered; its tool node is built from the same tuple.
+# Fork: the node binds a subset when TRADINGAGENTS_DISABLE_INSIDER_TXNS is set;
+# the tool node keeps the full tuple, which is a superset of any binding.
+TOOLS = (
+    get_fundamentals,
+    get_balance_sheet,
+    get_cashflow,
+    get_income_statement,
+    get_insider_transactions,
+)
 
 def _insider_txns_disabled() -> bool:
     """Whether to omit get_insider_transactions from the fundamentals analyst.

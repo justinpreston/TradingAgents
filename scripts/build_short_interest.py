@@ -31,7 +31,7 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(REPO_ROOT / ".env")
 
-from tradingagents.dataflows.polygon_shorts import build_shorts_snapshot  # noqa: E402
+from tradingagents.dataflows.vendors.polygon.shorts import build_shorts_snapshot  # noqa: E402
 
 
 def render_markdown(snap: dict) -> str:

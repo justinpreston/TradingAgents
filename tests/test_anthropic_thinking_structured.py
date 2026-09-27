@@ -25,7 +25,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import BaseModel
 
-from tradingagents.agents.utils import structured as struct_mod
+from tradingagents.agents import structured as struct_mod
 
 
 class _DummyPlan(BaseModel):

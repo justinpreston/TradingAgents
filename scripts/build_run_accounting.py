@@ -114,7 +114,7 @@ def _fetch_prices(tickers: list[str], pace: float = 1.4, retry_sleep: float = 70
         load_repo_env()
     except Exception:
         pass
-    from tradingagents.dataflows.polygon_common import _make_request  # type: ignore
+    from tradingagents.dataflows.vendors.polygon.common import _make_request  # type: ignore
 
     out: dict[str, float] = {}
     for t in tickers:
@@ -478,7 +478,7 @@ def main() -> int:
             load_repo_env()
         except Exception:
             pass
-        from tradingagents.dataflows.polygon_common import _make_request, PolygonError  # type: ignore
+        from tradingagents.dataflows.vendors.polygon.common import _make_request, PolygonError  # type: ignore
         for t in tickers_missing_sector:
             try:
                 r = _make_request(f"/v3/reference/tickers/{t}")

@@ -61,8 +61,8 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(REPO_ROOT / ".env")
 
-from tradingagents.dataflows.polygon_common import _make_request  # noqa: E402
-from tradingagents.dataflows.polygon_options import (  # noqa: E402
+from tradingagents.dataflows.vendors.polygon.common import _make_request  # noqa: E402
+from tradingagents.dataflows.vendors.polygon.options import (  # noqa: E402
     _is_auth_blip_error,
     _is_rate_limit_error,
     fetch_chain as _fetch_chain,
@@ -187,7 +187,7 @@ def _bs_put(S: float, K: float, T: float, r: float, sigma: float) -> float:
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Polygon chain fetch — relocated to tradingagents.dataflows.polygon_options
+# Polygon chain fetch — relocated to tradingagents.dataflows.vendors.polygon.options
 # (imported above as _fetch_chain / _is_rate_limit_error / _is_auth_blip_error
 # for backward compatibility with any code importing these names from here).
 # ──────────────────────────────────────────────────────────────────────

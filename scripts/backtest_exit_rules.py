@@ -48,8 +48,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tradingagents.dataflows.polygon_bars import fetch_daily_bars, occ_ticker  # noqa: E402
-from tradingagents.dataflows.polygon_common import min_request_interval  # noqa: E402
+from tradingagents.dataflows.vendors.polygon.bars import fetch_daily_bars, occ_ticker  # noqa: E402
+from tradingagents.dataflows.vendors.polygon.common import min_request_interval  # noqa: E402
 
 
 def _api_key() -> str:

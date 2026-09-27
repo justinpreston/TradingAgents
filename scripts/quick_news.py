@@ -30,7 +30,7 @@ def main() -> int:
     except Exception:
         pass
 
-    from tradingagents.dataflows.polygon_news import get_news
+    from tradingagents.dataflows.vendors.polygon.news import get_news
     end = args.end_date or datetime.utcnow().strftime("%Y-%m-%d")
     start = (datetime.strptime(end, "%Y-%m-%d") - timedelta(days=args.days)).strftime("%Y-%m-%d")
 
