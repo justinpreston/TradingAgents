@@ -119,8 +119,12 @@ def get_global_news(
 
 def get_insider_transactions(
     ticker: Annotated[str, "ticker symbol"],
+    curr_date: Annotated[str | None, "analysis date YYYY-MM-DD; later rows are dropped"] = None,
 ) -> str:
     """Insider Form-4 transactions from Polygon.
+
+    Matches the router's ``(ticker, trade_date)`` call: rows filed or traded
+    after ``curr_date`` are dropped so a historical run cannot see them.
 
     Polygon does not currently expose an SEC insider-transactions endpoint
     on the public REST surface — we have probed every documented spelling
@@ -153,6 +157,11 @@ def get_insider_transactions(
         except PolygonError as exc:
             last_exc = exc
             continue
+        if curr_date:
+            results = [
+                r for r in results
+                if (r.get("filing_date") or r.get("transaction_date") or "")[:10] <= curr_date
+            ]
         return _format_insider_transactions(ticker.upper(), results)
     raise PolygonError(
         "Polygon insider transactions unavailable on every known endpoint "

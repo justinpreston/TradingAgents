@@ -307,8 +307,7 @@ def get_stock_data(
     header = (
         f"# Stock data for {symbol.upper()} from {start_date} to {end_date}\n"
         f"# Total records: {len(df)}\n"
-        f"# Source: Polygon (split-adjusted)\n"
-        f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"# Source: Polygon (split-adjusted)\n\n"
     )
     return header + df.to_csv()
 
@@ -479,8 +478,7 @@ def get_fundamentals(
         f"# Source: Polygon (point-in-time as of {curr_date})\n"
         f"# {derived_count} fields derived from filings & bars available on or before {curr_date}\n"
         f"# Forward-looking analyst projections (Forward EPS / PE / PEG) intentionally omitted —\n"
-        f"#   no PIT-correct source.\n"
-        f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"#   no PIT-correct source.\n\n"
     )
     return header + "\n".join(out_lines)
 
@@ -500,8 +498,7 @@ def _statement_report(
     header = (
         f"# {label} data for {ticker.upper()} ({timeframe})\n"
         f"# Source: Polygon (point-in-time, filings public on or before {curr_date or 'latest'})\n"
-        f"# Periods returned: {len(entries)}\n"
-        f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"# Periods returned: {len(entries)}\n\n"
     )
     return header + csv_string
 
