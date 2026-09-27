@@ -1,10 +1,7 @@
 import re
-from datetime import date, datetime, timedelta
-from typing import Annotated
+from datetime import date, datetime
 
-import pandas as pd
-
-SavePathType = Annotated[str, "File path to save data. If None, data is not saved."]
+import requests
 
 # Tickers can contain letters, digits, dot, dash, underscore, caret
 # (index symbols like ^GSPC), equals (futures like GC=F), and plus
@@ -40,12 +37,6 @@ def safe_ticker_component(value: str, *, max_len: int = 32) -> str:
     if set(value) == {"."}:
         raise ValueError(f"ticker cannot consist solely of dots: {value!r}")
     return value
-
-
-def save_output(data: pd.DataFrame, tag: str, save_path: SavePathType = None) -> None:
-    if save_path:
-        data.to_csv(save_path, encoding="utf-8")
-        print(f"{tag} saved to {save_path}")
 
 
 def get_current_date():
@@ -87,24 +78,36 @@ def resolve_trade_date(value, *, today=None):
     return parsed.isoformat(), f"backtest ({delta}d ago)"
 
 
-def decorate_all_methods(decorator):
-    def class_decorator(cls):
-        for attr_name, attr_value in cls.__dict__.items():
-            if callable(attr_value):
-                setattr(cls, attr_name, decorator(attr_value))
-        return cls
 
-    return class_decorator
+def get_scrubbed(url: str, *, params: dict, timeout: float, secret: str, passthrough=()):
+    """``requests.get`` plus ``raise_for_status``, with ``secret`` kept out of errors.
+
+    Vendors that authenticate with a query parameter put the key in the URL, and
+    requests quotes the full URL in HTTP, connection and timeout errors, so any
+    log or traceback that records one would carry the key (#1324). A requests
+    error is re-raised as the same class with the key replaced and nothing
+    attached: no request or response (both hold the URL) and no exception chain,
+    which is why this raises after the ``except`` block rather than inside it.
+    Statuses in ``passthrough`` are returned for the caller to handle.
+    """
+    try:
+        response = requests.get(url, params=params, timeout=timeout)
+        if response.status_code not in passthrough:
+            response.raise_for_status()
+        return response
+    except requests.RequestException as exc:
+        error = type(exc)(str(exc).replace(secret, "***")) if secret else exc
+    raise error
 
 
-def get_next_weekday(date):
+def vendor_reachable(url: str, timeout: float = 5.0) -> bool:
+    """Whether the vendor answers at all, for telling silence from an outage.
 
-    if not isinstance(date, datetime):
-        date = datetime.strptime(date, "%Y-%m-%d")
-
-    if date.weekday() >= 5:
-        days_to_add = 7 - date.weekday()
-        next_weekday = date + timedelta(days=days_to_add)
-        return next_weekday
-    else:
-        return date
+    A client that returns an empty result instead of raising leaves those two
+    cases indistinguishable. Called only when a result is empty.
+    """
+    try:
+        requests.head(url, timeout=timeout, allow_redirects=True)
+        return True
+    except requests.RequestException:
+        return False

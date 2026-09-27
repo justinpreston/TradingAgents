@@ -200,8 +200,8 @@ def _full_pit_overrides():
 
 @pytest.mark.unit
 def test_historical_curr_date_reconstructs_pit_snapshot():
-    """A past curr_date must reconstruct snapshot fields from PIT data, NOT
-    return the live ``info`` snapshot."""
+    """A past curr_date must reconstruct snapshot fields from PIT data and
+    never read the live ``info`` snapshot — not even stable fields (#1300)."""
     past = "2024-05-10"
     with _patch_ticker(_fake_info(), **_full_pit_overrides()):
         out = y_finance.get_fundamentals("NVDA", curr_date=past)
@@ -215,12 +215,12 @@ def test_historical_curr_date_reconstructs_pit_snapshot():
     assert "EPS (TTM):" in out
     assert "PE Ratio (TTM):" in out
 
+    # Name/sector/industry come from the live profile, which is withheld.
     for label in _STABLE_FIELD_LABELS:
-        assert f"{label}:" in out, f"stable field {label!r} missing from output"
+        assert f"{label}:" not in out, f"live field {label!r} leaked into a historical run"
 
-    assert "Point-in-time mode" in out
-    assert past in out
-    assert "reconstructed" in out
+    assert "withheld" in out
+    assert f"Reconstructed point-in-time figures (as of {past})" in out
     assert "Forward EPS:" not in out
     assert "Forward PE:" not in out
     assert "PEG Ratio:" not in out
@@ -389,7 +389,7 @@ def test_historical_no_dividend_history_omits_yield():
 @pytest.mark.unit
 def test_derivation_failure_does_not_crash_get_fundamentals():
     """If the derivation module raises mid-run, get_fundamentals must still return
-    a valid (degraded) report with the stable structural fields."""
+    the withheld notice rather than crash."""
     fake_ticker = MagicMock()
     fake_ticker.info = _fake_info()
 
@@ -412,9 +412,8 @@ def test_derivation_failure_does_not_crash_get_fundamentals():
     with patch.object(y_finance.yf, "Ticker", return_value=fake_ticker):
         out = y_finance.get_fundamentals("NVDA", curr_date="2024-05-10")
 
-    for label in _STABLE_FIELD_LABELS:
-        assert f"{label}:" in out
-    assert "Point-in-time mode" in out
+    assert "withheld" in out
+    assert "Reconstructed point-in-time figures" not in out
     assert "Market Cap:" not in out
 
 
@@ -476,4 +475,4 @@ def test_empty_info_payload():
 
     with _patch_ticker({}):
         with pytest.raises(NoMarketDataError):
-            y_finance.get_fundamentals("NVDA", curr_date="2024-05-10")
+            y_finance.get_fundamentals("NVDA", curr_date=None)

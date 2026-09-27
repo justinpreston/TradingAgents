@@ -1,6 +1,7 @@
 import json
 
 from .alpha_vantage_common import _make_api_request
+from .date_window import withhold_live_profile
 
 
 def _filter_reports_by_date(result, curr_date: str):
@@ -31,13 +32,22 @@ def get_fundamentals(ticker: str, curr_date: str = None) -> str:
     """
     Retrieve comprehensive fundamental data for a given ticker symbol using Alpha Vantage.
 
+    OVERVIEW serves only present-day values and carries no historical vintage, so
+    a past ``curr_date`` withholds it rather than leaking post-decision figures
+    into a backtest (#1300); the statement endpoints below stay point-in-time via
+    ``_filter_reports_by_date``.
+
     Args:
         ticker (str): Ticker symbol of the company
-        curr_date (str): Current date you are trading at, yyyy-mm-dd (not used for Alpha Vantage)
+        curr_date (str): Analysis date, yyyy-mm-dd
 
     Returns:
         str: Company overview data including financial ratios and key metrics
     """
+    withheld = withhold_live_profile(curr_date, ticker)
+    if withheld:
+        return withheld
+
     params = {
         "symbol": ticker,
     }

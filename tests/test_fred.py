@@ -8,6 +8,7 @@ import unittest
 from unittest import mock
 
 import pytest
+import requests
 
 import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
@@ -151,21 +152,45 @@ class FredFormattingTests(unittest.TestCase):
         self.assertEqual(obs_params["observation_start"], "2025-07-02")  # 90d back
 
     def test_requests_pin_the_data_vintage(self):
-        # #1275: both the metadata and observations requests must set
-        # realtime_start=realtime_end=curr_date, or FRED serves the latest
-        # revision and revision-prone series leak future information.
+        # #1275: both the metadata and observations requests must pin the vintage
+        # to curr_date (clamped to FRED's today), or FRED serves the latest
+        # revision and revision-prone series leak future information. A past
+        # curr_date sits below FRED's today, so it pins through unchanged.
         captured = {}
 
         def _capture(path, params):
             captured[path] = params
             return _META if path == "series" else _OBS
 
-        with mock.patch.object(fred, "_request", side_effect=_capture):
+        with mock.patch.object(fred, "_fred_today", return_value="2026-01-01"), \
+                mock.patch.object(fred, "_request", side_effect=_capture):
             fred.get_macro_data("cpi", "2025-09-30", 90)
 
         for path in ("series", "series/observations"):
             self.assertEqual(captured[path]["realtime_start"], "2025-09-30", path)
             self.assertEqual(captured[path]["realtime_end"], "2025-09-30", path)
+
+    def test_future_curr_date_clamps_vintage_to_fred_today(self):
+        # #1275 regression: on a live run curr_date is the caller's LOCAL date,
+        # which can be a day ahead of FRED's US-Central clock. Pinning the vintage
+        # to that future date 400s, and the routing layer then drops macro data
+        # silently. The pin must clamp to FRED's today; the observation window
+        # (future bars can't exist yet) stays at curr_date.
+        captured = {}
+
+        def _capture(path, params):
+            captured[path] = params
+            return _META if path == "series" else _OBS
+
+        with mock.patch.object(fred, "_fred_today", return_value="2026-08-31"), \
+                mock.patch.object(fred, "_request", side_effect=_capture):
+            fred.get_macro_data("cpi", "2026-09-01", 90)  # local a day ahead of Chicago
+
+        for path in ("series", "series/observations"):
+            self.assertEqual(captured[path]["realtime_start"], "2026-08-31", path)
+            self.assertEqual(captured[path]["realtime_end"], "2026-08-31", path)
+        # the observation window still tracks curr_date, not the clamped vintage
+        self.assertEqual(captured["series/observations"]["observation_end"], "2026-09-01")
 
 
 @pytest.mark.unit
@@ -209,3 +234,53 @@ class FredRoutingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+_KEY = "abcdef0123456789abcdef0123456789"
+
+
+@pytest.mark.unit
+class TestKeyKeptOutOfErrors:
+    """The key travels as a query parameter, and requests quotes the full URL in
+    its error messages, so any log or traceback would carry it (#1324)."""
+
+    def _raises(self, side_effect):
+        with mock.patch.dict("os.environ", {"FRED_API_KEY": _KEY}), \
+             mock.patch("tradingagents.dataflows.utils.requests.get", side_effect=side_effect), \
+             pytest.raises(requests.RequestException) as caught:
+            fred._request("series", {"series_id": "DGS10"})
+        return caught.value
+
+    def test_http_error_message_carries_no_key(self):
+        response = mock.Mock(status_code=502)
+        response.raise_for_status.side_effect = requests.HTTPError(
+            f"502 Server Error for url: https://api.stlouisfed.org/fred/series?api_key={_KEY}",
+            response=response,
+        )
+        with mock.patch.dict("os.environ", {"FRED_API_KEY": _KEY}), \
+             mock.patch("tradingagents.dataflows.utils.requests.get", return_value=response), \
+             pytest.raises(requests.HTTPError) as caught:
+            fred._request("series", {"series_id": "DGS10"})
+        exc = caught.value
+        assert _KEY not in str(exc) and _KEY not in repr(exc)
+        # The response and request carry the full URL, so they are not attached.
+        assert exc.response is None and exc.request is None
+        assert exc.__cause__ is None and exc.__context__ is None  # no chain holds the key
+
+    def test_connection_error_before_any_response_carries_no_key(self):
+        exc = self._raises(requests.ConnectionError(
+            f"Max retries exceeded with url: /fred/series?series_id=DGS10&api_key={_KEY}"))
+        assert isinstance(exc, requests.ConnectionError)
+        assert _KEY not in str(exc) and exc.__context__ is None
+
+
+@pytest.mark.unit
+def test_error_without_the_key_in_its_message_still_drops_the_request():
+    # Some timeout messages omit the URL, but the attached request still has it.
+    import requests as rq
+    req = rq.Request("GET", f"https://api.stlouisfed.org/fred/series?api_key={_KEY}").prepare()
+    with mock.patch.dict("os.environ", {"FRED_API_KEY": _KEY}), \
+         mock.patch("tradingagents.dataflows.utils.requests.get", side_effect=rq.Timeout("Read timed out.", request=req)), \
+         pytest.raises(rq.Timeout) as caught:
+        fred._request("series", {"series_id": "DGS10"})
+    assert caught.value.request is None

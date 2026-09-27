@@ -4,10 +4,16 @@ yfinance can return the newest in-range bar with a NaN close (an unsettled or
 glitched session). The old path parsed dates without normalizing timezone and
 dropped every NaN-close row before applying the curr_date cutoff, so the latest
 bar disappeared and the previous trading day looked like the latest. Now dates
-are normalized, and a latest in-range bar with no close raises rather than
-silently falling back.
+are normalized before the cutoff, so the frame ends at the last settled bar
+instead of carrying a fabricated close.
+
+Refusing the whole frame instead (the first attempt at #1201) reported a
+tradable symbol as invalid or delisted (#1289), so only a range with no close
+anywhere counts as no data and the staleness check judges the rest.
 """
 from __future__ import annotations
+
+import os
 
 import pandas as pd
 import pytest
@@ -85,26 +91,53 @@ def _run_load(monkeypatch, tmp_path, frame, curr_date):
     monkeypatch.setattr(su, "get_config", lambda: {"data_cache_dir": str(tmp_path)})
     today = pd.Timestamp(curr_date)
     monkeypatch.setattr(su.pd.Timestamp, "today", staticmethod(lambda: today))
-    start = (today - pd.DateOffset(years=5)).strftime("%Y-%m-%d")
-    end = (today + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-    (tmp_path / f"AAPL-YFin-data-{start}-{end}.csv").write_text(frame.to_csv(index=False))
+    cache_file = tmp_path / "AAPL-YFin-data.csv"
+    cache_file.write_text(frame.to_csv(index=False))
+    os.utime(cache_file, (today.timestamp(), today.timestamp()))
 
     def _fail_download(*a, **k):
         raise AssertionError("should use the seeded cache, not download")
     monkeypatch.setattr(su.yf, "download", _fail_download)
-    monkeypatch.setattr(su, "_assert_ohlcv_not_stale", lambda *a, **k: None)
     return su.load_ohlcv("AAPL", curr_date)
 
 
 @pytest.mark.unit
-def test_latest_in_range_nan_close_raises_not_silent_fallback(monkeypatch, tmp_path):
-    # Newest bar (the curr_date) has no close -> raise, don't return Thursday.
+def test_unsettled_latest_bar_is_served_as_the_last_settled_bar(monkeypatch, tmp_path):
+    # Newest bar (the curr_date) has no close: serve the last settled bar rather
+    # than reporting the whole symbol as unavailable (#1289).
     frame = pd.DataFrame({
         "Date": ["2026-05-07", "2026-05-08"],
         "Open": [100.0, 101.0], "High": [101.0, 102.0], "Low": [99.0, 100.0],
         "Close": [100.5, float("nan")], "Volume": [1_000_000, 1_000_000],
     })
-    with pytest.raises(NoMarketDataError, match="no closing price"):
+    out = _run_load(monkeypatch, tmp_path, frame, "2026-05-08")
+    assert out["Date"].iloc[-1] == pd.Timestamp("2026-05-07")
+    assert out["Close"].iloc[-1] == 100.5
+
+
+@pytest.mark.unit
+def test_no_settled_bar_at_all_is_still_no_data(monkeypatch, tmp_path):
+    frame = pd.DataFrame({
+        "Date": ["2026-05-07", "2026-05-08"],
+        "Open": [100.0, 101.0], "High": [101.0, 102.0], "Low": [99.0, 100.0],
+        "Close": [float("nan"), float("nan")], "Volume": [1_000_000, 1_000_000],
+    })
+    with pytest.raises(NoMarketDataError, match="no bar in range has a closing price"):
+        _run_load(monkeypatch, tmp_path, frame, "2026-05-08")
+
+
+@pytest.mark.unit
+def test_serving_the_last_settled_bar_does_not_bypass_the_staleness_check(
+    monkeypatch, tmp_path
+):
+    # Falling back must not resurrect a long-dead series: once the closeless
+    # tail is gone, the remaining bar is judged on its age like any other.
+    frame = pd.DataFrame({
+        "Date": ["2026-01-05", "2026-05-08"],
+        "Open": [100.0, 101.0], "High": [101.0, 102.0], "Low": [99.0, 100.0],
+        "Close": [100.5, float("nan")], "Volume": [1_000_000, 1_000_000],
+    })
+    with pytest.raises(NoMarketDataError, match="stale"):
         _run_load(monkeypatch, tmp_path, frame, "2026-05-08")
 
 
@@ -134,3 +167,34 @@ def test_tz_aware_latest_bar_is_kept_at_the_cutoff(monkeypatch, tmp_path):
     out = _run_load(monkeypatch, tmp_path, frame, "2026-05-08")
     assert out["Close"].iloc[-1] == 101.5
     assert out["Date"].iloc[-1] == pd.Timestamp("2026-05-08")
+
+
+@pytest.mark.unit
+def test_the_snapshot_does_not_present_a_filled_price_as_reported(monkeypatch, tmp_path):
+    """Gap filling exists so indicators compute on a continuous series. The
+    verification snapshot is the one place a number must be what the vendor
+    reported, or the module built to stop invented prices supplies them."""
+    from tradingagents.dataflows import market_data_validator as mdv, stockstats_utils as su
+
+    frame = pd.DataFrame({
+        "Date": ["2026-05-06", "2026-05-07", "2026-05-08"],
+        "Open": [100.0, 104.5, ""],     # the latest bar has not settled
+        "High": [101.0, 105.5, ""],
+        "Low": [99.0, 103.5, ""],
+        "Close": [100.5, 105.0, 106.0],
+        "Volume": [1000000, 1000000, ""],
+    })
+    today = pd.Timestamp("2026-05-08 12:00")
+    monkeypatch.setattr(su, "get_config", lambda: {"data_cache_dir": str(tmp_path)})
+    monkeypatch.setattr(su.pd.Timestamp, "today", staticmethod(lambda: today))
+    cache = tmp_path / "AAPL-YFin-data.csv"
+    cache.write_text(frame.to_csv(index=False))
+    os.utime(cache, (today.timestamp(), today.timestamp()))
+    monkeypatch.setattr(su.yf, "download", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("should read the seeded cache")))
+
+    out = mdv.build_verified_market_snapshot("AAPL", "2026-05-08", 3)
+
+    row = out.split("Latest verified OHLCV row")[1].split("###")[0]
+    assert "104.50" not in row and "105.50" not in row  # the previous session's numbers
+    assert "106.00" in row  # the close the vendor did report

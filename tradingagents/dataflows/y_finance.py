@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from typing import Annotated
 
@@ -5,16 +6,24 @@ import pandas as pd
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
 
+from .date_window import withhold_live_profile
+from .errors import VendorError, VendorRateLimitError
 from .stockstats_utils import (
     StockstatsUtils,
     _assert_ohlcv_not_stale,
     _clean_dataframe,
     filter_financials_by_date,
     load_ohlcv,
+    raise_for_empty,
     yf_retry,
 )
 from .yf_pit_derivations import derive_pit_fundamentals
 from .symbol_utils import NoMarketDataError, normalize_symbol
+from .utils import vendor_reachable
+
+_YAHOO_HOST = "https://query2.finance.yahoo.com"
+
+logger = logging.getLogger(__name__)
 
 def get_YFin_data_online(
     symbol: Annotated[str, "ticker symbol of the company"],
@@ -39,9 +48,7 @@ def get_YFin_data_online(
     # instead of returning prose: the routing layer turns it into a single
     # unambiguous "no data" signal so the agent never fabricates a price.
     if data.empty:
-        raise NoMarketDataError(
-            symbol, canonical, f"no rows between {start_date} and {end_date}"
-        )
+        raise_for_empty(symbol, canonical, f"rows between {start_date} and {end_date}")
 
     # Remove timezone info from index for cleaner output
     if data.index.tz is not None:
@@ -186,10 +193,10 @@ def get_stock_stats_indicators_window(
         for date_str, value in date_values:
             ind_string += f"{date_str}: {value}\n"
 
-    except NoMarketDataError:
+    except VendorError:
         raise  # Unknown/delisted symbol — let the router emit the sentinel
     except Exception as e:
-        print(f"Error getting bulk stockstats data: {e}")
+        logger.warning("Bulk stockstats fetch failed, falling back per-day: %s", e)
         # Fallback to original implementation if bulk method fails
         ind_string = ""
         curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
@@ -261,13 +268,15 @@ def get_stockstats_indicator(
             indicator,
             curr_date,
         )
-    except NoMarketDataError:
+    except VendorError:
         raise  # Unknown/delisted symbol — let the router emit the sentinel
     except Exception as e:
-        print(
-            f"Error getting stockstats indicator data for indicator {indicator} on {curr_date}: {e}"
-        )
-        return ""
+        # An empty string renders as "2026-05-08: " in the indicator table, which
+        # reads as no value that day rather than a read that failed. Raise so the
+        # router can try the next vendor or report the series unavailable.
+        raise NoMarketDataError(
+            symbol, symbol, f"{indicator} could not be read for {curr_date}: {e}"
+        ) from e
 
     return str(indicator_value)
 
@@ -312,16 +321,6 @@ _YF_STABLE_FIELDS = (
 )
 
 
-def _is_historical_curr_date(curr_date):
-    """Return True iff curr_date is a parseable date strictly before today."""
-    if not curr_date:
-        return False
-    try:
-        curr_dt = datetime.strptime(curr_date, "%Y-%m-%d").date()
-    except (TypeError, ValueError):
-        return False
-    return curr_dt < datetime.now().date()
-
 
 def get_fundamentals(
     ticker: Annotated[str, "ticker symbol of the company"],
@@ -335,60 +334,38 @@ def get_fundamentals(
 ):
     """Get company fundamentals overview from yfinance.
 
-    yfinance's ``Ticker.info`` always returns *live* values (current price,
-    current market cap, TTM ratios computed off the trailing window ending
-    today) regardless of the requested ``curr_date``. When ``curr_date`` is
-    in the past this function returns:
-
-    * stable structural fields (name, sector, industry, beta) from
-      ``Ticker.info`` — these don't materially vary across historical dates;
-    * snapshot fields (Market Cap, P/E, TTM revenue/income/FCF, margins,
-      ROE/ROA, 52-week ranges, moving averages, dividend yield) reconstructed
-      PIT-correctly from ``Ticker.history``, the quarterly statements, and
-      ``get_shares_full`` — see :mod:`yf_pit_derivations`.
-
-    Forward-looking fields (Forward EPS, Forward P/E, PEG Ratio) are not
-    reconstructed: they are analyst projections, not historical fact, and
-    have no PIT-correct yfinance source.
-
-    A header note flags PIT mode so downstream agents can reason about the
-    reconstruction explicitly. For point-in-time financial *statements*, use
-    :func:`get_income_statement`, :func:`get_balance_sheet`, and
-    :func:`get_cashflow`, which already filter by fiscal period via
-    ``filter_financials_by_date``.
+    ``Ticker.info`` is a present-day snapshot with no historical vintage, so a
+    past ``curr_date`` never reads it (``date_window.withhold_live_profile``,
+    #1300) — not even name, sector or industry. Snapshot fields (Market Cap,
+    P/E, TTM revenue/income/FCF, margins, ROE/ROA, 52-week ranges, moving
+    averages, dividend yield) are instead reconstructed from ``Ticker.history``,
+    the quarterly statements and ``get_shares_full`` (see
+    :mod:`yf_pit_derivations`) and appended under the withheld notice.
+    Forward-looking fields (Forward EPS, Forward P/E, PEG Ratio) have no
+    point-in-time source and are omitted.
     """
     canonical = normalize_symbol(ticker)
+
+    # A past curr_date never reads the live ``Ticker.info`` — not even name,
+    # sector or industry (#1300). Instead of withholding everything, the
+    # snapshot fields are reconstructed point-in-time from dated statements
+    # and price bars and appended under the withheld notice.
+    withheld = withhold_live_profile(curr_date, canonical)
+    if withheld:
+        return withheld + _pit_reconstruction_section(canonical, curr_date)
+
     try:
         ticker_obj = yf.Ticker(canonical)
         info = yf_retry(lambda: ticker_obj.info)
 
         if not info:
-            raise NoMarketDataError(ticker, canonical, "no fundamentals returned")
+            raise_for_empty(ticker, canonical, "fundamentals")
 
-        is_historical = _is_historical_curr_date(curr_date)
-
-        lines = []
-
-        for label, key in _YF_STABLE_FIELDS:
-            value = info.get(key)
-            if value is not None:
-                lines.append(f"{label}: {value}")
-
-        derived: dict = {}
-        if is_historical:
-            try:
-                derived = derive_pit_fundamentals(ticker_obj, curr_date) or {}
-            except Exception:
-                derived = {}
-
-            for label, _key in _YF_LIVE_SNAPSHOT_FIELDS:
-                if label in derived:
-                    lines.append(f"{label}: {derived[label]}")
-        else:
-            for label, key in _YF_LIVE_SNAPSHOT_FIELDS:
-                value = info.get(key)
-                if value is not None:
-                    lines.append(f"{label}: {value}")
+        lines = [
+            f"{label}: {info[key]}"
+            for label, key in _YF_STABLE_FIELDS + _YF_LIVE_SNAPSHOT_FIELDS
+            if info.get(key) is not None
+        ]
 
         # yfinance returns a stub dict (e.g. {"trailingPegRatio": None}) for
         # unknown symbols, so `info` is truthy but every field is empty. Treat
@@ -398,30 +375,44 @@ def get_fundamentals(
             raise NoMarketDataError(ticker, canonical, "no fundamental fields returned")
 
         header = f"# Company Fundamentals for {canonical}\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        if is_historical:
-            num_derived = sum(1 for label, _ in _YF_LIVE_SNAPSHOT_FIELDS if label in derived)
-            header += (
-                f"# Point-in-time mode (curr_date={curr_date}): snapshot fields "
-                f"reconstructed\n"
-                f"#   from historical price bars, quarterly statements, and "
-                f"share-count series\n"
-                f"#   ({num_derived} of {len(_YF_LIVE_SNAPSHOT_FIELDS)} fields "
-                f"derived; missing entries\n"
-                f"#   indicate sparse data for this date).\n"
-                f"# Forward-looking analyst projections (Forward EPS, Forward "
-                f"P/E, PEG Ratio)\n"
-                f"#   are intentionally omitted — no PIT-correct source.\n"
-            )
-        header += "\n"
+        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 
         return header + "\n".join(lines)
 
-    except NoMarketDataError:
+    except VendorError:
         raise
     except Exception as e:
-        from tradingagents.dataflows.tool_errors import format_tool_error
-        return format_tool_error("get_fundamentals (yfinance)", ticker, e)
+        raise NoMarketDataError(ticker, canonical, f"fundamentals unavailable: {e}") from e
+
+
+def _pit_reconstruction_section(canonical: str, curr_date: str) -> str:
+    """Snapshot fields rebuilt from data dated on or before ``curr_date``.
+
+    Uses only ``Ticker.history``, the quarterly statements and the share-count
+    series (see :mod:`yf_pit_derivations`), never ``Ticker.info``. Forward-looking
+    fields (Forward EPS, Forward P/E, PEG Ratio) have no point-in-time source and
+    are omitted. Returns "" when nothing could be derived.
+    """
+    try:
+        derived = derive_pit_fundamentals(yf.Ticker(canonical), curr_date) or {}
+    except Exception as e:
+        logger.warning("PIT fundamentals reconstruction failed for %s: %s", canonical, e)
+        return ""
+    lines = [
+        f"{label}: {derived[label]}"
+        for label, _key in _YF_LIVE_SNAPSHOT_FIELDS
+        if label in derived
+    ]
+    if not lines:
+        return ""
+    return (
+        f"\n\n## Reconstructed point-in-time figures (as of {curr_date})\n"
+        f"# Derived from price bars, quarterly statements and share counts dated "
+        f"on or before {curr_date} ({len(lines)} of {len(_YF_LIVE_SNAPSHOT_FIELDS)} "
+        f"fields; missing entries mean sparse data). Forward-looking analyst "
+        f"projections are omitted — no point-in-time source.\n\n"
+        + "\n".join(lines)
+    )
 
 
 def get_balance_sheet(
@@ -442,22 +433,22 @@ def get_balance_sheet(
         data = filter_financials_by_date(data, curr_date)
 
         if data.empty:
-            raise NoMarketDataError(ticker, canonical, "no balance sheet data")
+            raise_for_empty(ticker, canonical, "balance sheet data")
 
         # Convert to CSV string for consistency with other functions
         csv_string = data.to_csv()
 
         # Add header information
         header = f"# Balance Sheet data for {canonical} ({freq})\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        header += _PERIOD_END_VINTAGE
 
         return header + csv_string
 
-    except NoMarketDataError:
+    except VendorError:
         raise
     except Exception as e:
-        from tradingagents.dataflows.tool_errors import format_tool_error
-        return format_tool_error("get_balance_sheet (yfinance)", ticker, e)
+        raise NoMarketDataError(ticker, canonical, f"balance sheet unavailable: {e}") from e
 
 
 def get_cashflow(
@@ -478,22 +469,22 @@ def get_cashflow(
         data = filter_financials_by_date(data, curr_date)
 
         if data.empty:
-            raise NoMarketDataError(ticker, canonical, "no cash flow data")
+            raise_for_empty(ticker, canonical, "cash flow data")
 
         # Convert to CSV string for consistency with other functions
         csv_string = data.to_csv()
 
         # Add header information
         header = f"# Cash Flow data for {canonical} ({freq})\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        header += _PERIOD_END_VINTAGE
 
         return header + csv_string
 
-    except NoMarketDataError:
+    except VendorError:
         raise
     except Exception as e:
-        from tradingagents.dataflows.tool_errors import format_tool_error
-        return format_tool_error("get_cashflow (yfinance)", ticker, e)
+        raise NoMarketDataError(ticker, canonical, f"cash flow unavailable: {e}") from e
 
 
 def get_income_statement(
@@ -514,26 +505,49 @@ def get_income_statement(
         data = filter_financials_by_date(data, curr_date)
 
         if data.empty:
-            raise NoMarketDataError(ticker, canonical, "no income statement data")
+            raise_for_empty(ticker, canonical, "income statement data")
 
         # Convert to CSV string for consistency with other functions
         csv_string = data.to_csv()
 
         # Add header information
         header = f"# Income Statement data for {canonical} ({freq})\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        header += _PERIOD_END_VINTAGE
 
         return header + csv_string
 
-    except NoMarketDataError:
+    except VendorError:
         raise
     except Exception as e:
-        from tradingagents.dataflows.tool_errors import format_tool_error
-        return format_tool_error("get_income_statement (yfinance)", ticker, e)
+        raise NoMarketDataError(ticker, canonical, f"income statement unavailable: {e}") from e
+
+
+# Rows are dated by the transaction, which is when the insider traded, not when
+# the market learned of it: a Form 4 is filed up to two business days later and
+# this vendor reports no filing date, so the most recent rows may not have been
+# public on the analysis date.
+_TRANSACTION_DATE_VINTAGE = (
+    "# Rows are dated by transaction date. A trade becomes public when its Form 4 "
+    "is filed, up to two business days later, so the newest rows may not have been "
+    "known on this date.\n\n"
+)
+
+
+# This vendor dates a statement by the period it covers, not by the day it was
+# filed, and carries no filing date to do better. A company files weeks after its
+# period ends, so a run dated in that gap can be served figures that were not yet
+# public. Say so rather than implying the stricter guarantee (SEC EDGAR, which
+# does carry filing dates, serves US filers as filed).
+_PERIOD_END_VINTAGE = (
+    "# Periods are cut at the fiscal period end; this vendor does not report "
+    "filing dates, so the most recent period may not have been published yet.\n\n"
+)
 
 
 def get_insider_transactions(
-    ticker: Annotated[str, "ticker symbol of the company"]
+    ticker: Annotated[str, "ticker symbol of the company"],
+    curr_date: Annotated[str | None, "only transactions on or before this date, yyyy-mm-dd"] = None,
 ):
     """Get insider transactions data from yfinance."""
     canonical = normalize_symbol(ticker)
@@ -544,17 +558,29 @@ def get_insider_transactions(
         # Empty is normal here (many valid symbols have no insider filings),
         # so report it plainly rather than treating the symbol as invalid.
         if data is None or data.empty:
+            if not vendor_reachable(_YAHOO_HOST):
+                raise VendorRateLimitError("Yahoo Finance is unreachable; insider filings were not retrieved")
             return f"No insider transactions reported for symbol '{canonical}'"
+
+        if curr_date:
+            traded = data["Start Date"]
+            kept = data[traded <= pd.Timestamp(curr_date)]
+            if kept.empty:
+                return (
+                    f"<insider transactions unavailable for {canonical} as of {curr_date}: "
+                    f"Yahoo serves recent transactions only (coverage starts {traded.min():%Y-%m-%d})>"
+                )
+            data = kept
 
         # Convert to CSV string for consistency with other functions
         csv_string = data.to_csv()
 
         # Add header information
         header = f"# Insider Transactions data for {canonical}\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        header += _TRANSACTION_DATE_VINTAGE
 
         return header + csv_string
 
     except Exception as e:
-        from tradingagents.dataflows.tool_errors import format_tool_error
-        return format_tool_error("get_insider_transactions (yfinance)", ticker, e)
+        raise NoMarketDataError(ticker, canonical, f"insider transactions unavailable: {e}") from e

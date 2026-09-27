@@ -10,6 +10,7 @@ from tradingagents.agents.schemas import TraderProposal, render_trader_proposal
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
+    get_portfolio_context_from_state,
 )
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
@@ -31,6 +32,7 @@ def create_trader(llm):
         # report is empty when the user did not select the market analyst, so
         # only offer it (and the grounding instruction) when it has content.
         market_report = (state["market_report"] or "").strip()
+        portfolio_context = get_portfolio_context_from_state(state)
 
         if market_report:
             grounding = (
@@ -50,6 +52,13 @@ def create_trader(llm):
                     "You are a trading agent analyzing market data to make investment decisions. "
                     "Based on your analysis, provide a specific recommendation to buy, sell, or hold. "
                     + grounding
+                    # Entry/stop are numeric price fields. Asking for concrete
+                    # levels invites a percentage ("15%"), which is not a price
+                    # and fails the structured parse (#1288).
+                    + "State entry price and stop-loss as absolute price levels in the "
+                    "instrument's quote currency (for example 189.5), never a percentage "
+                    "or a range; convert a percentage distance to the price level it "
+                    "implies, or omit the field if you cannot state a number. "
                     + NO_EXTERNAL_TOOLS
                     + get_language_instruction()
                 ),
@@ -60,8 +69,17 @@ def create_trader(llm):
                     f"Here is the research team's investment plan for {company_name}. "
                     f"{instrument_context}\n\n"
                     f"{report_section}"
+                    f"{portfolio_context}\n\n"
                     f"Proposed Investment Plan:\n{investment_plan}\n\n"
-                    f"Make an informed, strategic trading decision."
+                    "Make an informed, strategic trading decision.\n\n"
+                    "## Output\n\n"
+                    "Write these sections, in this order, starting with the action "
+                    "on its own line:\n\n"
+                    "- **Action**: exactly one of Buy / Hold / Sell. A research "
+                    "recommendation of Overweight is a Buy and Underweight is a Sell, "
+                    "sized by how strong the case is; conflict alone is not a Hold.\n"
+                    "- **Reasoning**: why, against the plan and the price structure\n"
+                    "- **Entry Price**, **Stop Loss**, **Position Sizing**: when you can state them"
                 ),
             },
         ]
