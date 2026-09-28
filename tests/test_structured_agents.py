@@ -493,20 +493,30 @@ class TestSentimentAnalystAgent:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("source", [
-    pytest.param(lambda: ResearchPlan.model_fields["recommendation"].description, id="ResearchPlan.recommendation"),
-    pytest.param(lambda: PortfolioDecision.model_fields["rating"].description, id="PortfolioDecision.rating"),
-    pytest.param(lambda: inspect.getsource(create_research_manager), id="research_manager prompt"),
-    pytest.param(lambda: inspect.getsource(create_portfolio_manager), id="portfolio_manager prompt"),
+@pytest.mark.parametrize("source, required", [
+    pytest.param(lambda: ResearchPlan.model_fields["recommendation"].description,
+                 "genuinely balanced", id="ResearchPlan.recommendation"),
+    pytest.param(lambda: inspect.getsource(create_research_manager),
+                 "genuinely balanced", id="research_manager prompt"),
+    pytest.param(lambda: inspect.getsource(create_portfolio_manager),
+                 "Be decisive", id="portfolio_manager prompt"),
+    pytest.param(lambda: PortfolioDecision.model_fields["rating"].description,
+                 None, id="PortfolioDecision.rating"),
 ])
-def test_conflict_alone_is_not_a_hold_trigger(source):
-    # The debate always contains conflicting arguments, so a Hold condition that
-    # conflict satisfies fires on every run and swallows directional calls
-    # (#1321). All four decision sites must state the same rule.
+def test_decision_sites_keep_the_forks_calibrated_hold_wording(source, required):
+    # Fork: upstream v0.5.x (#1321) rewrote these to "Choose Hold only when ...
+    # too thin to support a call; do not manufacture a direction". The
+    # 2026-09-27 prompt A/B (8 tickers, 17 runs/arm) showed that wording lifts
+    # the matrix PICK rate from 18% to 59% by turning conservative
+    # Underweight/Sell into Hold. The veto gate, tier stats and exit rules were
+    # calibrated on the pre-port wording, so it is kept until a deliberate
+    # experiment says otherwise. Change these only together.
     text = " ".join(source().split())
-    assert "conflict alone is not a reason to Hold" in text or \
-        "Conflicting arguments alone are not a reason to Hold" in text
-    assert "materially conflicting" not in text
+    if required:
+        assert required in text
+    for upstream_phrase in ("too thin to support a call", "manufacture a direction",
+                            "force a direction", "materially conflicting"):
+        assert upstream_phrase not in text
 
 
 @pytest.mark.unit

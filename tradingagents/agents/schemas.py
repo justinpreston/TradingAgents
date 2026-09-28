@@ -104,10 +104,9 @@ class ResearchPlan(BaseModel):
     recommendation: PortfolioRating = Field(
         description=(
             "The investment recommendation. Exactly one of Buy / Overweight / "
-            "Hold / Underweight / Sell. Conflicting arguments alone are not a "
-            "reason to Hold: commit to the stronger side, sized by how "
-            "decisively it wins. Choose Hold only when the evidence is still "
-            "balanced after weighing, or too thin to support a call."
+            "Hold / Underweight / Sell. Reserve Hold for situations where the "
+            "evidence on both sides is genuinely balanced; otherwise commit to "
+            "the side with the stronger arguments."
         ),
     )
     rationale: str = Field(
@@ -230,11 +229,7 @@ class PortfolioDecision(BaseModel):
     rating: PortfolioRating = Field(
         description=(
             "The final position rating. Exactly one of Buy / Overweight / Hold / "
-            "Underweight / Sell, picked based on the analysts' debate. "
-            "Conflicting arguments alone are not a reason to Hold: commit to the "
-            "stronger side, sized by how decisively it wins. Choose Hold only "
-            "when the evidence is still balanced after weighing, or too thin to "
-            "support a call."
+            "Underweight / Sell, picked based on the analysts' debate."
         ),
     )
     executive_summary: str = Field(

@@ -611,6 +611,14 @@ to re-check on every sync:
   `assert_analyst_grounding`; `graph/setup.py` — `persona_llms`, `risk_profile`.
 - `llm_clients/openai_client.py` (Copilot headers), `llm_clients/factory.py`
   (Copilot `reasoning_effort`).
+- Hold wording at the four decision sites (RM + PM prompts, `ResearchPlan` /
+  `PortfolioDecision` field descriptions) stays at the pre-port "be decisive /
+  reserve Hold for genuinely balanced" text. Upstream's #1321 wording tripled
+  the PICK rate in the 2026-09-27 A/B (18% → 59%, 8 tickers × 17 runs/arm) by
+  softening conservative Underweight/Sell to Hold. Pinned by
+  `tests/test_structured_agents.py::test_decision_sites_keep_the_forks_calibrated_hold_wording`.
+- PM `## Output` list must include **Price Target** / **Time Horizon** — without
+  them conservative PTs vanish and every PICK falls to Tier C.
 
 ---
 

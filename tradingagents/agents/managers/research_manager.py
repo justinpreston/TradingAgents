@@ -35,7 +35,7 @@ def create_research_manager(llm, risk_profile: str | None = None):
 - **Underweight**: Cautious view; recommend trimming exposure
 - **Sell**: Strong conviction in the bear thesis; recommend exiting or avoiding the position
 
-The debate always contains conflicting arguments; deciding which side is stronger is the job, so conflict alone is not a reason to Hold. Commit to the side with the stronger case, sized by how decisively it wins. Choose Hold only when the evidence is still balanced after that weighing, or too thin to support a call; do not manufacture a direction to appear decisive. Weigh the bull and bear cases on their merits, independent of which side spoke first or last.
+Commit to a clear stance whenever the debate's strongest arguments warrant one; reserve Hold for situations where the evidence on both sides is genuinely balanced.
 {risk_profile_block}
 ---
 
