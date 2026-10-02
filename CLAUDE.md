@@ -593,13 +593,26 @@ runs/matrix_2026-05-01_top25/
 
 ## Upstream sync (TauricResearch/TradingAgents)
 
-Remote `upstream`; synced through **v0.5.1** (2026-09-27, branch
+Remote `upstream`; synced through **v0.5.1** (v0.5.2 merged via PR #8) (2026-09-27, branch
 `port/upstream-v0.5.1`, merged tag-by-tag v0.4.0 → v0.5.0 → v0.5.1). Merge
 upstream a release tag at a time and run the full suite after each. Fork seams
 to re-check on every sync:
 
-- `dataflows/router.py` — Polygon registered in `VENDOR_LIST`/`VENDOR_METHODS`;
-  `PolygonError` falls through as "unavailable".
+- `dataflows/router.py` — Polygon registered in `VENDOR_METHODS` for bars,
+  indicators, `get_fundamentals` (overview), news; **not** for the three
+  statements (sec_edgar/alpha_vantage/yfinance only). `PolygonError` falls
+  through as "unavailable".
+- `default_config.py` — `data_vendors.fundamental_data = "sec_edgar,yfinance"`
+  (matches upstream again) and `tool_vendors.get_fundamentals = "polygon,yfinance"`
+  (fork; upstream has no overview vendor besides yfinance/alpha_vantage).
+- `dataflows/vendors/sec_edgar.py` — upstream's statements plus fork additions:
+  `_pace()` rate limiter, `EdgarNotFoundError`, `_cached_json(persist=)`,
+  `quarterly_income_series()`, `ttm_snapshot()`, and the extra
+  `RevenueFromContractWithCustomerIncludingAssessedTax` revenue tag.
+- `dataflows/vendors/polygon/finance.py::get_fundamentals` — takes its
+  filing-derived fields from `sec_edgar.ttm_snapshot()`; no Polygon financials.
+- `screener/fundamentals.py` — EDGAR-backed `fetch_quarterly_financials`;
+  report dicts are `{end, filed, revenue, gross_profit, operating_income}`.
 - `dataflows/vendors/yahoo/fundamentals.py::get_fundamentals` — past dates get
   upstream's withheld notice (#1300) **plus** the fork's PIT reconstruction.
 - `dataflows/vendors/yahoo/ohlcv.py::load_ohlcv` — Polygon bar dispatch.
@@ -630,6 +643,7 @@ to re-check on every sync:
 
 # Required env vars (in .env at repo root)
 POLYGON_API_KEY=...        # mandatory for screener + options overlay
+SEC_EDGAR_USER_AGENT=...   # optional: "Your Name you@example.com" (SEC asks callers to identify themselves)
 OPENAI_API_KEY=...         # OR any other supported LLM provider:
 ANTHROPIC_API_KEY=...      # (GOOGLE/XAI/DEEPSEEK/DASHSCOPE/ZHIPU/OPENROUTER)
 
@@ -736,6 +750,25 @@ defaults (polygon, alpha_vantage, yfinance). `tool_vendors` overrides at the
 individual tool level (e.g. `get_insider_transactions` routes to
 `yfinance,alpha_vantage` because Polygon free tier lacks insider data).
 `dataflows/config.py::set_config()` wires this at graph construction time.
+
+**Fundamentals come from SEC EDGAR, not Polygon** (changed 2026-10-02; Polygon's
+`/vX/reference/financials` is retired — sunset 2026-10-09, 410 in the brownout —
+and its `/stocks/financials/v1/...` successors return 403 on this plan, so do
+not reintroduce either). Statements: `data_vendors.fundamental_data =
+"sec_edgar,yfinance"` (EDGAR as filed, point-in-time by filing date).
+Overview: `tool_vendors.get_fundamentals = "polygon,yfinance"` — Polygon
+reference data + bars, with every filing-derived field (TTM revenue / margins /
+EPS / OCF, latest balance sheet) from `sec_edgar.ttm_snapshot()`; a ticker EDGAR
+does not cover (ADR, new IPO) or an EDGAR outage raises so the router falls to
+yfinance. The screener's quarterly series is
+`sec_edgar.quarterly_income_series()` (8 consecutive quarters; Q4 derived as
+annual − Q1..Q3 where only the 10-K reports it; never bridges a gap). EDGAR is
+paced process-wide at ~8 req/s (`sec_edgar._pace`, SEC limit is 10) and always
+sends `SEC_EDGAR_USER_AGENT` (default placeholder works). Screener signals are
+cached 7 days under the `fundamentals_edgar_v1` namespace (the old Polygon
+`fundamentals` namespace is never read). A failed EDGAR request raises
+`VendorUnavailableError` (orchestrator marks the run partial); only "no
+coverage" is `insufficient_data`.
 
 **Structured output**: Research Manager, Trader, and Portfolio Manager use
 Pydantic schemas (`agents/schemas.py`) with provider-native structured output
@@ -943,6 +976,9 @@ feeding a run artifact — don't replace those with the MCP. Rough split:
 
 ## Don'ts
 
+- ❌ Don't call Polygon `/vX/reference/financials` (retired) or its 403-gated
+  successors; fundamentals are SEC EDGAR (`dataflows/vendors/sec_edgar.py`).
+  Don't put a real email in the repo for `SEC_EDGAR_USER_AGENT`.
 - ❌ Don't add new dependencies casually — `requirements.txt` is intentionally
   minimal (`.` for editable). Heavy deps go in `pyproject.toml::dependencies`.
 - ❌ Don't commit anything under `runs/` — it's all gitignored for a reason.
