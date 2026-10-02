@@ -207,6 +207,26 @@ def test_the_revenue_tag_may_change_over_the_history(monkeypatch, tmp_path):
     assert len(rows) == 8 and rows[0]["revenue"] == 120 and rows[-1]["revenue"] == 200
 
 
+def test_a_bank_reads_revenue_net_of_interest_expense(monkeypatch, tmp_path):
+    """JPM, WFC, GS and MS tag their top line only as RevenuesNetOfInterestExpense;
+    without it every large bank screened as insufficient_data."""
+    facts = _facts(RevenuesNetOfInterestExpense=("USD", REVENUE))
+    _serve(monkeypatch, tmp_path, {"0000000123": facts})
+    rows = sec_edgar.quarterly_income_series("ACME", "2026-03-01")
+    assert len(rows) == 8 and rows[-1]["revenue"] == 200
+
+
+def test_net_revenue_outranks_a_contract_revenue_component(monkeypatch, tmp_path):
+    """A filer tagging both (AXP) reports contract revenue as one component of
+    its net revenue, so the net figure is the top line."""
+    component = [dict(f, val=f["val"] // 2) for f in REVENUE]
+    facts = _facts(RevenuesNetOfInterestExpense=("USD", REVENUE),
+                   RevenueFromContractWithCustomerExcludingAssessedTax=("USD", component))
+    _serve(monkeypatch, tmp_path, {"0000000123": facts})
+    rows = sec_edgar.quarterly_income_series("ACME", "2026-03-01")
+    assert rows[-1]["revenue"] == 200
+
+
 def test_a_filer_that_stopped_reporting_has_no_coverage(edgar):
     assert sec_edgar.quarterly_income_series("ACME", "2028-01-01") == []
 

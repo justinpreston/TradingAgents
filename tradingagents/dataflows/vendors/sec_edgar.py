@@ -57,7 +57,7 @@ _STATEMENTS: dict[str, list[tuple[str, tuple[str, ...]]]] = {
     "income_statement": [
         ("Revenue", ("RevenueFromContractWithCustomerExcludingAssessedTax",
                      "RevenueFromContractWithCustomerIncludingAssessedTax", "Revenues",
-                     "SalesRevenueNet")),
+                     "SalesRevenueNet", "RevenuesNetOfInterestExpense")),
         ("Cost of Revenue", ("CostOfRevenue", "CostOfGoodsAndServicesSold")),
         ("Gross Profit", ("GrossProfit",)),
         ("Operating Income", ("OperatingIncomeLoss",)),
@@ -320,7 +320,12 @@ _MAX_QUARTER_GAP = 120
 # A series whose latest quarter ended longer ago than this has stopped reporting.
 _STALE_AFTER_DAYS = 420
 
+# Banks and brokers (JPM, WFC, GS, MS) report their top line only as revenue net
+# of interest expense; a filer that tags it uses it as the total, while its
+# contract-revenue tag (AXP's discount revenue) is just one component. So it
+# comes first.
 _REVENUE_TAGS = (
+    "RevenuesNetOfInterestExpense",
     "RevenueFromContractWithCustomerExcludingAssessedTax",
     "RevenueFromContractWithCustomerIncludingAssessedTax",
     "Revenues",
