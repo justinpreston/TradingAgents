@@ -31,7 +31,7 @@ from typing import Any
 
 import requests
 
-from tradingagents.dataflows.errors import VendorError, VendorRateLimitError
+from tradingagents.dataflows.errors import VendorError, VendorUnavailableError
 
 API_BASE_URL = "https://api.polygon.io"
 
@@ -49,13 +49,13 @@ class PolygonError(VendorError):
     taxonomy so generic ``except VendorError`` handlers (if any are added
     later) catch Polygon failures too. The vendor router in ``interface.py``
     catches ``(PolygonRateLimitError, PolygonError)`` explicitly *before*
-    the generic ``VendorRateLimitError``/``VendorNotConfiguredError``
+    the generic ``VendorUnavailableError``/``VendorNotConfiguredError``
     clauses, so this ancestry change is purely additive — existing
     ``except PolygonError`` call sites are unaffected.
     """
 
 
-class PolygonRateLimitError(PolygonError, VendorRateLimitError):
+class PolygonRateLimitError(PolygonError, VendorUnavailableError):
     """Raised when Polygon returns 429 or signals rate limit exhaustion.
 
     Mirrors :class:`AlphaVantageRateLimitError` so the vendor router can
@@ -282,7 +282,24 @@ def _parse_retry_after(value: str | None) -> float | None:
     return max(0.0, delta)
 
 
-def _make_request(
+def _make_request(path: str, params: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+    """:func:`_make_request_raw` with the API key kept out of every error.
+
+    The key travels as the ``apiKey`` query parameter, and requests quotes the
+    full URL in connection, timeout and HTTP errors, so a failure message would
+    otherwise carry it into tool output, agent prompts, state files and logs
+    (upstream does the same for its own vendors, #1324).
+    """
+    try:
+        return _make_request_raw(path, params, **kwargs)
+    except PolygonError as exc:
+        key = os.getenv("POLYGON_API_KEY")
+        if key and key in str(exc):
+            raise type(exc)(str(exc).replace(key, "***")) from None
+        raise
+
+
+def _make_request_raw(
     path: str,
     params: dict[str, Any] | None = None,
     *,

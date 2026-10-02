@@ -546,6 +546,6 @@ def get_indicators(
     return get_stock_stats_indicators_window(
         symbol=symbol,
         indicator=indicator,
-        curr_date=curr_date,
+        as_of_date=curr_date,
         look_back_days=look_back_days,
     )

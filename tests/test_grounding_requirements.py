@@ -55,6 +55,7 @@ _NOT_AGENTS = {
     "tradingagents.agents.state",
     "tradingagents.agents.structured",
     "tradingagents.agents.tools",
+    "tradingagents.agents.analysts.turn",   # the shared tool-turn helper itself
 }
 
 
@@ -86,6 +87,10 @@ def _has_bind_tools_call(tree: ast.AST) -> bool:
             continue
         func = node.func
         if isinstance(func, ast.Attribute) and func.attr == "bind_tools":
+            return True
+        # Upstream v0.5.2: analysts call take_turn(prompt, llm, tools, ...),
+        # which binds the tools (agents/analysts/turn.py).
+        if isinstance(func, ast.Name) and func.id == "take_turn":
             return True
     return False
 

@@ -1,19 +1,16 @@
 import logging
 import os
-import time
 
 import pandas as pd
 import yfinance as yf
-from yfinance.exceptions import YFRateLimitError
 
 from tradingagents.dataflows.config import get_config
-from tradingagents.dataflows.errors import NoMarketDataError, VendorRateLimitError
-from tradingagents.dataflows.net import vendor_reachable
+from tradingagents.dataflows.errors import NoMarketDataError
+from tradingagents.dataflows.files import replace_file
 from tradingagents.dataflows.symbols import normalize_symbol, safe_ticker_component
+from tradingagents.dataflows.vendors.yahoo.common import raise_for_empty, yf_retry
 
 logger = logging.getLogger(__name__)
-
-YAHOO_HOST = "https://query2.finance.yahoo.com"
 
 # A vendor's latest OHLCV row this many calendar days before the requested date
 # is treated as stale. Generous enough to span long holiday weekends, tight
@@ -25,36 +22,6 @@ MAX_OHLCV_STALE_DAYS = 10
 # up today's close soon after it publishes, long enough that a day with no bar
 # at all (weekend, holiday) cannot trigger a download on every call.
 OHLCV_CACHE_TTL_SECONDS = 900
-
-
-def raise_for_empty(symbol: str, canonical: str, what: str) -> None:
-    """Report an empty Yahoo result as an absence, or as an outage if it is one.
-
-    yfinance returns an empty frame for a failed request rather than raising, so
-    without this a Yahoo outage reads as "this symbol has no {what}".
-    """
-    if not vendor_reachable(YAHOO_HOST):
-        raise VendorRateLimitError(f"Yahoo Finance is unreachable; no {what} was retrieved")
-    raise NoMarketDataError(symbol, canonical, f"no {what}")
-
-
-def yf_retry(func, max_retries=3, base_delay=2.0):
-    """Execute a yfinance call with exponential backoff on rate limits.
-
-    yfinance raises YFRateLimitError on HTTP 429 responses but does not
-    retry them internally. This wrapper adds retry logic specifically
-    for rate limits. Other exceptions propagate immediately.
-    """
-    for attempt in range(max_retries + 1):
-        try:
-            return func()
-        except YFRateLimitError:
-            if attempt < max_retries:
-                delay = base_delay * (2 ** attempt)
-                logger.warning(f"Yahoo Finance rate limited, retrying in {delay:.0f}s (attempt {attempt + 1}/{max_retries})")
-                time.sleep(delay)
-            else:
-                raise
 
 
 def _ensure_date_column(data: pd.DataFrame) -> pd.DataFrame:
@@ -87,7 +54,7 @@ def _local_midnight(value) -> pd.Timestamp:
 
 def _normalize_dates(dates) -> pd.Series:
     """Parse to naive, midnight-normalized dates so tz-aware or intraday
-    timestamps compare correctly against the naive ``curr_date`` cutoff (#1201).
+    timestamps compare correctly against the naive ``as_of_date`` cutoff (#1201).
 
     Normalized per element: 5 years of yfinance bars span daylight-saving
     changes (and cache CSVs round-trip the offsets as strings), so the series can
@@ -177,13 +144,13 @@ def _coerce_ohlcv_dates(data: pd.DataFrame) -> pd.Series:
 
 def _assert_ohlcv_not_stale(
     data: pd.DataFrame,
-    curr_date: str,
+    as_of_date: str,
     symbol: str,
     canonical: str | None = None,
     *,
     max_stale_days: int = MAX_OHLCV_STALE_DAYS,
 ) -> None:
-    """Reject OHLCV whose latest row is far older than curr_date.
+    """Reject OHLCV whose latest row is far older than as_of_date.
 
     Raises NoMarketDataError (with a stale-specific detail) so the router treats
     it like any other "no usable data from this vendor" — try the next vendor,
@@ -194,7 +161,7 @@ def _assert_ohlcv_not_stale(
     """
     if data is None or data.empty:
         return
-    requested = pd.to_datetime(curr_date, errors="coerce")
+    requested = pd.to_datetime(as_of_date, errors="coerce")
     if pd.isna(requested):
         return
     requested = requested.normalize()
@@ -212,7 +179,7 @@ def _assert_ohlcv_not_stale(
         )
 
 
-def _cache_is_fresh(data_file, curr_date_dt, now) -> bool:
+def _cache_is_fresh(data_file, as_of_dt, now) -> bool:
     """Whether the symbol's cached download can serve this request.
 
     The file holds the download made on the day it was written, so it serves
@@ -224,17 +191,17 @@ def _cache_is_fresh(data_file, curr_date_dt, now) -> bool:
     written = pd.Timestamp.fromtimestamp(os.path.getmtime(data_file))
     if written.date() != now.date():
         return False
-    return curr_date_dt.date() < now.date() or (now - written).total_seconds() <= OHLCV_CACHE_TTL_SECONDS
+    return as_of_dt.date() < now.date() or (now - written).total_seconds() <= OHLCV_CACHE_TTL_SECONDS
 
 
-def load_ohlcv(symbol: str, curr_date: str, fill_gaps: bool = True) -> pd.DataFrame:
+def load_ohlcv(symbol: str, as_of_date: str, fill_gaps: bool = True) -> pd.DataFrame:
     """Fetch OHLCV data with caching, filtered to prevent look-ahead bias.
 
     Dispatches on the configured ``core_stock_apis`` vendor: ``polygon`` uses
-    Polygon's split-adjusted aggregates endpoint (falling back to yfinance on
-    failure), ``yfinance`` uses ``yf.download``. Downloads 5 years of data up
-    to today and caches one file per ``(symbol, vendor)``. Rows after
-    curr_date are filtered out so backtests never see future prices.
+    Polygon's split-adjusted aggregates endpoint (falling back to Yahoo on
+    failure), ``yfinance`` uses Yahoo. Downloads 5 years of data up to today
+    and caches one file per ``(symbol, vendor)``. Rows after as_of_date are
+    filtered out so backtests never see future prices.
 
     ``fill_gaps`` carries prices forward over gaps so indicators compute on a
     continuous series. Pass ``False`` to read the values as the vendor reported
@@ -247,7 +214,7 @@ def load_ohlcv(symbol: str, curr_date: str, fill_gaps: bool = True) -> pd.DataFr
     safe_symbol = safe_ticker_component(canonical)
 
     config = get_config()
-    curr_date_dt = pd.to_datetime(curr_date).normalize()
+    as_of_dt = pd.to_datetime(as_of_date).normalize()
 
     # Determine vendor for bars. Tool-level override takes precedence, then
     # the core_stock_apis category.
@@ -262,8 +229,8 @@ def load_ohlcv(symbol: str, curr_date: str, fill_gaps: bool = True) -> pd.DataFr
     start_date = now - pd.DateOffset(years=5)
     start_str = start_date.strftime("%Y-%m-%d")
     # yfinance ``end`` is EXCLUSIVE; request tomorrow so today's row is included
-    # when curr_date is the current day (#986). Look-ahead is still prevented by
-    # the curr_date filter below.
+    # when as_of_date is the current day (#986). Look-ahead is still prevented by
+    # the as_of_date filter below.
     end_str = (now + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
 
     os.makedirs(config["data_cache_dir"], exist_ok=True)
@@ -284,7 +251,7 @@ def load_ohlcv(symbol: str, curr_date: str, fill_gaps: bool = True) -> pd.DataFr
         if (
             not cached.empty
             and "Close" in cached.columns
-            and _cache_is_fresh(data_file, curr_date_dt, now)
+            and _cache_is_fresh(data_file, as_of_dt, now)
         ):
             data = cached
 
@@ -293,46 +260,40 @@ def load_ohlcv(symbol: str, curr_date: str, fill_gaps: bool = True) -> pd.DataFr
         if primary_vendor == "polygon":
             # Polygon uses its own ticker convention, not Yahoo's, so feed it the
             # raw symbol (not the Yahoo-normalized ``canonical``). A hard failure
-            # or an empty payload both fall back to yfinance before we give up.
+            # or an empty payload both fall back to Yahoo before we give up.
             try:
-                downloaded = _load_ohlcv_polygon(symbol, curr_date_dt)
+                downloaded = _load_ohlcv_polygon(symbol, as_of_dt)
             except Exception as exc:
                 logger.warning(
                     f"Polygon bar fetch failed for {symbol} ({exc}); falling back to yfinance"
                 )
                 downloaded = None
             if downloaded is None or downloaded.empty or "Close" not in downloaded.columns:
-                downloaded = yf_retry(lambda: yf.download(
-                    canonical,
-                    start=start_str,
-                    end=end_str,
-                    multi_level_index=False,
-                    progress=False,
-                    auto_adjust=True,
-                ))
-                downloaded = downloaded.reset_index()
-        else:
-            downloaded = yf_retry(lambda: yf.download(
-                canonical,
+                downloaded = None
+            else:
+                downloaded = _ensure_date_column(downloaded)
+        if downloaded is None:
+            # yf.download catches every error, a rate limit included, and returns
+            # an empty frame. Ticker.history raises the rate limit, so it is retried.
+            downloaded = yf_retry(lambda: yf.Ticker(canonical).history(
                 start=start_str,
                 end=end_str,
-                multi_level_index=False,
-                progress=False,
                 auto_adjust=True,
+                actions=False,
             ))
-            downloaded = downloaded.reset_index()
-
-        downloaded = _ensure_date_column(downloaded)
+            if downloaded is None:
+                raise_for_empty(symbol, canonical, "price rows")
+            downloaded = _ensure_date_column(downloaded.reset_index())
         # Only cache real data — never persist an empty frame.
         if downloaded.empty or "Close" not in downloaded.columns:
             raise_for_empty(symbol, canonical, "price rows")
-        downloaded.to_csv(data_file, index=False, encoding="utf-8")
+        replace_file(data_file, lambda temp: downloaded.to_csv(temp, index=False, encoding="utf-8"))
         data = downloaded
 
     data = _clean_dataframe(data)
 
-    # Filter to curr_date to prevent look-ahead bias in backtesting.
-    data = data[data["Date"] <= curr_date_dt]
+    # Filter to as_of_date to prevent look-ahead bias in backtesting.
+    data = data[data["Date"] <= as_of_dt]
 
     # A closeless newest bar is an unsettled session, not a symbol without data.
     # _fill_price_gaps below drops it, here and mid-series alike, so the frame
@@ -355,9 +316,9 @@ def load_ohlcv(symbol: str, curr_date: str, fill_gaps: bool = True) -> pd.DataFr
     # a filled cell is the previous session's price under this session's date.
     data = _fill_price_gaps(data) if fill_gaps else data.dropna(subset=["Close"]).copy()
 
-    # Reject a stale frame (latest row far older than curr_date) rather than
+    # Reject a stale frame (latest row far older than as_of_date) rather than
     # feeding year-old prices into indicators (#1021).
-    _assert_ohlcv_not_stale(data, curr_date, symbol, canonical)
+    _assert_ohlcv_not_stale(data, as_of_date, symbol, canonical)
 
     return data
 

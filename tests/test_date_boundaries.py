@@ -4,6 +4,8 @@ requested end_date (and the current day) is actually included.
 Regressions for #986 (current-day OHLCV excluded) and #987 (requested end_date
 row omitted).
 """
+from types import SimpleNamespace
+
 import pandas as pd
 import pytest
 
@@ -50,7 +52,7 @@ def test_load_ohlcv_requests_inclusive_end(monkeypatch, tmp_path):
     })
     captured = {}
 
-    def fake_download(symbol, start, end, **kwargs):
+    def fake_history(start, end, **kwargs):
         captured["end"] = end
         idx = pd.to_datetime([pd.Timestamp.today().normalize()])
         return pd.DataFrame(
@@ -59,7 +61,7 @@ def test_load_ohlcv_requests_inclusive_end(monkeypatch, tmp_path):
             index=idx,
         )
 
-    monkeypatch.setattr(ohlcv.yf, "download", fake_download)
+    monkeypatch.setattr(ohlcv.yf, "Ticker", lambda symbol: SimpleNamespace(history=fake_history))
     today = pd.Timestamp.today().strftime("%Y-%m-%d")
     ohlcv.load_ohlcv("AAPL", today)
 
