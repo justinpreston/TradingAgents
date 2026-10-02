@@ -13,8 +13,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from tradingagents.dataflows import polygon_common as pc
-from tradingagents.dataflows.polygon_common import (
+from tradingagents.dataflows.vendors.polygon import common as pc
+from tradingagents.dataflows.vendors.polygon.common import (
     PolygonRateLimitError,
     _parse_retry_after,
     _wait_for_slot,
@@ -207,7 +207,7 @@ class TestMakeRequestRetry:
         )
 
     def test_404_is_not_retried(self):
-        from tradingagents.dataflows.polygon_common import PolygonNotFoundError
+        from tradingagents.dataflows.vendors.polygon.common import PolygonNotFoundError
         session = MagicMock()
         session.get.return_value = _make_response(404, text="not found")
         with patch.object(pc, "_get_session", return_value=session):
@@ -234,7 +234,7 @@ class TestRateLimitPropagation:
 
     def test_universe_enrich_swallows_404(self):
         from tradingagents.screener.universe import _enrich_with_reference
-        from tradingagents.dataflows.polygon_common import PolygonNotFoundError
+        from tradingagents.dataflows.vendors.polygon.common import PolygonNotFoundError
 
         with patch(
             "tradingagents.screener.universe._make_request",
@@ -254,7 +254,7 @@ class TestRateLimitPropagation:
 
     def test_fundamentals_swallows_404(self):
         from tradingagents.screener.fundamentals import fetch_quarterly_financials
-        from tradingagents.dataflows.polygon_common import PolygonNotFoundError
+        from tradingagents.dataflows.vendors.polygon.common import PolygonNotFoundError
 
         with patch(
             "tradingagents.screener.fundamentals.paginated_results",

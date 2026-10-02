@@ -76,7 +76,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts._env import load_repo_env  # noqa: E402
 
-from tradingagents.dataflows.utils import resolve_trade_date  # noqa: E402
+from tradingagents.dataflows.date_window import resolve_trade_date  # noqa: E402
 
 load_repo_env()
 

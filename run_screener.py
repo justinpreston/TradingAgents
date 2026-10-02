@@ -35,7 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parent
 load_dotenv(REPO_ROOT / ".env")
 sys.path.insert(0, str(REPO_ROOT))
 
-from tradingagents.dataflows.polygon_common import recommended_min_interval_for_tier  # noqa: E402
+from tradingagents.dataflows.vendors.polygon.common import recommended_min_interval_for_tier  # noqa: E402
 from tradingagents.screener.orchestrator import run_screener  # noqa: E402
 from tradingagents.screener.output import (  # noqa: E402
     write_json,

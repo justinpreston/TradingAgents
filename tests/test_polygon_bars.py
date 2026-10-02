@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 import pytest
 
-from tradingagents.dataflows.polygon_bars import fetch_daily_bars, occ_ticker
-from tradingagents.dataflows.polygon_common import (
+from tradingagents.dataflows.vendors.polygon.bars import fetch_daily_bars, occ_ticker
+from tradingagents.dataflows.vendors.polygon.common import (
     PolygonAuthError,
     PolygonError,
     PolygonRateLimitError,
@@ -45,7 +45,7 @@ def test_occ_ticker_fractional_strike():
 
 def test_fetch_daily_bars_success():
     with patch(
-        "tradingagents.dataflows.polygon_bars._make_request",
+        "tradingagents.dataflows.vendors.polygon.bars._make_request",
         return_value={"results": [{"t": 1, "o": 1, "h": 2, "l": 0.5, "c": 1.5}]},
     ) as mock_req:
         bars, err = fetch_daily_bars("AAPL", "2026-01-01", "2026-01-31")
@@ -57,14 +57,14 @@ def test_fetch_daily_bars_success():
 
 
 def test_fetch_daily_bars_empty_results():
-    with patch("tradingagents.dataflows.polygon_bars._make_request", return_value={"results": []}):
+    with patch("tradingagents.dataflows.vendors.polygon.bars._make_request", return_value={"results": []}):
         bars, err = fetch_daily_bars("AAPL", "2026-01-01", "2026-01-31")
     assert err is None
     assert bars == []
 
 
 def test_fetch_daily_bars_missing_results_key():
-    with patch("tradingagents.dataflows.polygon_bars._make_request", return_value={}):
+    with patch("tradingagents.dataflows.vendors.polygon.bars._make_request", return_value={}):
         bars, err = fetch_daily_bars("AAPL", "2026-01-01", "2026-01-31")
     assert err is None
     assert bars == []
@@ -72,7 +72,7 @@ def test_fetch_daily_bars_missing_results_key():
 
 def test_fetch_daily_bars_auth_error_403():
     with patch(
-        "tradingagents.dataflows.polygon_bars._make_request",
+        "tradingagents.dataflows.vendors.polygon.bars._make_request",
         side_effect=PolygonAuthError("Polygon auth failed for /x: 403 NOT_AUTHORIZED"),
     ):
         bars, err = fetch_daily_bars("AAPL", "2026-01-01", "2026-01-31")
@@ -82,7 +82,7 @@ def test_fetch_daily_bars_auth_error_403():
 
 def test_fetch_daily_bars_auth_error_401():
     with patch(
-        "tradingagents.dataflows.polygon_bars._make_request",
+        "tradingagents.dataflows.vendors.polygon.bars._make_request",
         side_effect=PolygonAuthError("Polygon auth failed for /x: 401 unauthorized"),
     ):
         bars, err = fetch_daily_bars("AAPL", "2026-01-01", "2026-01-31")
@@ -92,7 +92,7 @@ def test_fetch_daily_bars_auth_error_401():
 
 def test_fetch_daily_bars_rate_limit_exhausted():
     with patch(
-        "tradingagents.dataflows.polygon_bars._make_request",
+        "tradingagents.dataflows.vendors.polygon.bars._make_request",
         side_effect=PolygonRateLimitError("rate limit hit after 6 attempts"),
     ):
         bars, err = fetch_daily_bars("AAPL", "2026-01-01", "2026-01-31")
@@ -102,7 +102,7 @@ def test_fetch_daily_bars_rate_limit_exhausted():
 
 def test_fetch_daily_bars_generic_error():
     with patch(
-        "tradingagents.dataflows.polygon_bars._make_request",
+        "tradingagents.dataflows.vendors.polygon.bars._make_request",
         side_effect=PolygonError("transient 500"),
     ):
         bars, err = fetch_daily_bars("AAPL", "2026-01-01", "2026-01-31")

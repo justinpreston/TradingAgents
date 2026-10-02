@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Callable
 
-from tradingagents.dataflows.polygon_common import (
+from tradingagents.dataflows.vendors.polygon.common import (
     PolygonRateLimitError,
     min_request_interval,
 )
@@ -54,7 +54,7 @@ from tradingagents.screener.universe import (
 log = logging.getLogger(__name__)
 
 
-from tradingagents.dataflows.polygon_common import recommended_min_interval_for_tier as _recommended_min_interval_for_tier
+from tradingagents.dataflows.vendors.polygon.common import recommended_min_interval_for_tier as _recommended_min_interval_for_tier
 
 DEFAULT_MIN_REQUEST_INTERVAL_S = _recommended_min_interval_for_tier()
 

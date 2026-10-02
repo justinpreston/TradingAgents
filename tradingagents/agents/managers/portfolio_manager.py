@@ -10,12 +10,13 @@ back gracefully to free-text generation.
 
 from __future__ import annotations
 
-from tradingagents.agents.schemas import PortfolioDecision, render_pm_decision
-from tradingagents.agents.utils.agent_utils import (
+from tradingagents.agents.context import (
     get_instrument_context_from_state,
     get_language_instruction,
+    get_portfolio_context_from_state,
 )
-from tradingagents.agents.utils.structured import (
+from tradingagents.agents.schemas import PortfolioDecision, render_pm_decision
+from tradingagents.agents.structured import (
     NO_EXTERNAL_TOOLS,
     bind_structured,
     invoke_structured_or_freetext,
@@ -35,6 +36,7 @@ def create_portfolio_manager(llm, risk_profile: str | None = None):
 
     def portfolio_manager_node(state) -> dict:
         instrument_context = get_instrument_context_from_state(state)
+        portfolio_context = get_portfolio_context_from_state(state)
 
         history = state["risk_debate_state"]["history"]
         risk_debate_state = state["risk_debate_state"]
@@ -51,6 +53,8 @@ def create_portfolio_manager(llm, risk_profile: str | None = None):
         prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
 
 {instrument_context}
+
+{portfolio_context}
 
 ---
 
@@ -71,6 +75,16 @@ def create_portfolio_manager(llm, risk_profile: str | None = None):
 ---
 
 Be decisive and ground every conclusion in specific evidence from the analysts.
+
+## Output
+
+Write these sections, in this order, starting with the rating on its own line:
+
+- **Rating**: exactly one of Buy / Overweight / Hold / Underweight / Sell
+- **Executive Summary**: the call and how to act on it
+- **Investment Thesis**: the evidence that decided it, and what would change it
+- **Price Target**: one price in the quote currency that the thesis supports over the time horizon, when you can ground one in the analysts' levels
+- **Time Horizon**: the holding period the call is for, e.g. 3-6 months
 
 {NO_EXTERNAL_TOOLS}{get_language_instruction()}"""
 

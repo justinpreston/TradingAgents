@@ -29,7 +29,7 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(REPO_ROOT / ".env")
 
-from tradingagents.dataflows.polygon_common import _make_request, PolygonError  # noqa: E402
+from tradingagents.dataflows.vendors.polygon.common import _make_request, PolygonError  # noqa: E402
 
 DEFAULT_POSITIONS = REPO_ROOT / "runs" / "portfolio" / "positions.json"
 

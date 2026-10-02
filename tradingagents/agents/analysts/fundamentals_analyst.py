@@ -3,21 +3,29 @@ import os
 from langchain_core.messages import ToolMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-from tradingagents.agents.utils.agent_utils import (
+from tradingagents.agents.context import get_instrument_context_from_state, get_language_instruction
+from tradingagents.agents.tools import (
     get_balance_sheet,
     get_cashflow,
     get_fundamentals,
     get_income_statement,
     get_insider_transactions,
-    get_instrument_context_from_state,
-    get_language_instruction,
 )
-from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.tool_errors import (
     build_data_gaps_section,
     extract_tool_errors,
 )
 
+# The tools this analyst is offered; its tool node is built from the same tuple.
+# Fork: the node binds a subset when TRADINGAGENTS_DISABLE_INSIDER_TXNS is set;
+# the tool node keeps the full tuple, which is a superset of any binding.
+TOOLS = (
+    get_fundamentals,
+    get_balance_sheet,
+    get_cashflow,
+    get_income_statement,
+    get_insider_transactions,
+)
 
 def _insider_txns_disabled() -> bool:
     """Whether to omit get_insider_transactions from the fundamentals analyst.
@@ -73,7 +81,7 @@ def create_fundamentals_analyst(llm):
             "You are a researcher tasked with analyzing fundamental information over the past week about a company. Please write a comprehensive report of the company's fundamental information such as financial documents, company profile, basic company financials, and company financial history to gain a full view of the company's fundamental information to inform traders. Make sure to include as much detail as possible. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
             + tool_doc
-            + get_language_instruction(),
+            + get_language_instruction()
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -84,8 +92,7 @@ def create_fundamentals_analyst(llm):
                     " Use the provided tools to progress towards answering the question."
                     " If you are unable to fully answer, that's OK; another assistant with different tools"
                     " will help where you left off. Execute what you can to make progress."
-                    " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
-                    " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
+                    " Report what your tools support; another agent decides the trade."
                     " You have access to the following tools: {tool_names}."
                     " Today's date is {current_date}; treat it as 'now' for all analysis and tool-call date ranges. {instrument_context}\n"
                     "{system_message}",

@@ -23,8 +23,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tradingagents.dataflows import polygon_options as polygon_options_mod
-
+from tradingagents.dataflows.vendors.polygon import options as polygon_options_mod
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "build_options_overlay.py"
 
@@ -70,7 +69,7 @@ class TestAuthBlipRetryClassification:
         assert overlay_mod._is_rate_limit_error("rate limit exceeded") is True
         assert overlay_mod._is_rate_limit_error("403 forbidden") is False
 
-    # _fetch_chain itself now lives in tradingagents.dataflows.polygon_options
+    # _fetch_chain itself now lives in tradingagents.dataflows.vendors.polygon.options
     # (build_options_overlay._fetch_chain is an imported alias for it), so
     # these three tests patch _make_request/time.sleep on the real owning
     # module rather than on overlay_mod's copy of the name.

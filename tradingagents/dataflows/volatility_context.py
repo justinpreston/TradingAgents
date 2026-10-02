@@ -38,7 +38,7 @@ import time
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from tradingagents.dataflows.polygon_common import _make_request
+from tradingagents.dataflows.vendors.polygon.common import _make_request
 
 _TRADING_DAYS_PER_YEAR = 252.0
 _RV_WINDOW_DAYS = 30

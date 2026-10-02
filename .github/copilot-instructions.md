@@ -131,3 +131,4 @@ OPENAI_API_KEY=...    # OR any other supported LLM provider key
 - ❌ Don't auto-edit `runs/portfolio/positions.json` from any portfolio script — `portfolio_log_action.py` only appends to the log; reconciling is the user's job.
 - ❌ Don't lecture or walk through derivations in portfolio output — lead with the action, plain English over jargon.
 - ❌ Don't let the LEAN integration bypass the human approval gate — `lean/signals.json` rows default `approved:false`; only the user flips them. Never auto-approve.
+- ❌ Don't merge `upstream` (TauricResearch) in one jump — merge one release tag at a time and re-check the fork seams listed under "Upstream sync" in `CLAUDE.md` (synced through v0.5.1; Polygon lives in `dataflows/vendors/polygon/`, routing in `dataflows/router.py`).

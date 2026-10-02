@@ -1,6 +1,6 @@
 """Polygon vendor module tests.
 
-Mocks :func:`tradingagents.dataflows.polygon_common._make_request` and
+Mocks :func:`tradingagents.dataflows.vendors.polygon.common._make_request` and
 :func:`paginated_results` so no live network calls are made. Validates:
 
 * PIT visibility rule (filing_date + period_of_report fallback)
@@ -17,8 +17,8 @@ from unittest.mock import patch
 
 import pytest
 
-from tradingagents.dataflows import polygon_finance as pf
-from tradingagents.dataflows.polygon_common import (
+from tradingagents.dataflows.vendors.polygon import finance as pf
+from tradingagents.dataflows.vendors.polygon.common import (
     PolygonError,
     PolygonNotFoundError,
     PolygonRateLimitError,
@@ -284,14 +284,14 @@ class TestPolygonNews:
                 "description": "NVIDIA shares rose ahead of earnings.",
             }
         ]
-        from tradingagents.dataflows import polygon_news as pn
+        from tradingagents.dataflows.vendors.polygon import news as pn
         with patch.object(pn, "paginated_results", return_value=sample):
             out = pn.get_news("NVDA", "2024-05-01", "2024-05-10")
         assert "NVDA up on AI demand" in out
         assert "Reuters" in out
 
     def test_get_news_handles_no_results(self):
-        from tradingagents.dataflows import polygon_news as pn
+        from tradingagents.dataflows.vendors.polygon import news as pn
         with patch.object(pn, "paginated_results", side_effect=PolygonNotFoundError("none")):
             out = pn.get_news("NVDA", "2024-05-01", "2024-05-10")
         assert "No news found" in out
@@ -303,8 +303,7 @@ class TestPolygonNews:
         must raise :class:`PolygonError` so the vendor router transparently
         falls through to alpha_vantage / yfinance.
         """
-        from tradingagents.dataflows import polygon_news as pn
-
+        from tradingagents.dataflows.vendors.polygon import news as pn
         # All configured probes raise PolygonNotFoundError → final raise.
         with patch.object(
             pn,
@@ -323,8 +322,7 @@ class TestPolygonNews:
         endpoint, or a future plan upgrade entitles us), the formatter
         must produce a usable digest and the remaining probes are
         skipped — no wasted round-trips."""
-        from tradingagents.dataflows import polygon_news as pn
-
+        from tradingagents.dataflows.vendors.polygon import news as pn
         sample = [
             {
                 "transaction_date": "2026-04-23",
@@ -345,7 +343,7 @@ class TestPolygonNews:
         assert "SVP, CFO" in out
 
     def test_get_insider_transactions_empty_results_returns_friendly_message(self):
-        from tradingagents.dataflows import polygon_news as pn
+        from tradingagents.dataflows.vendors.polygon import news as pn
         with patch.object(pn, "paginated_results", return_value=[]):
             out = pn.get_insider_transactions("XYZ")
         assert "No insider transactions found" in out
@@ -354,8 +352,7 @@ class TestPolygonNews:
         """If the first probe 404s but a later one succeeds (defends
         against URL drift across Polygon API versions), the function
         must return the successful payload."""
-        from tradingagents.dataflows import polygon_news as pn
-
+        from tradingagents.dataflows.vendors.polygon import news as pn
         sample = [{"transaction_date": "2026-04-23", "executive": "DOE, JANE"}]
         side_effects = [
             PolygonNotFoundError("404"),  # first endpoint missing
@@ -382,8 +379,7 @@ class TestVendorRouterFallback:
     PolygonError, and from any vendor missing API key to the next."""
 
     def test_polygon_error_triggers_fallback_to_yfinance(self):
-        from tradingagents.dataflows import interface
-
+        from tradingagents.dataflows import router as interface
         def boom(*args, **kwargs):
             raise PolygonRateLimitError("simulated 429")
 
@@ -406,8 +402,7 @@ class TestVendorRouterFallback:
             assert result == sentinel
 
     def test_missing_api_key_value_error_triggers_fallback(self):
-        from tradingagents.dataflows import interface
-
+        from tradingagents.dataflows import router as interface
         def missing_key(*args, **kwargs):
             raise ValueError("ALPHA_VANTAGE_API_KEY environment variable is not set.")
 
@@ -428,8 +423,7 @@ class TestVendorRouterFallback:
     def test_unrelated_value_error_does_not_swallow(self):
         """ValueError that isn't about API keys (e.g. bad input args) must
         propagate — we only fall through on missing-key signals."""
-        from tradingagents.dataflows import interface
-
+        from tradingagents.dataflows import router as interface
         def bad_input(*args, **kwargs):
             raise ValueError("ticker must be a non-empty string")
 

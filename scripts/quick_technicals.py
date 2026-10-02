@@ -32,7 +32,7 @@ def main() -> int:
     except Exception:
         pass
 
-    from tradingagents.dataflows.polygon_finance import get_stock_data, get_indicators
+    from tradingagents.dataflows.vendors.polygon.finance import get_stock_data, get_indicators
 
     ticker = args.ticker.upper()
     end = args.end_date or datetime.utcnow().strftime("%Y-%m-%d")

@@ -1,4 +1,8 @@
-"""Regression tests for TradingAgentsGraph._create_tool_nodes wiring.
+"""Regression tests for the analyst tool-node wiring.
+
+Upstream v0.5.1 builds each analyst's ToolNode from the ``TOOLS`` tuple its
+module declares (``graph/analyst_execution.py::ANALYST_NODE_SPECS``); these
+tests pin those sets.
 
 Each analyst ToolNode must contain the same tool callables that the
 corresponding analyst factory binds to its LLM. A mismatch (a missing
@@ -14,7 +18,7 @@ from __future__ import annotations
 
 from langgraph.prebuilt import ToolNode
 
-from tradingagents.agents.utils.agent_utils import (
+from tradingagents.agents.tools import (
     get_balance_sheet,
     get_cashflow,
     get_fundamentals,
@@ -28,17 +32,16 @@ from tradingagents.agents.utils.agent_utils import (
     get_stock_data,
     get_verified_market_snapshot,
 )
-from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.graph.analyst_execution import ANALYST_NODE_SPECS
 
 
 def _tool_nodes() -> dict[str, ToolNode]:
-    """Build the tool-node mapping without going through __init__.
-
-    The method has no self.* dependencies in its body, so this is safe
-    and avoids spinning up LLM clients, memory logs, or configs.
-    """
-    bare = TradingAgentsGraph.__new__(TradingAgentsGraph)
-    return bare._create_tool_nodes()
+    """Build the ToolNodes the graph wires in, keyed by analyst."""
+    return {
+        key: ToolNode(list(spec.tools))
+        for key, spec in ANALYST_NODE_SPECS.items()
+        if spec.tools
+    }
 
 
 def _names(node: ToolNode) -> set[str]:
@@ -71,7 +74,8 @@ def test_each_analyst_node_has_expected_tools():
         get_indicators.name,
         get_verified_market_snapshot.name,
     }
-    assert _names(nodes["social"]) == {get_news.name}
+    # The sentiment ("social") analyst pre-fetches its sources, so it has no tool node.
+    assert "social" not in nodes
     assert _names(nodes["news"]) == {
         get_news.name,
         get_global_news.name,

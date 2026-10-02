@@ -36,8 +36,8 @@ def main() -> int:
     except Exception:
         pass
 
-    from tradingagents.dataflows.reddit import fetch_reddit_posts
-    from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
+    from tradingagents.dataflows.vendors.reddit import fetch_reddit_posts
+    from tradingagents.dataflows.vendors.stocktwits import fetch_stocktwits_messages
 
     ticker = args.ticker.upper()
     print(f"# Social sentiment · {ticker}\n")

@@ -47,6 +47,14 @@ _NOT_AGENTS = {
     # Backwards-compat re-export shim — actual implementation is in
     # sentiment_analyst.py which is covered separately.
     "tradingagents.agents.analysts.social_media_analyst",
+    # Shared utilities that upstream v0.5.1 flattened out of agents/utils/
+    # (previously skipped by the utils/ directory rule below).
+    "tradingagents.agents.context",
+    "tradingagents.agents.post_screen",
+    "tradingagents.agents.rating",
+    "tradingagents.agents.state",
+    "tradingagents.agents.structured",
+    "tradingagents.agents.tools",
 }
 
 

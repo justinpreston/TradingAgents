@@ -27,7 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tradingagents.dataflows.utils import resolve_trade_date
+from tradingagents.dataflows.date_window import resolve_trade_date
 
 
 class TestResolveTradeDate(unittest.TestCase):

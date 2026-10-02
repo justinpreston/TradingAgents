@@ -378,7 +378,7 @@ def test_fetch_failure_yields_stale_warning_not_crash(runs_dir, two_tier_runs, p
 
 
 def test_fetch_live_prices_handles_request_errors_gracefully(monkeypatch):
-    import tradingagents.dataflows.polygon_common as pc
+    import tradingagents.dataflows.vendors.polygon.common as pc
 
     def boom(*args, **kwargs):
         raise pc.PolygonError("simulated failure")
@@ -390,7 +390,7 @@ def test_fetch_live_prices_handles_request_errors_gracefully(monkeypatch):
 
 
 def test_fetch_live_prices_returns_close_price(monkeypatch):
-    import tradingagents.dataflows.polygon_common as pc
+    import tradingagents.dataflows.vendors.polygon.common as pc
 
     def fake_request(path, params=None, **kwargs):
         return {"results": [{"c": 123.45}]}

@@ -77,7 +77,7 @@ from tradingagents.dataflows.news_enrichment import (  # noqa: E402
     SentimentScorer,
     classify_themes,
 )
-from tradingagents.dataflows.polygon_common import (  # noqa: E402
+from tradingagents.dataflows.vendors.polygon.common import (  # noqa: E402
     PolygonError,
     paginated_results,
 )

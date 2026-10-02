@@ -43,7 +43,7 @@ from scripts._env import load_repo_env  # noqa: E402
 
 from tradingagents.default_config import DEFAULT_CONFIG  # noqa: E402
 from tradingagents.graph.trading_graph import TradingAgentsGraph  # noqa: E402
-from tradingagents.dataflows.utils import resolve_trade_date  # noqa: E402
+from tradingagents.dataflows.date_window import resolve_trade_date  # noqa: E402
 
 load_repo_env()
 

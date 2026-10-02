@@ -7,12 +7,14 @@ behavior we added for the Trader, Research Manager, and Sentiment Analyst
 so they share the same deterministic output shape.
 """
 
+import inspect
 from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ValidationError
 
 from tradingagents.agents.analysts.sentiment_analyst import create_sentiment_analyst
+from tradingagents.agents.managers.portfolio_manager import create_portfolio_manager
 from tradingagents.agents.managers.research_manager import create_research_manager
 from tradingagents.agents.schemas import (
     PortfolioDecision,
@@ -59,12 +61,13 @@ class TestRenderTraderProposal:
         assert "**Position Sizing**: 6% of portfolio" in md
         assert "FINAL TRANSACTION PROPOSAL: **BUY**" in md
 
-    def test_optional_fields_omitted_when_absent(self):
+    def test_optional_fields_are_named_as_not_provided(self):
+        """An omitted line reads as a field nobody asked for; the reader cannot
+        tell it from a level the trader declined to set."""
         p = TraderProposal(action=TraderAction.SELL, reasoning="Guidance cut.")
         md = render_trader_proposal(p)
-        assert "Entry Price" not in md
-        assert "Stop Loss" not in md
-        assert "Position Sizing" not in md
+        for field in ("Entry Price", "Stop Loss", "Position Sizing"):
+            assert f"**{field}**: not provided" in md
         assert "FINAL TRANSACTION PROPOSAL: **SELL**" in md
 
 
@@ -96,6 +99,43 @@ class TestNullishFloatCoercion:
             price_target="N/A",
         )
         assert d.price_target is None
+
+    def test_percentage_answer_to_a_price_field_becomes_none(self):
+        # The Trader is asked for concrete levels and may answer a price field
+        # with a distance ("15%"), which failed the whole proposal (#1288).
+        # A percentage cannot be salvaged: 15% must not become a $15 stop.
+        for pct in ("15%", " 7.5% ", "-10%"):
+            p = TraderProposal(
+                action=TraderAction.BUY,
+                reasoning="x",
+                entry_price=pct,
+                stop_loss=pct,
+            )
+            assert p.entry_price is None
+            assert p.stop_loss is None
+
+    def test_human_formatted_price_is_reduced_to_its_number(self):
+        p = TraderProposal(
+            action=TraderAction.BUY,
+            reasoning="x",
+            entry_price="$1,234.50",
+            stop_loss="1,180",
+        )
+        assert p.entry_price == 1234.50
+        assert p.stop_loss == 1180.0
+
+    def test_one_bad_field_no_longer_fails_the_whole_proposal(self):
+        # Previously a single '15%' raised, forcing a free-text retry that lost
+        # the action and reasoning; now the rest of the proposal survives.
+        p = TraderProposal(
+            action=TraderAction.SELL,
+            reasoning="downgrade on margin compression",
+            entry_price="612.40",
+            stop_loss="15%",
+        )
+        assert p.action is TraderAction.SELL
+        assert p.entry_price == 612.40
+        assert p.stop_loss is None
 
 
 @pytest.mark.unit
@@ -131,6 +171,7 @@ def _make_trader_state():
     return {
         "company_of_interest": "NVDA",
         "investment_plan": "**Recommendation**: Buy\n**Rationale**: ...\n**Strategic Actions**: ...",
+        "market_report": "Current price $189.5; 14-day ATR 4.2; support $178, resistance $196.",
     }
 
 
@@ -156,7 +197,7 @@ def _structured_trader_llm(captured: dict, proposal: TraderProposal | None = Non
 def test_invoke_structured_falls_back_when_result_is_none():
     # A thinking model can answer in plain text, leaving the parser with None.
     # That must fall back to free text, not crash on render(None) (#1051).
-    from tradingagents.agents.utils.structured import invoke_structured_or_freetext
+    from tradingagents.agents.structured import invoke_structured_or_freetext
 
     structured = MagicMock()
     structured.invoke.return_value = None
@@ -199,6 +240,31 @@ class TestTraderAgent:
         # The investment plan is in the user message of the captured prompt.
         prompt = captured["prompt"]
         assert any("Proposed Investment Plan" in m["content"] for m in prompt)
+
+    def test_prompt_includes_market_report_for_price_levels(self):
+        # #1167: the Trader must see the technical market report so entry/stop
+        # levels are grounded in real price structure, not just the digested plan.
+        captured = {}
+        trader = create_trader(_structured_trader_llm(captured))
+        trader(_make_trader_state())
+        user = " ".join(m["content"] for m in captured["prompt"] if m["role"] == "user")
+        system = " ".join(m["content"] for m in captured["prompt"] if m["role"] == "system")
+        assert "Technical Market Report:" in user
+        assert "14-day ATR 4.2" in user            # the actual report content reached the Trader
+        assert "support $178, resistance $196" in user
+        assert "Ground concrete price levels" in system
+
+    def test_empty_market_report_omits_the_section_and_grounding(self):
+        # #1167: when the market analyst wasn't selected the report is empty, so
+        # don't tell the Trader to ground levels in a report it doesn't have.
+        captured = {}
+        state = _make_trader_state()
+        state["market_report"] = ""
+        create_trader(_structured_trader_llm(captured))(state)
+        text = " ".join(m["content"] for m in captured["prompt"])
+        assert "Technical Market Report:" not in text
+        assert "Ground concrete price levels" not in text
+        assert "Proposed Investment Plan" in text  # still present
 
     def test_falls_back_to_freetext_when_structured_unavailable(self):
         plain_response = (
@@ -367,6 +433,24 @@ def _structured_sentiment_llm(captured: dict, report: SentimentReport | None = N
 
 @pytest.mark.unit
 class TestSentimentAnalystAgent:
+    @pytest.fixture(autouse=True)
+    def _stub_prefetched_sources(self, monkeypatch):
+        """Stub the sources the analyst pre-fetches before prompting.
+
+        create_sentiment_analyst fetches news, StockTwits and Reddit itself, so
+        without this these tests hit the live network. A real Reddit 429 then
+        backs the fetcher off for a minute per subreddit, which is what turned
+        this file into a multi-minute hang.
+        """
+        from tradingagents.agents.analysts import sentiment_analyst as sentiment
+
+        # Fork: the analyst bypasses the LLM below _MIN_INFORMATIVE_CHARS of
+        # real source text, so each stub carries enough to clear that gate.
+        body = "\n".join(f"post {i}: traders discussing the stock" for i in range(12))
+        monkeypatch.setattr(sentiment, "fetch_stocktwits_messages", lambda *a, **k: "st\n" + body)
+        monkeypatch.setattr(sentiment, "fetch_reddit_posts", lambda *a, **k: "rd\n" + body)
+        monkeypatch.setattr(sentiment.get_news, "func", lambda *a, **k: "news\n" + body, raising=False)
+
     def test_structured_path_produces_rendered_markdown(self):
         captured = {}
         report = SentimentReport(
@@ -406,3 +490,72 @@ class TestSentimentAnalystAgent:
         llm.with_structured_output.return_value = structured
         llm.invoke.return_value = MagicMock(content=plain)
         assert create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"] == plain
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("source, required", [
+    pytest.param(lambda: ResearchPlan.model_fields["recommendation"].description,
+                 "genuinely balanced", id="ResearchPlan.recommendation"),
+    pytest.param(lambda: inspect.getsource(create_research_manager),
+                 "genuinely balanced", id="research_manager prompt"),
+    pytest.param(lambda: inspect.getsource(create_portfolio_manager),
+                 "Be decisive", id="portfolio_manager prompt"),
+    pytest.param(lambda: PortfolioDecision.model_fields["rating"].description,
+                 None, id="PortfolioDecision.rating"),
+])
+def test_decision_sites_keep_the_forks_calibrated_hold_wording(source, required):
+    # Fork: upstream v0.5.x (#1321) rewrote these to "Choose Hold only when ...
+    # too thin to support a call; do not manufacture a direction". The
+    # 2026-09-27 prompt A/B (8 tickers, 17 runs/arm) showed that wording lifts
+    # the matrix PICK rate from 18% to 59% by turning conservative
+    # Underweight/Sell into Hold. The veto gate, tier stats and exit rules were
+    # calibrated on the pre-port wording, so it is kept until a deliberate
+    # experiment says otherwise. Change these only together.
+    text = " ".join(source().split())
+    if required:
+        assert required in text
+    for upstream_phrase in ("too thin to support a call", "manufacture a direction",
+                            "force a direction", "materially conflicting"):
+        assert upstream_phrase not in text
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("written", ["150-160", "150 to 160", "around 150", "150/160", "~150"])
+def test_a_price_written_as_a_range_drops_only_that_field(written):
+    """Anything that is not a single number becomes None. Letting it through
+    fails the whole decision's validation, and the run falls back to free text,
+    losing every other field the model got right."""
+    from tradingagents.agents.schemas import PortfolioDecision, PortfolioRating
+
+    decision = PortfolioDecision(rating=PortfolioRating.BUY, executive_summary="s",
+                                 investment_thesis="t", price_target=written)
+    assert decision.price_target is None
+
+
+@pytest.mark.unit
+def test_a_price_that_is_a_number_survives():
+    from tradingagents.agents.schemas import PortfolioDecision, PortfolioRating
+
+    decision = PortfolioDecision(rating=PortfolioRating.BUY, executive_summary="s",
+                                 investment_thesis="t", price_target="$1,150.25")
+    assert decision.price_target == 1150.25
+
+
+@pytest.mark.unit
+def test_a_field_the_model_did_not_give_says_so():
+    """An omitted line and a line never asked for read the same to an analyst."""
+    from tradingagents.agents.schemas import PortfolioDecision, PortfolioRating, render_pm_decision
+
+    rendered = render_pm_decision(PortfolioDecision(
+        rating=PortfolioRating.HOLD, executive_summary="s", investment_thesis="t"))
+    assert "Price Target" in rendered and "not provided" in rendered.lower()
+
+
+@pytest.mark.unit
+def test_the_trader_names_the_levels_it_did_not_give():
+    from tradingagents.agents.schemas import TraderAction, TraderProposal, render_trader_proposal
+
+    rendered = render_trader_proposal(TraderProposal(action=TraderAction.HOLD, reasoning="r"))
+    for field in ("Entry Price", "Stop Loss", "Position Sizing"):
+        assert field in rendered
+    assert rendered.lower().count("not provided") == 3

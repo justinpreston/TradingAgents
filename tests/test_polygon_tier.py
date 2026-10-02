@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from tradingagents.dataflows.polygon_common import (
+from tradingagents.dataflows.vendors.polygon.common import (
     _TIER_INTERVALS,
     recommended_min_interval_for_tier,
 )
