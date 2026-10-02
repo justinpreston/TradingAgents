@@ -20,8 +20,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import requests
@@ -54,7 +55,8 @@ _STATEMENTS: dict[str, list[tuple[str, tuple[str, ...]]]] = {
                                  "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest")),
     ],
     "income_statement": [
-        ("Revenue", ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues",
+        ("Revenue", ("RevenueFromContractWithCustomerExcludingAssessedTax",
+                     "RevenueFromContractWithCustomerIncludingAssessedTax", "Revenues",
                      "SalesRevenueNet")),
         ("Cost of Revenue", ("CostOfRevenue", "CostOfGoodsAndServicesSold")),
         ("Gross Profit", ("GrossProfit",)),
@@ -104,8 +106,40 @@ def _user_agent() -> str:
 
 
 
+class EdgarNotFoundError(VendorUnavailableError):
+    """EDGAR answered 404: the document does not exist (no XBRL facts for this CIK).
+
+    Still a ``VendorUnavailableError`` so the router skips to the next vendor,
+    but distinguishable by callers that must tell "no coverage" from "outage".
+    """
+
+
+# SEC's fair-access limit is 10 requests/second per source. The pacer spaces
+# every request this process makes at least ``_MIN_INTERVAL`` apart (8 req/s
+# leaves headroom for clock jitter) so a screener walking hundreds of tickers
+# cannot get the caller's address throttled. It is process-wide; separate
+# processes (matrix cells) each make only a handful of requests.
+_MIN_INTERVAL = 0.125
+_pace_lock = threading.Lock()
+_next_slot = 0.0
+_monotonic = time.monotonic
+_sleep = time.sleep
+
+
+def _pace() -> None:
+    """Block until this request's slot, then reserve the next one."""
+    global _next_slot
+    with _pace_lock:
+        now = _monotonic()
+        slot = max(now, _next_slot)
+        _next_slot = slot + _MIN_INTERVAL
+    if slot > now:
+        _sleep(slot - now)
+
+
 def _fetch_json(url: str) -> dict:
     """Read a public EDGAR document, respecting SEC's identification rule."""
+    _pace()
     try:
         response = requests.get(url, headers={"User-Agent": _user_agent()}, timeout=30)
         response.raise_for_status()
@@ -114,12 +148,20 @@ def _fetch_json(url: str) -> dict:
         status = getattr(getattr(exc, "response", None), "status_code", None)
         # Every failure here is "this vendor cannot serve it now", so the router
         # moves on instead of seeing a transport exception it has no rule for.
-        raise VendorUnavailableError(f"SEC EDGAR request failed ({status or type(exc).__name__})") from exc
+        error = EdgarNotFoundError if status == 404 else VendorUnavailableError
+        raise error(f"SEC EDGAR request failed ({status or type(exc).__name__})") from exc
     except ValueError as exc:
         raise VendorUnavailableError("SEC EDGAR returned an unreadable response") from exc
 
 
-def _cached_json(url: str, name: str) -> dict:
+def _cached_json(url: str, name: str, *, persist: bool = True) -> dict:
+    """A document from the 24h disk cache, else fetched.
+
+    ``persist=False`` still reads a fresh cache file but never writes one: a
+    company's facts run to several MB, and a screener walking the whole universe
+    would otherwise fill the cache directory with files it does not need (it
+    keeps its own small derived-signals cache).
+    """
     path = Path(get_config()["data_cache_dir"]) / "sec_edgar" / name
     if path.exists() and time.time() - path.stat().st_mtime < _CACHE_TTL_SECONDS:
         try:
@@ -127,8 +169,9 @@ def _cached_json(url: str, name: str) -> dict:
         except ValueError:
             pass  # a truncated file is a miss, not a failure
     data = _fetch_json(url)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    replace_file(path, lambda temp: Path(temp).write_text(json.dumps(data), encoding="utf-8"))
+    if persist:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        replace_file(path, lambda temp: Path(temp).write_text(json.dumps(data), encoding="utf-8"))
     return data
 
 
@@ -255,3 +298,267 @@ def get_income_statement(ticker: str, freq: str = "quarterly", as_of_date: str |
 def get_cashflow(ticker: str, freq: str = "quarterly", as_of_date: str | None = None) -> str:
     """Cash flow statement as filed on or before ``as_of_date``."""
     return _statement("cashflow", ticker, freq, as_of_date, "Cash Flow Statement")
+
+
+# --- quarterly series and trailing-twelve-month figures -----------------------
+#
+# The statements above refuse to derive a fourth quarter, because the table they
+# print is a record of what was filed. The screener and the fundamentals overview
+# need the opposite: an unbroken run of quarters and four-quarter sums, and
+# filers report a fourth quarter only inside the annual figure. Those callers
+# take the derived quarter (annual less the first three, or year-to-date less
+# the year to date before it), and it carries the later of its two filing dates.
+
+# Spans of a fiscal quarter and of the cumulative (year-to-date) figures a 10-Q or
+# 10-K reports. A 52/53-week year runs a few days past 365.
+_QUARTER_SPAN = (55, 120)
+_CUMULATIVE_SPANS = ((150, 200), (240, 290), (300, 400))
+
+# Two quarter ends further apart than this have a missing quarter between them.
+_MAX_QUARTER_GAP = 120
+
+# A series whose latest quarter ended longer ago than this has stopped reporting.
+_STALE_AFTER_DAYS = 420
+
+_REVENUE_TAGS = (
+    "RevenueFromContractWithCustomerExcludingAssessedTax",
+    "RevenueFromContractWithCustomerIncludingAssessedTax",
+    "Revenues",
+    "SalesRevenueNet",
+)
+_COST_OF_REVENUE_TAGS = ("CostOfRevenue", "CostOfGoodsAndServicesSold", "CostOfGoodsSold")
+
+Quarters = dict[str, tuple[float, str]]     # period end -> (value, filing date)
+
+
+def _days(start: str, end: str) -> int:
+    return (date.fromisoformat(end) - date.fromisoformat(start)).days
+
+
+def _duration_periods(us_gaap: dict, tag: str, as_of_date: str, unit: str) -> dict[tuple[str, str], tuple[float, str]]:
+    """{(start, end): (value, filed)} for a duration tag as known on ``as_of_date``.
+
+    A period reported more than once keeps its latest filing, so a restatement
+    counts from the day it was filed.
+    """
+    periods: dict[tuple[str, str], tuple[float, str]] = {}
+    for fact in ((us_gaap.get(tag) or {}).get("units") or {}).get(unit, []):
+        if "start" not in fact or fact["filed"] > as_of_date:
+            continue
+        key = (fact["start"], fact["end"])
+        seen = periods.get(key)
+        if seen is None or fact["filed"] >= seen[1]:
+            periods[key] = (fact["val"], fact["filed"])
+    return periods
+
+
+def _quarters(periods: dict[tuple[str, str], tuple[float, str]]) -> Quarters:
+    """Fiscal quarters from reported periods, deriving the ones never reported alone.
+
+    A quarter filed as such is used as filed. One that exists only inside a
+    cumulative figure (a fourth quarter inside the annual figure, a cash-flow
+    second quarter inside the six-month figure) is that figure less the one
+    before it in the same fiscal year, which is only done when every quarter in
+    between is known: it never subtracts across a gap.
+    """
+    quarters: Quarters = {}
+    for (start, end), value in periods.items():
+        if _QUARTER_SPAN[0] <= _days(start, end) <= _QUARTER_SPAN[1]:
+            quarters[end] = value
+
+    year_starts = {start for (start, end) in periods
+                   if any(low <= _days(start, end) <= high for low, high in _CUMULATIVE_SPANS)}
+    for year_start in sorted(year_starts):
+        # The first quarter shares the year's start; later ones are known by
+        # their own span, and the cumulative figures by start == year_start.
+        cumulative = {end: value for (start, end), value in periods.items()
+                      if start == year_start
+                      and _QUARTER_SPAN[0] <= _days(start, end) <= _CUMULATIVE_SPANS[-1][1]}
+        in_year = {end: value for (start, end), value in periods.items()
+                   if _QUARTER_SPAN[0] <= _days(start, end) <= _QUARTER_SPAN[1]
+                   and 0 <= _days(year_start, start) < 360}
+        previous_end = (date.fromisoformat(year_start) - timedelta(days=1)).isoformat()
+        running: float | None = 0.0
+        running_filed = ""
+        for end in sorted(set(cumulative) | set(in_year)):
+            contiguous = (running is not None
+                          and _QUARTER_SPAN[0] <= _days(previous_end, end) <= _MAX_QUARTER_GAP)
+            if end in in_year:
+                value, filed = in_year[end]
+                if end in cumulative:
+                    running, running_filed = cumulative[end]
+                elif contiguous:
+                    running, running_filed = running + value, max(running_filed, filed)
+                else:
+                    running = None
+            else:
+                value, filed = cumulative[end]
+                if contiguous:
+                    quarters.setdefault(end, (value - running, max(filed, running_filed)))
+                running, running_filed = value, filed
+            previous_end = end
+    return quarters
+
+
+def _quarter_series(us_gaap: dict, tags: tuple[str, ...], as_of_date: str, unit: str = "USD") -> Quarters:
+    """Quarters across ``tags``: a period takes the first tag that yields it.
+
+    Derivation happens per tag, never across tags, so a year-to-date figure is
+    never reduced by a quarter another tag reported. Filers renamed lines over
+    the years, which is why one tag rarely covers the whole history.
+    """
+    merged: Quarters = {}
+    for tag in tags:
+        for end, value in _quarters(_duration_periods(us_gaap, tag, as_of_date, unit)).items():
+            merged.setdefault(end, value)
+    return merged
+
+
+def _recent_run(series: Quarters, count: int) -> list[str]:
+    """Period ends, newest first, of up to ``count`` quarters with none missing between."""
+    run: list[str] = []
+    for end in sorted(series, reverse=True):
+        if run and not _QUARTER_SPAN[0] <= _days(end, run[-1]) <= _MAX_QUARTER_GAP:
+            break
+        run.append(end)
+        if len(run) == count:
+            break
+    return run
+
+
+def _ttm(series: Quarters) -> float | None:
+    """Sum of the latest four consecutive quarters, or None when fewer are known."""
+    run = _recent_run(series, 4)
+    return sum(series[end][0] for end in run) if len(run) == 4 else None
+
+
+def _us_gaap_facts(ticker: str, *, persist: bool = True) -> dict | None:
+    """The filer's us-gaap facts, or None when EDGAR has none (not a US filer, ADR, new IPO).
+
+    A failed request is not "no facts": it raises, so a caller cannot mistake an
+    outage for a company EDGAR does not cover.
+    """
+    cik = cik_for(ticker)
+    if cik is None:
+        return None
+    try:
+        facts = _cached_json(_FACTS_URL.format(cik=cik), f"CIK{cik}.json", persist=persist)
+    except EdgarNotFoundError:
+        return None
+    return (facts.get("facts") or {}).get("us-gaap") or None
+
+
+def quarterly_income_series(
+    ticker: str,
+    as_of_date: str | None = None,
+    max_quarters: int = 8,
+    *,
+    persist: bool = True,
+) -> list[dict]:
+    """The latest ``max_quarters`` consecutive quarters of revenue, gross profit and operating income.
+
+    Oldest first, as {"end", "filed", "revenue", "gross_profit", "operating_income"}
+    (a line the filer does not tag is None). Returns [] where EDGAR has no
+    coverage (not a US filer, no us-gaap facts, no quarterly revenue, or a
+    filer that stopped reporting); a failed request raises
+    ``VendorUnavailableError``.
+    """
+    as_of_date = as_of_date or datetime.now().strftime("%Y-%m-%d")
+    us_gaap = _us_gaap_facts(ticker, persist=persist)
+    if us_gaap is None:
+        return []
+
+    revenue = _quarter_series(us_gaap, _REVENUE_TAGS, as_of_date)
+    run = _recent_run(revenue, max_quarters)
+    if not run or _days(run[0], as_of_date) > _STALE_AFTER_DAYS:
+        return []
+    gross = _quarter_series(us_gaap, ("GrossProfit",), as_of_date)
+    cost = _quarter_series(us_gaap, _COST_OF_REVENUE_TAGS, as_of_date)
+    operating = _quarter_series(us_gaap, ("OperatingIncomeLoss",), as_of_date)
+
+    rows = []
+    for end in reversed(run):
+        value, filed = revenue[end]
+        if end in gross:
+            gross_profit = gross[end][0]
+        else:
+            gross_profit = value - cost[end][0] if end in cost else None
+        rows.append({
+            "end": end,
+            "filed": filed,
+            "revenue": value,
+            "gross_profit": gross_profit,
+            "operating_income": operating[end][0] if end in operating else None,
+        })
+    return rows
+
+
+def _latest_instant(us_gaap: dict, tags: tuple[str, ...], as_of_date: str) -> float | None:
+    """The newest balance-sheet figure filed by ``as_of_date``; earlier tags win a tie on date."""
+    best: tuple[str, int, str, float] | None = None
+    for priority, tag in enumerate(tags):
+        for fact in ((us_gaap.get(tag) or {}).get("units") or {}).get("USD", []):
+            if "start" in fact or fact["filed"] > as_of_date:
+                continue
+            candidate = (fact["end"], -priority, fact["filed"], fact["val"])
+            if best is None or candidate[:3] > best[:3]:
+                best = candidate
+    return best[3] if best else None
+
+
+def ttm_snapshot(ticker: str, as_of_date: str | None = None) -> dict:
+    """Trailing-twelve-month and latest balance figures from facts filed by ``as_of_date``.
+
+    A figure the filer does not tag, or whose last four quarters are not all
+    known, is absent from the result rather than estimated. Keys: revenue,
+    gross_profit, operating_income, net_income, eps (diluted, else basic),
+    operating_cash_flow (TTM); cash, long_term_debt, total_assets, equity
+    (latest); latest_period_end and latest_filed for the newest quarter.
+    Raises ``NoMarketDataError`` where EDGAR has no coverage and
+    ``VendorUnavailableError`` when it could not be reached.
+    """
+    as_of_date = as_of_date or datetime.now().strftime("%Y-%m-%d")
+    us_gaap = _us_gaap_facts(ticker)
+    if us_gaap is None:
+        raise NoMarketDataError(ticker, ticker, "no SEC EDGAR us-gaap facts (not a US filer, or too new)")
+
+    revenue = _quarter_series(us_gaap, _REVENUE_TAGS, as_of_date)
+    flows = {
+        "revenue": revenue,
+        "gross_profit": _quarter_series(us_gaap, ("GrossProfit",), as_of_date),
+        "operating_income": _quarter_series(us_gaap, ("OperatingIncomeLoss",), as_of_date),
+        "net_income": _quarter_series(us_gaap, ("NetIncomeLoss",), as_of_date),
+        "operating_cash_flow": _quarter_series(
+            us_gaap, ("NetCashProvidedByUsedInOperatingActivities",
+                      "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"), as_of_date),
+    }
+    snapshot: dict = {}
+    for name, series in flows.items():
+        total = _ttm(series)
+        if total is not None:
+            snapshot[name] = total
+    # Per-share lines are summed the same way. A derived fourth quarter is the
+    # annual figure less three quarters, so it inherits any change in share count.
+    for tags in (("EarningsPerShareDiluted",), ("EarningsPerShareBasic",)):
+        eps = _ttm(_quarter_series(us_gaap, tags, as_of_date, unit="USD/shares"))
+        if eps is not None:
+            snapshot["eps"] = eps
+            break
+
+    for name, tags in (
+        ("cash", ("CashAndCashEquivalentsAtCarryingValue",)),
+        ("long_term_debt", ("LongTermDebtNoncurrent", "LongTermDebt")),
+        ("total_assets", ("Assets",)),
+        ("equity", ("StockholdersEquity",
+                    "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest")),
+    ):
+        value = _latest_instant(us_gaap, tags, as_of_date)
+        if value is not None:
+            snapshot[name] = value
+
+    run = _recent_run(revenue, 1) or _recent_run(flows["net_income"], 1)
+    if run:
+        newest = revenue if run[0] in revenue else flows["net_income"]
+        snapshot["latest_period_end"] = run[0]
+        snapshot["latest_filed"] = newest[run[0]][1]
+    return snapshot
