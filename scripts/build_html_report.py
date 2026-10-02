@@ -16,6 +16,8 @@ import html
 from datetime import datetime
 from pathlib import Path
 
+MUTED_DASH = '<span class="muted">—</span>'
+
 from tradingagents.tiers import tier_for_row
 
 
@@ -2619,7 +2621,7 @@ function tatToggleTheme() {{
                 if chronos_map:
                     chronos_data = chronos_map.get((r["ticker"], r["_run"]))
                     chip = _chronos_chip(chronos_data)
-                    model_cell = f'<td>{chip if chip else "<span class=\"muted\">—</span>"}</td>'
+                    model_cell = f'<td>{chip or MUTED_DASH}</td>'
                 parts.append(
                     f'<tr>'
                     f'<td class="tkr">{html.escape(r["ticker"])}</td>'

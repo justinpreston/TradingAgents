@@ -242,11 +242,11 @@ def aggregate(results):
         "profitable_rate_pct": (len(prof) / len(prof_known) * 100) if prof_known else None,
     }
     print(f"{'ALL':<5} {overall['n']:>3} "
-          f"{(f'{overall['pt_hit_rate_pct']:.0f}%' if overall['pt_hit_rate_pct'] is not None else '—'):>7} "
+          f"{(format(overall['pt_hit_rate_pct'], '.0f') + '%' if overall['pt_hit_rate_pct'] is not None else '—'):>7} "
           f"{'':>11} "
-          f"{(f'{overall['avg_option_roi_pct']:+.1f}' if overall['avg_option_roi_pct'] is not None else '—'):>12} "
-          f"{(f'{overall['median_option_roi_pct']:+.1f}' if overall['median_option_roi_pct'] is not None else '—'):>15} "
-          f"{(f'{overall['profitable_rate_pct']:.0f}%' if overall['profitable_rate_pct'] is not None else '—'):>8}")
+          f"{(format(overall['avg_option_roi_pct'], '+.1f') if overall['avg_option_roi_pct'] is not None else '—'):>12} "
+          f"{(format(overall['median_option_roi_pct'], '+.1f') if overall['median_option_roi_pct'] is not None else '—'):>15} "
+          f"{(format(overall['profitable_rate_pct'], '.0f') + '%' if overall['profitable_rate_pct'] is not None else '—'):>8}")
 
     # coverage
     statuses = {}
