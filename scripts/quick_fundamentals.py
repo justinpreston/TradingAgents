@@ -30,13 +30,14 @@ def main() -> int:
     except Exception:
         pass
 
-    from tradingagents.dataflows.vendors.polygon.finance import get_fundamentals
+    # Routed (polygon overview + EDGAR facts, yfinance fallback), not called directly.
+    from tradingagents.dataflows.router import route_to_vendor
 
     ticker = args.ticker.upper()
     curr_date = args.date or datetime.utcnow().strftime("%Y-%m-%d")
 
     print(f"# Fundamentals · {ticker} · point-in-time {curr_date}\n")
-    print(get_fundamentals(ticker, curr_date))
+    print(route_to_vendor("get_fundamentals", ticker, curr_date))
 
     if not args.no_insider:
         # Insider transactions route to yfinance/AV per default_config.tool_vendors

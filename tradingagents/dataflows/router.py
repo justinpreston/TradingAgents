@@ -20,10 +20,7 @@ from tradingagents.dataflows.vendors.alpha_vantage import (
 from tradingagents.dataflows.vendors.fred import get_macro_data as get_fred_macro_data
 from tradingagents.dataflows.vendors.polygon.common import PolygonError
 from tradingagents.dataflows.vendors.polygon.finance import (
-    get_balance_sheet as get_polygon_balance_sheet,
-    get_cashflow as get_polygon_cashflow,
     get_fundamentals as get_polygon_fundamentals,
-    get_income_statement as get_polygon_income_statement,
     get_indicators as get_polygon_indicators,
     get_stock_data as get_polygon_stock_data,
 )
@@ -128,19 +125,16 @@ VENDOR_METHODS = {
         "yfinance": get_yfinance_fundamentals,
     },
     "get_balance_sheet": {
-        "polygon": get_polygon_balance_sheet,
         "alpha_vantage": get_alpha_vantage_balance_sheet,
         "sec_edgar": get_sec_edgar_balance_sheet,
         "yfinance": get_yfinance_balance_sheet,
     },
     "get_cashflow": {
-        "polygon": get_polygon_cashflow,
         "alpha_vantage": get_alpha_vantage_cashflow,
         "sec_edgar": get_sec_edgar_cashflow,
         "yfinance": get_yfinance_cashflow,
     },
     "get_income_statement": {
-        "polygon": get_polygon_income_statement,
         "alpha_vantage": get_alpha_vantage_income_statement,
         "sec_edgar": get_sec_edgar_income_statement,
         "yfinance": get_yfinance_income_statement,

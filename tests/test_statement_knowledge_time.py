@@ -51,8 +51,8 @@ def test_a_current_run_is_still_served_yahoo_statements():
 
 @pytest.mark.unit
 def test_statements_come_from_the_configured_default_first():
-    # Fork: statements default to Polygon (point-in-time by filing date), not
-    # upstream's sec_edgar,yfinance; the first configured vendor must serve.
+    # Statements default to sec_edgar,yfinance (the fork's Polygon financials are
+    # retired); the first configured vendor must serve.
     set_config(copy.deepcopy(default_config.DEFAULT_CONFIG))
     served = []
     chain = {name: (lambda *a, _n=name, **k: served.append(_n) or f"{_n} statements")

@@ -242,23 +242,23 @@ class TestRateLimitPropagation:
         ):
             assert _enrich_with_reference("DELISTED") == {}
 
-    def test_fundamentals_propagates_rate_limit(self):
+    def test_fundamentals_propagates_edgar_outage(self):
+        from tradingagents.dataflows.errors import VendorUnavailableError
         from tradingagents.screener.fundamentals import fetch_quarterly_financials
 
         with patch(
-            "tradingagents.screener.fundamentals.paginated_results",
-            side_effect=PolygonRateLimitError("test"),
+            "tradingagents.screener.fundamentals.sec_edgar.quarterly_income_series",
+            side_effect=VendorUnavailableError("SEC EDGAR request failed (429)"),
         ):
-            with pytest.raises(PolygonRateLimitError):
+            with pytest.raises(VendorUnavailableError):
                 fetch_quarterly_financials("AAPL")
 
-    def test_fundamentals_swallows_404(self):
+    def test_fundamentals_no_coverage_is_empty(self):
         from tradingagents.screener.fundamentals import fetch_quarterly_financials
-        from tradingagents.dataflows.vendors.polygon.common import PolygonNotFoundError
 
         with patch(
-            "tradingagents.screener.fundamentals.paginated_results",
-            side_effect=PolygonNotFoundError("test"),
+            "tradingagents.screener.fundamentals.sec_edgar.quarterly_income_series",
+            return_value=[],
         ):
             assert fetch_quarterly_financials("ADRX") == []
 
