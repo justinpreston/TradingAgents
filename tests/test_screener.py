@@ -98,14 +98,10 @@ def test_compute_fundamental_re_acceleration():
     ]
     for i, (r, c) in enumerate(zip(revenues_by_q, cogs_by_q)):
         reports.append({
-            "period_of_report_date": quarter_ends[i],
-            "financials": {
-                "income_statement": {
-                    "revenues": {"value": r * 1_000_000},
-                    "cost_of_revenue": {"value": c * 1_000_000},
-                    "operating_income_loss": {"value": (r - c - 10) * 1_000_000},
-                }
-            },
+            "end": quarter_ends[i],
+            "revenue": r * 1_000_000,
+            "gross_profit": (r - c) * 1_000_000,
+            "operating_income": (r - c - 10) * 1_000_000,
         })
     sig = compute_fundamental_signals("FAKE", reports=reports)
     assert sig.quarters_available == 8

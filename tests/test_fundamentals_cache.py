@@ -23,14 +23,11 @@ def _make_reports(revenues: list[float], cogs: list[float]) -> list[dict]:
     ]
     return [
         {
-            "period_of_report_date": quarter_ends[i],
-            "financials": {
-                "income_statement": {
-                    "revenues": {"value": r * 1_000_000},
-                    "cost_of_revenue": {"value": c * 1_000_000},
-                    "operating_income_loss": {"value": (r - c - 10) * 1_000_000},
-                }
-            },
+            "end": quarter_ends[i],
+            "filed": quarter_ends[i],
+            "revenue": r * 1_000_000,
+            "gross_profit": (r - c) * 1_000_000,
+            "operating_income": (r - c - 10) * 1_000_000,
         }
         for i, (r, c) in enumerate(zip(revenues, cogs))
     ]
@@ -39,12 +36,12 @@ def _make_reports(revenues: list[float], cogs: list[float]) -> list[dict]:
 @pytest.fixture
 def isolated_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DiskCache:
     """Replace the module-level cache with a tmp-rooted one."""
-    cache = DiskCache("fundamentals", ttl_seconds=fundamentals._FUNDAMENTALS_CACHE_TTL_S, cache_root=tmp_path)
+    cache = DiskCache(fundamentals._FUNDAMENTALS_CACHE_NAMESPACE, ttl_seconds=fundamentals._FUNDAMENTALS_CACHE_TTL_S, cache_root=tmp_path)
     monkeypatch.setattr(fundamentals, "_FUNDAMENTALS_CACHE", cache)
     return cache
 
 
-def test_cache_miss_calls_polygon_then_caches(isolated_cache: DiskCache) -> None:
+def test_cache_miss_fetches_then_caches(isolated_cache: DiskCache) -> None:
     reports = _make_reports([80, 82, 85, 90, 95, 100, 110, 125],
                             [50, 51, 52, 54, 55, 56, 58, 60])
     fetch_count = {"n": 0}
@@ -130,3 +127,26 @@ def test_signals_from_dict_tolerates_missing_keys() -> None:
     assert sig.ticker == "T"
     assert sig.fundamental_score == 0.0
     assert sig.flags == []
+
+
+def test_cache_namespace_is_not_the_old_polygon_one(isolated_cache: DiskCache, tmp_path: Path) -> None:
+    """Entries the Polygon-backed screener wrote (namespace "fundamentals") hold a
+    different series (no Q4s) and must never be served as EDGAR signals."""
+    assert fundamentals._FUNDAMENTALS_CACHE_NAMESPACE != "fundamentals"
+    stale = DiskCache("fundamentals", ttl_seconds=fundamentals._FUNDAMENTALS_CACHE_TTL_S, cache_root=tmp_path)
+    stale.set("AAPL", {"ticker": "AAPL", "fundamental_score": 99.0})
+
+    reports = _make_reports([100, 100, 100, 100, 100, 100, 100, 100], [50] * 8)
+    with patch.object(fundamentals, "fetch_quarterly_financials", return_value=reports) as fetch:
+        sig = compute_fundamental_signals("AAPL")
+    fetch.assert_called_once()
+    assert sig.fundamental_score != 99.0
+
+
+def test_a_failed_fetch_is_not_cached_as_insufficient_data(isolated_cache: DiskCache) -> None:
+    from tradingagents.dataflows.errors import VendorUnavailableError
+
+    with patch.object(fundamentals, "fetch_quarterly_financials", side_effect=VendorUnavailableError("503")), \
+            pytest.raises(VendorUnavailableError):
+        compute_fundamental_signals("AAPL")
+    assert isolated_cache.get("AAPL") is None

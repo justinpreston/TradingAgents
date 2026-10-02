@@ -1,51 +1,40 @@
 """Polygon REST implementations for the trading-agents data layer.
 
-This module is the production-default replacement for the yfinance-based
-fundamentals path. Polygon's ``/vX/reference/financials`` endpoint returns
-as-reported SEC filings with both ``filing_date`` (when the filing became
-public) and ``period_of_report_date`` (the fiscal period end), enabling
-strict point-in-time semantics that yfinance's snapshot ``info`` cannot
-provide.
+Market data (bars, indicators) and the overview's company reference data come
+from Polygon. Polygon's ``/vX/reference/financials`` endpoint is retired
+(sunset 2026-10-09) and its successors are not on this plan, so every
+filing-derived figure now comes from SEC EDGAR (:mod:`..sec_edgar`), selected by
+filing date: statements are served by the ``sec_edgar`` vendor directly, and the
+overview below takes its TTM and balance-sheet fields from
+:func:`sec_edgar.ttm_snapshot`.
 
-Public surface intentionally mirrors :mod:`y_finance` so the vendor router
-in :mod:`interface` can swap between providers without touching call sites:
+Public surface:
 
 * :func:`get_stock_data` — daily OHLCV bars over a date range (CSV string)
 * :func:`get_fundamentals` — overview/snapshot fundamentals at ``curr_date``
-* :func:`get_balance_sheet`, :func:`get_cashflow`, :func:`get_income_statement`
-  — point-in-time financial statements filtered by both filing date and
-  period end date
 * :func:`get_indicators` — technical indicators computed off Polygon bars
   via ``stockstats``
 
 Forward-looking analyst projections (Forward EPS / PE / PEG) have no
-PIT-correct source on Polygon either; we omit them rather than fabricate.
+PIT-correct source either; we omit them rather than fabricate.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from io import StringIO
 from typing import Annotated, Any
 
 import pandas as pd
+
+from tradingagents.dataflows.vendors import sec_edgar
 
 from .common import (
     PolygonError,
     PolygonNotFoundError,
     _make_request,
-    paginated_results,
 )
 
 # --- helpers ----------------------------------------------------------------
-
-# When Polygon returns a financials row without a filing_date, fall back to
-# this many days after period_of_report_date as a conservative upper bound on
-# when the filing would have been public. SEC large-accelerated 10-Q deadline
-# is 40 days, 10-K is 60 days; 90 gives a safety margin while still excluding
-# rows whose period ended within the last quarter.
-_FILING_LAG_FALLBACK_DAYS = 90
-
 
 def _parse_date(s: str | None) -> datetime | None:
     if not s:
@@ -54,92 +43,6 @@ def _parse_date(s: str | None) -> datetime | None:
         return datetime.strptime(s[:10], "%Y-%m-%d")
     except ValueError:
         return None
-
-
-def _is_pit_visible(entry: dict, curr_dt: datetime) -> bool:
-    """Decide whether a Polygon financials entry was public at ``curr_dt``.
-
-    Rule: filing_date strictly before curr_dt. If filing_date is missing,
-    accept only when period_of_report_date + 90d <= curr_dt (conservative).
-    Period-of-report alone is never sufficient — the filing happens later.
-    """
-    filing = _parse_date(entry.get("filing_date"))
-    if filing is not None:
-        return filing < curr_dt
-
-    period = _parse_date(entry.get("end_date") or entry.get("period_of_report_date"))
-    if period is None:
-        return False
-    return period + timedelta(days=_FILING_LAG_FALLBACK_DAYS) <= curr_dt
-
-
-def _financials_facts(
-    ticker: str,
-    *,
-    curr_date: str | None,
-    timeframe: str,
-    limit: int = 8,
-) -> list[dict[str, Any]]:
-    """Fetch and PIT-filter financials entries.
-
-    timeframe: 'quarterly' or 'annual'
-    """
-    params: dict[str, Any] = {
-        "ticker": ticker.upper(),
-        "order": "desc",
-        "limit": str(limit),
-        "timeframe": timeframe,
-    }
-    if curr_date:
-        params["period_of_report_date.lt"] = curr_date
-        params["filing_date.lt"] = curr_date
-
-    try:
-        results = paginated_results("/vX/reference/financials", params, max_pages=2)
-    except PolygonNotFoundError:
-        return []
-
-    if not curr_date:
-        return results
-
-    curr_dt = _parse_date(curr_date)
-    if curr_dt is None:
-        return results
-
-    return [r for r in results if _is_pit_visible(r, curr_dt)]
-
-
-def _statement_to_csv(entries: list[dict[str, Any]], section: str) -> str:
-    """Convert a list of financials entries' ``section`` (e.g. 'balance_sheet')
-    into a CSV string with periods as columns and concept labels as rows.
-    """
-    if not entries:
-        return ""
-
-    columns: list[str] = []
-    by_concept: dict[str, dict[str, Any]] = {}
-
-    for entry in entries:
-        period_end = entry.get("end_date") or entry.get("period_of_report_date") or "unknown"
-        timeframe = entry.get("timeframe", "")
-        col_name = f"{period_end} ({timeframe})" if timeframe else period_end
-        columns.append(col_name)
-
-        section_data = (entry.get("financials") or {}).get(section) or {}
-        for concept_key, concept_payload in section_data.items():
-            if not isinstance(concept_payload, dict):
-                continue
-            label = concept_payload.get("label") or concept_key
-            value = concept_payload.get("value")
-            row = by_concept.setdefault(label, {})
-            row[col_name] = value
-
-    if not by_concept:
-        return ""
-
-    df = pd.DataFrame.from_dict(by_concept, orient="index", columns=columns)
-    df.index.name = "concept"
-    return df.to_csv()
 
 
 def _format_money(value: Any) -> str:
@@ -156,39 +59,6 @@ def _format_money(value: Any) -> str:
     if abs(v) >= 1e6:
         return f"${v / 1e6:.2f}M"
     return f"${v:,.2f}"
-
-
-def _ttm_sum(entries: list[dict[str, Any]], section: str, concept: str, n: int = 4) -> float | None:
-    """Sum the most recent ``n`` quarterly values of ``concept`` in ``section``.
-    Returns None if any value is missing (strict TTM)."""
-    quarterly = [e for e in entries if e.get("timeframe") == "quarterly"]
-    quarterly = quarterly[:n]
-    if len(quarterly) < n:
-        return None
-    total = 0.0
-    for e in quarterly:
-        s = (e.get("financials") or {}).get(section) or {}
-        v = (s.get(concept) or {}).get("value")
-        if v is None:
-            return None
-        try:
-            total += float(v)
-        except (TypeError, ValueError):
-            return None
-    return total
-
-
-def _latest_value(entries: list[dict[str, Any]], section: str, concept: str) -> float | None:
-    """Return the value of ``concept`` from the most recent entry, if present."""
-    for e in entries:
-        s = (e.get("financials") or {}).get(section) or {}
-        v = (s.get(concept) or {}).get("value")
-        if v is not None:
-            try:
-                return float(v)
-            except (TypeError, ValueError):
-                continue
-    return None
 
 
 def _close_at(ticker: str, curr_date: str) -> float | None:
@@ -324,14 +194,20 @@ def get_fundamentals(
     """Build an overview fundamentals report for ``ticker`` at ``curr_date``.
 
     Combines Polygon's ``/v3/reference/tickers`` (company metadata, shares,
-    SIC code), the latest PIT-visible financials, daily bar history (52w
-    range + moving averages), and derived TTM ratios. The market cap shown
+    SIC code), SEC EDGAR facts filed on or before ``curr_date`` (TTM revenue,
+    margins, EPS, latest balance sheet), daily bar history (52w range + moving
+    averages), and derived ratios. The market cap shown
     is the as-of value from Polygon's reference data, which uses the share
     count and price valid on ``curr_date`` — eliminating the split-adjustment
     pitfalls the yfinance-derived path had on tickers like NVDA.
     """
     if not curr_date:
         curr_date = datetime.utcnow().strftime("%Y-%m-%d")
+
+    # Filing-derived fields come from SEC EDGAR, fetched first: when EDGAR has no
+    # coverage or cannot be reached this raises, and the router serves the
+    # overview from the next vendor (yfinance) instead of a half-empty one.
+    edgar_snapshot = sec_edgar.ttm_snapshot(ticker, curr_date)
 
     out_lines: list[str] = []
     derived_count = 0
@@ -387,17 +263,14 @@ def get_fundamentals(
         out_lines.append(f"200-Day Moving Average: ${sma200:.2f}")
         derived_count += 1
 
-    # Quarterly financials (TTM)
-    quarterlies = _financials_facts(ticker, curr_date=curr_date, timeframe="quarterly", limit=8)
-
-    revenue_ttm = _ttm_sum(quarterlies, "income_statement", "revenues")
-    net_income_ttm = _ttm_sum(quarterlies, "income_statement", "net_income_loss")
-    op_income_ttm = _ttm_sum(quarterlies, "income_statement", "operating_income_loss")
-    diluted_eps_ttm = _ttm_sum(quarterlies, "income_statement", "diluted_earnings_per_share")
-    basic_eps_ttm = _ttm_sum(quarterlies, "income_statement", "basic_earnings_per_share")
-    op_cash_ttm = _ttm_sum(quarterlies, "cash_flow_statement", "net_cash_flow_from_operating_activities")
-    capex_ttm = _ttm_sum(quarterlies, "cash_flow_statement", "net_cash_flow_from_investing_activities_continuing")
-    gross_profit_ttm = _ttm_sum(quarterlies, "income_statement", "gross_profit")
+    # Filing-derived figures (TTM sums, latest balance sheet) from SEC EDGAR
+    snap = edgar_snapshot
+    revenue_ttm = snap.get("revenue")
+    gross_profit_ttm = snap.get("gross_profit")
+    op_income_ttm = snap.get("operating_income")
+    net_income_ttm = snap.get("net_income")
+    eps_ttm = snap.get("eps")
+    op_cash_ttm = snap.get("operating_cash_flow")
 
     if revenue_ttm is not None:
         out_lines.append(f"Revenue (TTM): {_format_money(revenue_ttm)}")
@@ -419,7 +292,6 @@ def get_fundamentals(
         derived_count += 1
 
     # Diluted EPS TTM and PE
-    eps_ttm = diluted_eps_ttm if diluted_eps_ttm is not None else basic_eps_ttm
     if eps_ttm is not None:
         out_lines.append(f"EPS (TTM): {eps_ttm:.2f}")
         derived_count += 1
@@ -432,14 +304,11 @@ def get_fundamentals(
         out_lines.append(f"Operating Cash Flow (TTM): {_format_money(op_cash_ttm)}")
         derived_count += 1
 
-    # Latest balance sheet snapshot (most recent quarterly)
-    cash = _latest_value(quarterlies, "balance_sheet", "cash_and_equivalents") \
-        or _latest_value(quarterlies, "balance_sheet", "cash")
-    debt = _latest_value(quarterlies, "balance_sheet", "long_term_debt") \
-        or _latest_value(quarterlies, "balance_sheet", "noncurrent_liabilities")
-    total_equity = _latest_value(quarterlies, "balance_sheet", "equity") \
-        or _latest_value(quarterlies, "balance_sheet", "stockholders_equity")
-    total_assets = _latest_value(quarterlies, "balance_sheet", "assets")
+    # Latest balance sheet snapshot
+    cash = snap.get("cash")
+    debt = snap.get("long_term_debt")
+    total_equity = snap.get("equity")
+    total_assets = snap.get("total_assets")
 
     if cash is not None:
         out_lines.append(f"Cash & Equivalents (latest): {_format_money(cash)}")
@@ -458,73 +327,19 @@ def get_fundamentals(
             derived_count += 1
 
     # Reporting period reference
-    if quarterlies:
-        latest = quarterlies[0]
-        period_end = latest.get("end_date") or latest.get("period_of_report_date")
-        filing_date = latest.get("filing_date")
-        if filing_date:
-            out_lines.append(
-                f"Most recent fiscal period: {period_end} (filed {filing_date})"
-            )
-        else:
-            out_lines.append(
-                f"Most recent fiscal period: {period_end} "
-                f"(filing date not reported by Polygon — visibility inferred from "
-                f"period_of_report + 90-day filing-lag fallback)"
-            )
+    if snap.get("latest_period_end"):
+        out_lines.append(
+            f"Most recent fiscal period: {snap['latest_period_end']} (filed {snap['latest_filed']})"
+        )
 
     header = (
         f"# Company Fundamentals for {ticker.upper()}\n"
-        f"# Source: Polygon (point-in-time as of {curr_date})\n"
+        f"# Source: Polygon reference data and bars + SEC EDGAR filings (point-in-time as of {curr_date})\n"
         f"# {derived_count} fields derived from filings & bars available on or before {curr_date}\n"
         f"# Forward-looking analyst projections (Forward EPS / PE / PEG) intentionally omitted —\n"
         f"#   no PIT-correct source.\n\n"
     )
     return header + "\n".join(out_lines)
-
-
-def _statement_report(
-    ticker: str,
-    section: str,
-    label: str,
-    freq: str,
-    curr_date: str | None,
-) -> str:
-    timeframe = "annual" if (freq or "").lower() == "annual" else "quarterly"
-    entries = _financials_facts(ticker, curr_date=curr_date, timeframe=timeframe, limit=8)
-    csv_string = _statement_to_csv(entries, section)
-    if not csv_string:
-        return f"No {label.lower()} data found for symbol '{ticker}'"
-    header = (
-        f"# {label} data for {ticker.upper()} ({timeframe})\n"
-        f"# Source: Polygon (point-in-time, filings public on or before {curr_date or 'latest'})\n"
-        f"# Periods returned: {len(entries)}\n\n"
-    )
-    return header + csv_string
-
-
-def get_balance_sheet(
-    ticker: Annotated[str, "ticker symbol of the company"],
-    freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",
-    curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None,
-) -> str:
-    return _statement_report(ticker, "balance_sheet", "Balance Sheet", freq, curr_date)
-
-
-def get_cashflow(
-    ticker: Annotated[str, "ticker symbol of the company"],
-    freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",
-    curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None,
-) -> str:
-    return _statement_report(ticker, "cash_flow_statement", "Cash Flow", freq, curr_date)
-
-
-def get_income_statement(
-    ticker: Annotated[str, "ticker symbol of the company"],
-    freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",
-    curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None,
-) -> str:
-    return _statement_report(ticker, "income_statement", "Income Statement", freq, curr_date)
 
 
 def get_indicators(

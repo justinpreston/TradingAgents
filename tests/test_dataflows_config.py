@@ -107,7 +107,7 @@ def test_a_run_reads_its_own_graphs_vendors_not_the_last_graph_built():
 
     defaults = default_config.DEFAULT_CONFIG
     expected = (defaults.get("tool_vendors") or {}).get("get_balance_sheet") \
-        or defaults["data_vendors"]["fundamental_data"]   # fork default: polygon
+        or defaults["data_vendors"]["fundamental_data"]   # default: sec_edgar,yfinance
     assert _vendors_seen_by_a_run(second) == [expected]
 
 

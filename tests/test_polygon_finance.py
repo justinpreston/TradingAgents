@@ -3,157 +3,24 @@
 Mocks :func:`tradingagents.dataflows.vendors.polygon.common._make_request` and
 :func:`paginated_results` so no live network calls are made. Validates:
 
-* PIT visibility rule (filing_date + period_of_report fallback)
-* Strict TTM aggregation (returns None when any quarter missing)
-* Statement-to-CSV shape (rows=concepts, columns=periods)
-* End-to-end ``get_fundamentals`` integration with mocked endpoints
+* End-to-end ``get_fundamentals`` integration with mocked Polygon endpoints and
+  a mocked SEC EDGAR snapshot (the retired Polygon financials endpoint is gone)
 * Vendor router fallback when Polygon raises
 """
 
 from __future__ import annotations
 
-from datetime import datetime
 from unittest.mock import patch
 
 import pytest
 
+from tradingagents.dataflows.errors import NoMarketDataError, VendorUnavailableError
 from tradingagents.dataflows.vendors.polygon import finance as pf
 from tradingagents.dataflows.vendors.polygon.common import (
     PolygonError,
     PolygonNotFoundError,
     PolygonRateLimitError,
 )
-
-
-# ---------------------------------------------------------------------------
-# _is_pit_visible
-# ---------------------------------------------------------------------------
-
-
-class TestIsPitVisible:
-    """Filings with filing_date < curr_date are visible. Filings without
-    filing_date fall back to a period_of_report + 90-day lag rule.
-    """
-
-    @staticmethod
-    def _curr() -> datetime:
-        return datetime(2024, 5, 10)
-
-    def test_filing_date_strictly_before_curr_date_is_visible(self):
-        entry = {"filing_date": "2024-05-09", "end_date": "2024-04-28"}
-        assert pf._is_pit_visible(entry, self._curr()) is True
-
-    def test_filing_date_equal_to_curr_date_is_not_visible(self):
-        # Strictly less-than: a filing made today wasn't on the wire when the
-        # market opened, so we exclude it from "visible at curr_date".
-        entry = {"filing_date": "2024-05-10", "end_date": "2024-04-28"}
-        assert pf._is_pit_visible(entry, self._curr()) is False
-
-    def test_filing_date_after_curr_date_is_not_visible(self):
-        entry = {"filing_date": "2024-05-29", "end_date": "2024-04-28"}
-        assert pf._is_pit_visible(entry, self._curr()) is False
-
-    def test_null_filing_date_with_old_period_is_visible_via_lag(self):
-        # period_of_report + 90 days <= curr_date → assume the SEC filing
-        # window has elapsed and the data is publicly available.
-        entry = {"filing_date": None, "end_date": "2024-01-31"}  # +90d = 2024-04-30
-        assert pf._is_pit_visible(entry, self._curr()) is True
-
-    def test_null_filing_date_with_recent_period_is_not_visible(self):
-        # period_of_report = curr_date - 30d → still inside the typical filing
-        # window, no filing_date evidence, so we treat it as not yet public.
-        entry = {"filing_date": None, "end_date": "2024-04-10"}
-        assert pf._is_pit_visible(entry, self._curr()) is False
-
-    def test_no_dates_at_all_is_not_visible(self):
-        # Defensive: row with neither filing_date nor period_of_report is
-        # excluded — better to drop than risk look-ahead.
-        entry = {"filing_date": None, "end_date": None}
-        assert pf._is_pit_visible(entry, self._curr()) is False
-
-
-# ---------------------------------------------------------------------------
-# _ttm_sum
-# ---------------------------------------------------------------------------
-
-
-def _quarter(value, concept="revenues", section="income_statement"):
-    """Build a Polygon-shaped financials entry with a single concept value."""
-    return {
-        "timeframe": "quarterly",
-        "financials": {
-            section: {
-                concept: {"value": value, "label": concept},
-            }
-        }
-    }
-
-
-class TestTtmSum:
-    def test_strict_ttm_sums_four_quarters(self):
-        quarters = [_quarter(100), _quarter(200), _quarter(150), _quarter(250)]
-        assert pf._ttm_sum(quarters, "income_statement", "revenues") == 700
-
-    def test_ttm_returns_none_when_fewer_than_four_quarters(self):
-        quarters = [_quarter(100), _quarter(200), _quarter(150)]
-        assert pf._ttm_sum(quarters, "income_statement", "revenues") is None
-
-    def test_ttm_returns_none_when_any_quarter_missing_value(self):
-        # All four entries present but one has no value for the concept.
-        quarters = [
-            _quarter(100),
-            _quarter(200),
-            {"timeframe": "quarterly", "financials": {"income_statement": {}}},  # missing concept
-            _quarter(250),
-        ]
-        assert pf._ttm_sum(quarters, "income_statement", "revenues") is None
-
-    def test_ttm_uses_only_first_four_quarters(self):
-        # If 5 are passed, only the most recent 4 (caller's responsibility
-        # to order) are summed.
-        quarters = [_quarter(100), _quarter(200), _quarter(150), _quarter(250), _quarter(999)]
-        assert pf._ttm_sum(quarters, "income_statement", "revenues") == 700
-
-
-# ---------------------------------------------------------------------------
-# _statement_to_csv
-# ---------------------------------------------------------------------------
-
-
-class TestStatementToCsv:
-    def test_csv_shape_has_concepts_as_rows_and_periods_as_columns(self):
-        entries = [
-            {
-                "end_date": "2024-04-28",
-                "financials": {
-                    "income_statement": {
-                        "revenues": {"value": 26044000000.0, "label": "Revenue"},
-                        "gross_profit": {"value": 20407000000.0, "label": "Gross Profit"},
-                    }
-                },
-            },
-            {
-                "end_date": "2024-01-28",
-                "financials": {
-                    "income_statement": {
-                        "revenues": {"value": 22103000000.0, "label": "Revenue"},
-                        "gross_profit": {"value": 16791000000.0, "label": "Gross Profit"},
-                    }
-                },
-            },
-        ]
-        csv = pf._statement_to_csv(entries, "income_statement")
-        # Headers: concept column + each period
-        assert "concept" in csv.lower() or "metric" in csv.lower() or "label" in csv.lower()
-        assert "2024-04-28" in csv
-        assert "2024-01-28" in csv
-        # Both concepts represented
-        assert "revenues" in csv.lower() or "revenue" in csv.lower()
-        assert "gross_profit" in csv.lower() or "gross profit" in csv.lower()
-
-    def test_csv_handles_empty_entries(self):
-        csv = pf._statement_to_csv([], "income_statement")
-        assert csv == "" or "no data" in csv.lower() or csv.startswith("concept") or csv.startswith("metric") or csv.startswith("label")
 
 
 # ---------------------------------------------------------------------------
@@ -181,40 +48,24 @@ _NVDA_BARS = {
 }
 
 
-def _fin_quarter(end_date, filing_date, revenues, net_income=None, gross_profit=None):
-    inc = {"revenues": {"value": revenues, "label": "Revenues"}}
-    if gross_profit is not None:
-        inc["gross_profit"] = {"value": gross_profit, "label": "Gross Profit"}
-    if net_income is not None:
-        inc["net_income_loss"] = {"value": net_income, "label": "Net Income"}
-    return {
-        "filing_date": filing_date,
-        "end_date": end_date,
-        "timeframe": "quarterly",
-        "financials": {
-            "income_statement": inc,
-            "balance_sheet": {
-                "assets": {"value": 65728000000.0, "label": "Total Assets"},
-                "equity": {"value": 42978000000.0, "label": "Equity"},
-                "long_term_debt": {"value": 9709000000.0, "label": "Long-Term Debt"},
-            },
-            "cash_flow_statement": {
-                "net_cash_flow_from_operating_activities": {"value": 7000000000.0, "label": "OCF"},
-            },
-        },
-    }
-
-
-_NVDA_FINANCIALS = [
-    _fin_quarter("2024-01-28", "2024-02-21", 22103000000, 12285000000, 16791000000),
-    _fin_quarter("2023-10-29", "2023-11-21", 18120000000, 9243000000, 13400000000),
-    _fin_quarter("2023-07-30", "2023-08-23", 13507000000, 6188000000, 9462000000),
-    _fin_quarter("2023-04-30", "2023-05-24", 7192000000, 2043000000, 4648000000),
-]
+# What sec_edgar.ttm_snapshot returns for NVDA as of 2024-05-10 (the EDGAR parsing
+# itself is tested in test_edgar_fundamentals.py).
+_NVDA_SNAPSHOT = {
+    "revenue": 60922000000.0,
+    "gross_profit": 44301000000.0,
+    "net_income": 29760000000.0,
+    "eps": 11.93,
+    "cash": 7280000000.0,
+    "total_assets": 65728000000.0,
+    "equity": 42978000000.0,
+    "long_term_debt": 8459000000.0,
+    "latest_period_end": "2024-01-28",
+    "latest_filed": "2024-02-21",
+}
 
 
 class TestGetFundamentalsIntegration:
-    """Full get_fundamentals call with mocked Polygon endpoints."""
+    """Full get_fundamentals call with mocked Polygon endpoints and EDGAR snapshot."""
 
     def _route(self, endpoint, params=None):
         """Mock dispatcher: route calls based on URL prefix."""
@@ -226,46 +77,65 @@ class TestGetFundamentalsIntegration:
 
     def test_get_fundamentals_returns_correct_market_cap_for_nvda(self):
         with patch.object(pf, "_make_request", side_effect=self._route), \
-             patch.object(pf, "paginated_results", return_value=_NVDA_FINANCIALS):
+             patch.object(pf.sec_edgar, "ttm_snapshot", return_value=_NVDA_SNAPSHOT) as snap:
             report = pf.get_fundamentals("NVDA", "2024-05-10")
 
         # Critical: market cap must be in trillions, not buggy $224B
         assert "$2.25T" in report or "$2.24T" in report
         assert "Nvidia" in report
         assert "SEMICONDUCTORS" in report.upper()
-        # PIT date appears in header
+        # PIT date appears in header, and EDGAR was asked for that date
         assert "2024-05-10" in report
+        snap.assert_called_once_with("NVDA", "2024-05-10")
 
-    def test_get_fundamentals_filters_out_post_curr_date_filings(self):
-        """A row with filing_date AFTER curr_date must not influence the
-        report — this is the guarantee that yf_pit_derivations Path D failed."""
-        leaked_future = _fin_quarter("2024-04-28", "2026-01-25", 99999999999)
-        all_financials = [leaked_future] + _NVDA_FINANCIALS
-
+    def test_filing_derived_fields_come_from_the_edgar_snapshot(self):
         with patch.object(pf, "_make_request", side_effect=self._route), \
-             patch.object(pf, "paginated_results", return_value=all_financials):
+             patch.object(pf.sec_edgar, "ttm_snapshot", return_value=_NVDA_SNAPSHOT):
             report = pf.get_fundamentals("NVDA", "2024-05-10")
+        assert "Revenue (TTM): $60.92B" in report
+        assert "Gross Margin (TTM): 72.7%" in report
+        assert "Net Income (TTM): $29.76B" in report
+        assert "EPS (TTM): 11.93" in report
+        assert "Total Assets (latest): $65.73B" in report
+        assert "Most recent fiscal period: 2024-01-28 (filed 2024-02-21)" in report
+        # Fields the filer did not tag are omitted, never invented.
+        assert "Operating Income (TTM)" not in report
+        assert "Operating Cash Flow (TTM)" not in report
 
-        # The leaked future-filed row's revenues (99,999,999,999) must not
-        # appear; only the legitimate ~$60B TTM should.
-        assert "99999999999" not in report
-        assert "$99.9B" not in report
+    def test_no_edgar_coverage_falls_through_to_the_next_vendor(self):
+        """An ADR or new IPO has no us-gaap facts: the overview must not be served
+        half-empty from Polygon alone, so the router moves on to yfinance."""
+        from tradingagents.dataflows import router
 
-    def test_get_fundamentals_handles_no_visible_filings(self):
-        """If every filing has filing_date >= curr_date, get_fundamentals
-        must still return a useful response (degraded but not crashing)."""
-        all_in_future = [
-            _fin_quarter("2024-04-28", "2030-01-01", 22103000000),
+        with patch.object(pf.sec_edgar, "ttm_snapshot", side_effect=NoMarketDataError("TEVA", "TEVA", "no facts")), \
+             patch.object(pf, "_make_request", side_effect=AssertionError("Polygon must not be called")), \
+             patch.object(router, "get_vendor", return_value="polygon,yfinance"), \
+             patch.dict(router.VENDOR_METHODS["get_fundamentals"],
+                        {"polygon": pf.get_fundamentals, "yfinance": lambda *a, **k: "YF OVERVIEW"}):
+            assert router.route_to_vendor("get_fundamentals", "TEVA", "2024-05-10") == "YF OVERVIEW"
+
+    def test_edgar_outage_falls_through_to_the_next_vendor(self):
+        from tradingagents.dataflows import router
+
+        with patch.object(pf.sec_edgar, "ttm_snapshot", side_effect=VendorUnavailableError("503")), \
+             patch.object(router, "get_vendor", return_value="polygon,yfinance"), \
+             patch.dict(router.VENDOR_METHODS["get_fundamentals"],
+                        {"polygon": pf.get_fundamentals, "yfinance": lambda *a, **k: "YF OVERVIEW"}):
+            assert router.route_to_vendor("get_fundamentals", "NVDA", "2024-05-10") == "YF OVERVIEW"
+
+    def test_no_code_path_calls_the_retired_financials_endpoint(self):
+        """Sunset 2026-10-09 (410 GONE in the brownout): no source file may pass the
+        endpoint as a string literal. Docstrings may still name it in backticks."""
+        from pathlib import Path
+
+        root = Path(pf.__file__).resolve().parents[3]
+        offenders = [
+            str(path) for folder in (root / "tradingagents", root / "scripts")
+            for path in folder.rglob("*.py")
+            if '"/vX/reference/financials"' in path.read_text(encoding="utf-8")
+            or "'/vX/reference/financials'" in path.read_text(encoding="utf-8")
         ]
-        with patch.object(pf, "_make_request", side_effect=self._route), \
-             patch.object(pf, "paginated_results", return_value=all_in_future):
-            report = pf.get_fundamentals("NVDA", "2024-05-10")
-
-        # Should still include the price-derived bits (close, 52w range)
-        # and metadata even when no PIT financials are visible.
-        assert "Nvidia" in report
-        # No TTM revenue can be computed → label should reflect missing data
-        # (we just want this to not raise)
+        assert offenders == []
 
 
 # ---------------------------------------------------------------------------

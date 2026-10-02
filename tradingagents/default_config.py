@@ -147,7 +147,10 @@ def build_default_config() -> dict:
         "data_vendors": {
             "core_stock_apis": "polygon",       # Options: polygon, alpha_vantage, yfinance
             "technical_indicators": "polygon",  # Options: polygon, alpha_vantage, yfinance
-            "fundamental_data": "polygon",      # Options: polygon, sec_edgar, alpha_vantage, yfinance
+            # Statements: SEC EDGAR as filed (point-in-time by filing date), Yahoo as
+            # fallback. Polygon's financials endpoint is retired (sunset 2026-10-09)
+            # and has no statement implementation any more.
+            "fundamental_data": "sec_edgar,yfinance",  # Options: sec_edgar, alpha_vantage, yfinance
             "news_data": "polygon",             # Options: polygon, alpha_vantage, yfinance
             "macro_data": "fred",                # Options: fred (needs FRED_API_KEY)
             "prediction_markets": "polymarket",  # Options: polymarket (keyless)
@@ -158,6 +161,10 @@ def build_default_config() -> dict:
             # Route this single tool to yfinance (free, always available) with
             # alpha_vantage as backup when ALPHA_VANTAGE_API_KEY is configured.
             "get_insider_transactions": "yfinance,alpha_vantage",
+            # The overview is Polygon reference data + bars plus EDGAR-derived TTM
+            # fields (point-in-time for past dates); yfinance when EDGAR has no
+            # coverage for the ticker (ADRs, new IPOs) or cannot be reached.
+            "get_fundamentals": "polygon,yfinance",
         },
         # Benchmark for alpha calculation in the reflection layer.
         # ``benchmark_ticker`` (when set) overrides the suffix map for all

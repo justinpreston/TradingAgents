@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Callable
 
+from tradingagents.dataflows.errors import VendorUnavailableError
 from tradingagents.dataflows.vendors.polygon.common import (
     PolygonRateLimitError,
     min_request_interval,
@@ -141,7 +142,9 @@ def run_screener(
 
             try:
                 fund = compute_fundamental_signals(entry.ticker)
-            except PolygonRateLimitError as e:
+            except (PolygonRateLimitError, VendorUnavailableError) as e:
+                # SEC EDGAR throttling or an outage is not "no filings": the
+                # run is partial, not the ticker uncovered.
                 rate_limited_failures.append(f"{entry.ticker}:fundamentals")
                 log.warning(
                     "rate limit on fundamentals for %s — scoring on tech only: %s",

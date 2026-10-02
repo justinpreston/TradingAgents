@@ -10,13 +10,18 @@ bubbles. The signals that matter for early-cycle catches:
   * Top-line growth rate >= 15% YoY (filters out dying-business turnarounds
     that are only "cheap")
 
-Polygon's ``/vX/reference/financials`` endpoint returns SEC filings with
-breakdowns under ``financials.income_statement``, ``cash_flow_statement``,
-etc. We use ``timeframe=quarterly`` to get the last 4–8 quarters.
+The quarterly series comes from SEC EDGAR company facts
+(:func:`tradingagents.dataflows.vendors.sec_edgar.quarterly_income_series`):
+the last 8 consecutive fiscal quarters of revenue, gross profit and operating
+income, with a fourth quarter derived from the annual figure where the filer
+reports it only there. (Polygon's ``/vX/reference/financials`` endpoint, which
+this used to read, is retired and returned no fourth quarters at all.)
 
 For tickers with insufficient financial history (recent IPOs, ADRs that
 don't file 10-Q, etc.) we return an ``insufficient_data`` flag and zero
 score — those names can still pass on technicals alone if the user wants.
+A failed EDGAR request is *not* insufficient data: it raises
+``VendorUnavailableError`` so the orchestrator can mark the run partial.
 
 Caching: by default :func:`compute_fundamental_signals` consults a
 disk cache keyed by ticker with a 7-day TTL — financials don't change
@@ -30,10 +35,7 @@ import logging
 from dataclasses import asdict, dataclass, field, fields
 
 from tradingagents.dataflows._disk_cache import DiskCache
-from tradingagents.dataflows.vendors.polygon.common import (
-    PolygonNotFoundError,
-    paginated_results,
-)
+from tradingagents.dataflows.vendors import sec_edgar
 
 log = logging.getLogger(__name__)
 
@@ -41,7 +43,10 @@ log = logging.getLogger(__name__)
 # cache; mid-week re-screens (e.g. VIX spike, override-trigger reruns) hit
 # cache for the prior week's tickers.
 _FUNDAMENTALS_CACHE_TTL_S = 7 * 24 * 3600
-_FUNDAMENTALS_CACHE = DiskCache("fundamentals", ttl_seconds=_FUNDAMENTALS_CACHE_TTL_S)
+# The namespace carries the data source and shape: entries written by the old
+# Polygon-backed screener lived under "fundamentals" and are never read.
+_FUNDAMENTALS_CACHE_NAMESPACE = "fundamentals_edgar_v1"
+_FUNDAMENTALS_CACHE = DiskCache(_FUNDAMENTALS_CACHE_NAMESPACE, ttl_seconds=_FUNDAMENTALS_CACHE_TTL_S)
 
 
 @dataclass
@@ -65,41 +70,19 @@ class FundamentalSignals:
     flags: list[str] = field(default_factory=list)
 
 
-def fetch_quarterly_financials(ticker: str, *, max_quarters: int = 8) -> list[dict]:
-    """Pull last ``max_quarters`` of quarterly SEC filings from Polygon.
+def fetch_quarterly_financials(ticker: str, *, max_quarters: int = 8, as_of_date: str | None = None) -> list[dict]:
+    """The last ``max_quarters`` consecutive quarters from SEC EDGAR, oldest first.
 
-    Only swallows :class:`PolygonNotFoundError` (ticker not covered by SEC
-    filings — typical for ADRs, recent IPOs, foreign issuers). Auth and
-    rate-limit errors propagate so the orchestrator can flag the run as
-    partial rather than silently labelling tickers ``insufficient_data``.
+    Each report is {"end", "filed", "revenue", "gross_profit", "operating_income"}.
+    Returns ``[]`` for a ticker EDGAR does not cover (ADRs and other foreign
+    filers, recent IPOs, no us-gaap facts). A failed or throttled request
+    propagates as :class:`VendorUnavailableError` so the orchestrator can flag
+    the run as partial rather than silently labelling tickers
+    ``insufficient_data``.
     """
-    try:
-        results = paginated_results(
-            "/vX/reference/financials",
-            initial_params={
-                "ticker": ticker,
-                "timeframe": "quarterly",
-                "order": "desc",
-                "sort": "filing_date",
-                "limit": max_quarters,
-            },
-            max_pages=2,
-        )
-    except PolygonNotFoundError:
-        log.debug("financials 404 for %s — no SEC filings indexed", ticker)
-        return []
-    return results[:max_quarters]
-
-
-def _income_value(report: dict, key: str) -> float:
-    """Pull a numeric value from financials.income_statement.{key}.value."""
-    try:
-        return float(
-            (((report.get("financials") or {}).get("income_statement") or {})
-             .get(key) or {}).get("value") or 0.0
-        )
-    except (TypeError, ValueError):
-        return 0.0
+    # Raw company facts are not written to the disk cache here: this runs for
+    # the whole universe and the derived signals have their own 7-day cache.
+    return sec_edgar.quarterly_income_series(ticker, as_of_date, max_quarters, persist=False)
 
 
 def _signals_from_dict(d: dict) -> "FundamentalSignals":
@@ -160,24 +143,19 @@ def _build_signals(ticker: str, reports: list[dict]) -> "FundamentalSignals":
         sig.flags.append("insufficient_data")
         return sig
 
-    # Reports come back desc by filing_date — reorder asc by fiscal period_of_report_date
-    sorted_reports = sorted(
-        reports,
-        key=lambda r: r.get("period_of_report_date") or r.get("end_date") or "",
-    )
+    sorted_reports = sorted(reports, key=lambda r: r.get("end") or "")
 
     revenues: list[float] = []
     gross_margins: list[float] = []
     op_margins: list[float] = []
     for r in sorted_reports:
-        rev = _income_value(r, "revenues")
-        cogs = _income_value(r, "cost_of_revenue") or _income_value(r, "cost_of_goods_and_services_sold")
-        op_inc = _income_value(r, "operating_income_loss")
+        rev = r.get("revenue") or 0.0
+        gross = r.get("gross_profit") or 0.0
+        op_inc = r.get("operating_income") or 0.0
         if rev <= 0:
             continue
         revenues.append(rev)
-        gross = rev - cogs if cogs > 0 else 0.0
-        gross_margins.append((gross / rev) if (cogs > 0 and gross > 0) else 0.0)
+        gross_margins.append((gross / rev) if gross > 0 else 0.0)
         op_margins.append((op_inc / rev) if op_inc != 0 else 0.0)
 
     sig.revenue_quarterly = revenues

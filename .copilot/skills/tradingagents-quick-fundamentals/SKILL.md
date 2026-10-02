@@ -1,7 +1,7 @@
 # TradingAgents · Quick Fundamentals
 
 Pull a ticker's point-in-time fundamentals snapshot + recent insider
-transactions. Wraps `polygon_finance.get_fundamentals()` (revenue, margins,
+transactions. Wraps the routed `get_fundamentals` (Polygon reference + bars with SEC EDGAR filing-derived TTM figures; yfinance fallback) (revenue, margins,
 balance sheet, cash flow, valuation ratios) and the routed
 `get_insider_transactions` call (Form-4 transactions via the yfinance →
 alpha_vantage fallback chain; Polygon free tier doesn't expose insider data).
@@ -40,7 +40,7 @@ Markdown with:
 - Insider transactions (last several quarters): CFO / CEO / director sales,
   grants, gifts with prices and share counts
 
-All numbers are **sourced** to Polygon (fundamentals) and yfinance /
+All numbers are **sourced** to Polygon + SEC EDGAR (fundamentals) and yfinance /
 alpha_vantage (insider). Never quote a number not in the output.
 
 ## Communication style
