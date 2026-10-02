@@ -146,7 +146,7 @@ def test_cache_namespace_is_not_the_old_polygon_one(isolated_cache: DiskCache, t
 def test_a_failed_fetch_is_not_cached_as_insufficient_data(isolated_cache: DiskCache) -> None:
     from tradingagents.dataflows.errors import VendorUnavailableError
 
-    with patch.object(fundamentals, "fetch_quarterly_financials", side_effect=VendorUnavailableError("503")):
-        with pytest.raises(VendorUnavailableError):
-            compute_fundamental_signals("AAPL")
+    with patch.object(fundamentals, "fetch_quarterly_financials", side_effect=VendorUnavailableError("503")), \
+            pytest.raises(VendorUnavailableError):
+        compute_fundamental_signals("AAPL")
     assert isolated_cache.get("AAPL") is None

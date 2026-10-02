@@ -276,9 +276,9 @@ def test_an_http_404_is_distinguishable_from_other_failures(monkeypatch):
                              (500, VendorUnavailableError)):
         response = requests.Response()
         response.status_code = status
-        with mock.patch.object(sec_edgar.requests, "get", return_value=response):
-            with pytest.raises(expected) as caught:
-                sec_edgar._fetch_json("https://data.sec.gov/x")
+        with mock.patch.object(sec_edgar.requests, "get", return_value=response), \
+                pytest.raises(expected) as caught:
+            sec_edgar._fetch_json("https://data.sec.gov/x")
         assert type(caught.value) is expected
 
 
@@ -425,7 +425,7 @@ def test_requests_are_spaced_under_the_ten_per_second_limit(monkeypatch):
     for _ in range(5):
         sec_edgar._pace()
         stamps.append(clock[0])
-    gaps = [b - a for a, b in zip(stamps, stamps[1:])]
+    gaps = [b - a for a, b in zip(stamps, stamps[1:], strict=False)]
     assert gaps and all(g >= sec_edgar._MIN_INTERVAL - 1e-9 for g in gaps)
     assert 1 / sec_edgar._MIN_INTERVAL < 10          # strictly under SEC's limit
     assert len(slept) == 4                           # the first request does not wait
@@ -462,7 +462,7 @@ def test_threads_share_one_pacer(monkeypatch):
     [t.join() for t in threads]
     slots.sort()
     assert len(slots) == 7
-    assert all(b - a >= sec_edgar._MIN_INTERVAL - 1e-9 for a, b in zip(slots, slots[1:]))
+    assert all(b - a >= sec_edgar._MIN_INTERVAL - 1e-9 for a, b in zip(slots, slots[1:], strict=False))
 
 
 def test_every_fetch_is_paced_and_identifies_the_caller(monkeypatch):
