@@ -48,3 +48,23 @@ def test_router_passes_the_trade_date_through_to_polygon():
 def test_no_wall_clock_stamp_in_polygon_tool_output():
     import inspect
     assert "Data retrieved on" not in inspect.getsource(pf)
+
+
+def test_polygon_errors_never_carry_the_api_key(monkeypatch):
+    """requests quotes the full URL (with ?apiKey=...) in connection errors; that
+    text reaches tool output, prompts, state files and logs, so it is scrubbed."""
+    import requests
+
+    from tradingagents.dataflows.vendors.polygon import common
+
+    monkeypatch.setenv("POLYGON_API_KEY", "sekret-key-123")
+
+    def _boom(url, params=None, timeout=None, **k):
+        raise requests.ConnectionError(f"Max retries exceeded with url: {url}?apiKey={params['apiKey']}")
+
+    monkeypatch.setattr(common.requests, "get", _boom)
+    monkeypatch.setattr(common.time, "sleep", lambda s: None)
+    with pytest.raises(common.PolygonError) as exc:
+        common._make_request("/v2/aggs/ticker/AAPL/prev", max_attempts=1)
+    assert "sekret-key-123" not in str(exc.value)
+    assert "***" in str(exc.value)

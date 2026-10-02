@@ -3,6 +3,7 @@ import os
 from langchain_core.messages import ToolMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
+from tradingagents.agents.analysts.turn import take_turn
 from tradingagents.agents.context import get_instrument_context_from_state, get_language_instruction
 from tradingagents.agents.tools import (
     get_balance_sheet,
@@ -106,14 +107,8 @@ def create_fundamentals_analyst(llm):
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(instrument_context=instrument_context)
 
-        chain = prompt | llm.bind_tools(tools)
-
-        result = chain.invoke(state["messages"])
-
-        report = ""
-
-        if len(result.tool_calls) == 0:
-            report = result.content
+        # Fork: the dynamic subset (TRADINGAGENTS_DISABLE_INSIDER_TXNS), not TOOLS.
+        result, report = take_turn(prompt, llm, tools, state["messages"])
 
         # Grounded-pipeline guardrail (see news_analyst.py for full rationale).
         tool_errors = []

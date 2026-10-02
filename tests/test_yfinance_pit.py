@@ -204,7 +204,7 @@ def test_historical_curr_date_reconstructs_pit_snapshot():
     never read the live ``info`` snapshot — not even stable fields (#1300)."""
     past = "2024-05-10"
     with _patch_ticker(_fake_info(), **_full_pit_overrides()):
-        out = y_finance.get_fundamentals("NVDA", curr_date=past)
+        out = y_finance.get_fundamentals("NVDA", as_of_date=past)
 
     assert "Market Cap:" in out, "Market Cap should be reconstructed for historical"
     # Reconstructed market cap must NOT match the poisoned live info value.
@@ -410,7 +410,7 @@ def test_derivation_failure_does_not_crash_get_fundamentals():
     )
 
     with patch.object(y_finance.yf, "Ticker", return_value=fake_ticker):
-        out = y_finance.get_fundamentals("NVDA", curr_date="2024-05-10")
+        out = y_finance.get_fundamentals("NVDA", as_of_date="2024-05-10")
 
     assert "withheld" in out
     assert "Reconstructed point-in-time figures" not in out
@@ -421,7 +421,7 @@ def test_derivation_failure_does_not_crash_get_fundamentals():
 def test_no_curr_date_preserves_live_snapshot_fields():
     """Backwards compatibility: curr_date=None returns the full live snapshot."""
     with _patch_ticker(_fake_info()):
-        out = y_finance.get_fundamentals("NVDA", curr_date=None)
+        out = y_finance.get_fundamentals("NVDA", as_of_date=None)
 
     for label in _LIVE_FIELD_LABELS + _STABLE_FIELD_LABELS:
         assert f"{label}:" in out, f"{label!r} missing from live (no-curr_date) output"
@@ -434,7 +434,7 @@ def test_today_preserves_live_snapshot_fields():
     """curr_date == today is a *live* call and must not trip the historical guard."""
     today = datetime.now().date().strftime("%Y-%m-%d")
     with _patch_ticker(_fake_info()):
-        out = y_finance.get_fundamentals("NVDA", curr_date=today)
+        out = y_finance.get_fundamentals("NVDA", as_of_date=today)
 
     assert "Market Cap:" in out
     assert "Point-in-time mode" not in out
@@ -446,7 +446,7 @@ def test_future_curr_date_treated_as_live():
     than silently returning an empty 'point-in-time' view."""
     future = (datetime.now().date() + timedelta(days=30)).strftime("%Y-%m-%d")
     with _patch_ticker(_fake_info()):
-        out = y_finance.get_fundamentals("NVDA", curr_date=future)
+        out = y_finance.get_fundamentals("NVDA", as_of_date=future)
 
     assert "Market Cap:" in out
     assert "Point-in-time mode" not in out
@@ -456,7 +456,7 @@ def test_future_curr_date_treated_as_live():
 def test_malformed_curr_date_treated_as_live():
     """Invalid curr_date strings must not silently suppress fields — fall back to live."""
     with _patch_ticker(_fake_info()):
-        out = y_finance.get_fundamentals("NVDA", curr_date="not-a-date")
+        out = y_finance.get_fundamentals("NVDA", as_of_date="not-a-date")
 
     assert "Market Cap:" in out
     assert "Point-in-time mode" not in out
@@ -473,10 +473,10 @@ def test_empty_info_payload():
     """
     from tradingagents.dataflows.errors import NoMarketDataError
 
-    from tradingagents.dataflows.vendors.yahoo import ohlcv
+    from tradingagents.dataflows.vendors.yahoo import common
 
     # An empty payload probes Yahoo to tell "no data" from an outage; keep the
     # probe offline and report the vendor as up.
-    with _patch_ticker({}), patch.object(ohlcv, "vendor_reachable", lambda *a, **k: True):
+    with _patch_ticker({}), patch.object(common, "vendor_reachable", lambda *a, **k: True):
         with pytest.raises(NoMarketDataError):
-            y_finance.get_fundamentals("NVDA", curr_date=None)
+            y_finance.get_fundamentals("NVDA", as_of_date=None)
