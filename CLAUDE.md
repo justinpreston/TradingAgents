@@ -593,8 +593,8 @@ runs/matrix_2026-05-01_top25/
 
 ## Upstream sync (TauricResearch/TradingAgents)
 
-Remote `upstream`; synced through **v0.5.1** (v0.5.2 merged via PR #8) (2026-09-27, branch
-`port/upstream-v0.5.1`, merged tag-by-tag v0.4.0 → v0.5.0 → v0.5.1). Merge
+Remote `upstream`; synced through **v0.5.2** (2026-10-02, PR #8; earlier
+v0.4.0 → v0.5.0 → v0.5.1 tag-by-tag on 2026-09-27, PR #7). Merge
 upstream a release tag at a time and run the full suite after each. Fork seams
 to re-check on every sync:
 
@@ -608,7 +608,8 @@ to re-check on every sync:
 - `dataflows/vendors/sec_edgar.py` — upstream's statements plus fork additions:
   `_pace()` rate limiter, `EdgarNotFoundError`, `_cached_json(persist=)`,
   `quarterly_income_series()`, `ttm_snapshot()`, and the extra
-  `RevenueFromContractWithCustomerIncludingAssessedTax` revenue tag.
+  `RevenueFromContractWithCustomerIncludingAssessedTax` and (banks)
+  `RevenuesNetOfInterestExpense` revenue tags.
 - `dataflows/vendors/polygon/finance.py::get_fundamentals` — takes its
   filing-derived fields from `sec_edgar.ttm_snapshot()`; no Polygon financials.
 - `screener/fundamentals.py` — EDGAR-backed `fetch_quarterly_financials`;
