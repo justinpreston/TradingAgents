@@ -81,6 +81,10 @@ advantage — the screener provably consumes Thursday EOD bars either way
 | **Friday 14:00** | Same-day options refresh (all of today's matrix runs) + packet rebuild | launchd `com.tradingagents.friday-refresh.plist` → `scripts/friday_options_refresh.py` |
 | **Friday afternoon / Monday** | User approves signals + executes at discretion | `scripts/approve_lean_signal.py --id <TICKER-DATE>`; manual Fidelity or LEAN paper |
 
+**When JP asks for the full Friday run by hand:** first check the upstream repo for new
+commits and the model list for newer releases, then run the full pipeline as a matrix
+across models, keeping the matrix on the latest model versions.
+
 **Override triggers** (re-run outside cadence):
 - Earnings on an active pick → re-matrix that single ticker.
 - VIX > 25 or SPX −5%/week → full re-screen (regime shift).
