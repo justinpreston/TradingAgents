@@ -185,6 +185,10 @@ _PROVIDER_HEADERS = {
 _OPENAI_REASONING_MODEL = re.compile(r"^(?:gpt-(?:[5-9]|[1-9]\d)|o[1-9])(?:[.-]|$)")
 
 
+# Copilot serves GPT-5 and later (gpt-5.5, gpt-6.1-sol, ...) only via /responses.
+_COPILOT_RESPONSES_ONLY = re.compile(r"^gpt-(?:[5-9]|[1-9]\d)(?:[.-]|$)")
+
+
 def _supports_reasoning_effort(model: str) -> bool:
     """Whether the (native OpenAI) model accepts ``reasoning_effort``."""
     return bool(_OPENAI_REASONING_MODEL.match(model.lower().strip()))
@@ -354,10 +358,10 @@ class OpenAIClient(BaseLLMClient):
             existing_headers = llm_kwargs.get("default_headers", {}) or {}
             llm_kwargs["default_headers"] = {**_PROVIDER_HEADERS[self.provider], **existing_headers}
 
-        # Copilot's GPT-5 family only exposes /responses — chat/completions returns
-        # unsupported_api_for_model for any gpt-5* model on api.githubcopilot.com.
+        # Copilot's GPT-5-and-later models only expose /responses — chat/completions
+        # returns unsupported_api_for_model for them on api.githubcopilot.com.
         # (Native OpenAI's Responses API is enabled via spec.use_responses_api above.)
-        if self.provider == "copilot" and self.model.lower().startswith("gpt-5"):
+        if self.provider == "copilot" and _COPILOT_RESPONSES_ONLY.match(self.model.lower().strip()):
             llm_kwargs["use_responses_api"] = True
 
         # The subclass (provider quirks) comes from the registry spec.
