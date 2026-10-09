@@ -135,18 +135,18 @@ def test_persona_aligned_parser_accepts_full_matrix_argv():
 # ---------------------------------------------------------------------------
 
 _EXPECTED_AGGRESSIVE_TABLE = {
-    "market_analyst":         "gpt-5.5",
-    "social_analyst":         "gpt-5.5",
-    "news_analyst":           "gpt-5.5",
-    "fundamentals_analyst":   "gpt-5.5",
-    "bull_researcher":        "claude-opus-4.8",
-    "bear_researcher":        "gpt-5.5",
-    "research_manager":       "gpt-5.5",
-    "trader":                 "gpt-5.5",
-    "aggressive_analyst":     "claude-opus-4.8",
-    "neutral_analyst":        "gpt-5.5",
-    "conservative_analyst":   "gpt-5.5",
-    "portfolio_manager":      "gpt-5.5",
+    "market_analyst":         "gpt-6.1-sol",
+    "social_analyst":         "gpt-6.1-sol",
+    "news_analyst":           "gpt-6.1-sol",
+    "fundamentals_analyst":   "gpt-6.1-sol",
+    "bull_researcher":        "claude-sonnet-5.5",
+    "bear_researcher":        "gpt-6.1-sol",
+    "research_manager":       "gpt-6.1-sol",
+    "trader":                 "gpt-6.1-sol",
+    "aggressive_analyst":     "claude-sonnet-5.5",
+    "neutral_analyst":        "gpt-6.1-sol",
+    "conservative_analyst":   "gpt-6.1-sol",
+    "portfolio_manager":      "gpt-6.1-sol",
 }
 
 
@@ -155,8 +155,8 @@ def test_aggressive_routing_table_matches_old_standalone_script():
 
 
 def test_persona_aligned_default_table_unchanged():
-    assert persona_mod.PERSONA_MODELS["bull_researcher"] == "gpt-5.5"
-    assert persona_mod.PERSONA_MODELS["bear_researcher"] == "claude-opus-4.8"
+    assert persona_mod.PERSONA_MODELS["bull_researcher"] == "gpt-6.1-sol"
+    assert persona_mod.PERSONA_MODELS["bear_researcher"] == "claude-sonnet-5.5"
 
 
 def test_two_tables_differ():
