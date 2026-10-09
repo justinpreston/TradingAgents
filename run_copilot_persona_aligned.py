@@ -78,7 +78,7 @@ DEFAULT_DATE: str | None = None
 # Copilot dropped every Opus model (2026-10-09); Sonnet 5.5 fills the Claude
 # seats until an Opus route comes back.
 CLAUDE = "claude-sonnet-5.5"
-GPT = "gpt-6.1-sol"
+GPT = "gpt-5.5"
 
 PERSONA_MODELS = {
     "market_analyst":         GPT,
