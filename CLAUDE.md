@@ -175,11 +175,28 @@ fresh agent should not promote them into the rhythm without confirmation.
 | `run_copilot_persona_aligned.py` | **Cadence.** The per-ticker sub-runner every matrix cell shells out to (`SUB_RUNNER`), invoked with `--persona-routing aggressive-aligned` (the matrix's historical persona→model table). Also runnable standalone (default routing `persona-aligned`) — but does **not** write `verdict_ledger.json`. | Matrix cells; ad-hoc single-ticker checks. |
 | `run_copilot_aggressive_aligned.py` | Deprecated back-compat shim — `os.execv`s into `run_copilot_persona_aligned.py --persona-routing aggressive-aligned`. | Don't use in new work. |
 | `run_copilot_multi.py` | Sequential multi-ticker via Copilot Chat API (any model). | Ad-hoc batches. |
-| `run_copilot_opus.py`, `run_copilot_opus_multi.py` | Legacy Opus-via-Copilot launchers. | Kept for back-compat; new work should use the multi variant. |
+| `run_copilot_opus.py`, `run_copilot_opus_multi.py` | Legacy Opus-via-Copilot launchers. **Broken since 2026-10-09** (Copilot dropped Opus). | Kept for back-compat; new work should use the multi variant. |
 | `run_opus.py` | Direct Anthropic API (no Copilot proxy). Premium-cost. | Ad-hoc Opus runs with a raw key. |
 | `run_github_models.py` | Routes through GitHub Models (OpenAI-compat; falls back to `gh auth token`). | Experimentation across hosted models. |
 | `compare_runs.py` | Side-by-side markdown diff of two `runs/<id>/summary.json` files. | Comparing persona / model behaviour. |
 | `resynthesize_pm.py` | Re-invoke just the Portfolio Manager against a saved `final_state` — skips the expensive debate. | Iterating on PM behaviour without paying for the upstream graph again. |
+
+### Matrix models (since 2026-10-09)
+
+Every LLM call goes through the GitHub Copilot endpoint (`api.githubcopilot.com`).
+On 2026-10-09 Copilot stopped serving every `claude-opus-*` model and `gpt-6-astra`,
+so the `aggressive-aligned` table in `run_copilot_persona_aligned.py` is now:
+
+- `CLAUDE = "claude-sonnet-5.5"`: bull researcher, aggressive risk analyst, and `deep_think_llm`.
+- `GPT = "gpt-5.5"`: every other role, including the Portfolio Manager.
+
+Copilot serves GPT-5 and later only through `/responses`; `openai_client.py`
+routes them there (`_COPILOT_RESPONSES_ONLY`). Claude models stay on chat completions.
+**Don't move the GPT seats to gpt-6.x.** gpt-6.1-sol gave 0/15 picks, with
+conservative Underweight on every ticker and no conservative PTs (2026-10-02 shadow run and
+2026-10-09 run), because the prompts are calibrated on gpt-5.5. The Opus launchers
+above no longer work on Copilot. Runs from 2026-10-09 on are a model change,
+so note it before comparing their pick rates with earlier weeks.
 
 **Rule of thumb:** if it isn't `run_screener.py` or `run_copilot_matrix.py`,
 it isn't part of the cadence. Don't feed it to
