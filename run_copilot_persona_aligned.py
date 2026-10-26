@@ -75,44 +75,46 @@ DEFAULT_TICKERS = ["NVDA", "AAPL", "MSFT", "GOOGL"]
 # explicitly via ``--date 2024-05-10`` for the 3-way comparison.
 DEFAULT_DATE: str | None = None
 
-OPUS = "claude-opus-4.8"
-GPT55 = "gpt-5.5"
+# Copilot dropped every Opus model (2026-10-09); Sonnet 5.5 fills the Claude
+# seats until an Opus route comes back.
+CLAUDE = "claude-sonnet-5.5"
+GPT = "gpt-5.5"
 
 PERSONA_MODELS = {
-    "market_analyst":         GPT55,
-    "social_analyst":         GPT55,
-    "news_analyst":           GPT55,
-    "fundamentals_analyst":   GPT55,
-    "bull_researcher":        GPT55,
-    "bear_researcher":        OPUS,
-    "research_manager":       OPUS,
-    "trader":                 GPT55,
-    "aggressive_analyst":     GPT55,
-    "neutral_analyst":        OPUS,
-    "conservative_analyst":   OPUS,
-    "portfolio_manager":      GPT55,
+    "market_analyst":         GPT,
+    "social_analyst":         GPT,
+    "news_analyst":           GPT,
+    "fundamentals_analyst":   GPT,
+    "bull_researcher":        GPT,
+    "bear_researcher":        CLAUDE,
+    "research_manager":       CLAUDE,
+    "trader":                 GPT,
+    "aggressive_analyst":     GPT,
+    "neutral_analyst":        CLAUDE,
+    "conservative_analyst":   CLAUDE,
+    "portfolio_manager":      GPT,
 }
 
 # "aggressive-aligned" routing (formerly the standalone
 # run_copilot_aggressive_aligned.py script — folded in here, see module
-# docstring). Flips bull_researcher/aggressive_analyst to Opus (deeper bull
+# docstring). Flips bull_researcher/aggressive_analyst to Claude (deeper bull
 # synthesis) and bear_researcher/research_manager/neutral_analyst/
-# conservative_analyst to GPT-5.5 (shorter, more rebuttable bear case;
+# conservative_analyst to GPT (shorter, more rebuttable bear case;
 # rubric verdict without Buy→Hold drift). This is the table
 # run_copilot_matrix.py selects via --persona-routing aggressive-aligned.
 AGGRESSIVE_PERSONA_MODELS = {
-    "market_analyst":         GPT55,
-    "social_analyst":         GPT55,
-    "news_analyst":           GPT55,
-    "fundamentals_analyst":   GPT55,
-    "bull_researcher":        OPUS,    # ← flipped from GPT55: deeper bull synthesis
-    "bear_researcher":        GPT55,   # ← flipped from OPUS: shorter, more rebuttable bear
-    "research_manager":       GPT55,   # ← flipped from OPUS: rubric verdict, no Buy→Hold drift
-    "trader":                 GPT55,
-    "aggressive_analyst":     OPUS,    # ← flipped from GPT55: deepest aggressive synthesis
-    "neutral_analyst":        GPT55,   # ← flipped from OPUS: aggressive-crowner disposition
-    "conservative_analyst":   GPT55,   # ← flipped from OPUS: capital pres but rebuttable
-    "portfolio_manager":      GPT55,
+    "market_analyst":         GPT,
+    "social_analyst":         GPT,
+    "news_analyst":           GPT,
+    "fundamentals_analyst":   GPT,
+    "bull_researcher":        CLAUDE,  # ← flipped from GPT: deeper bull synthesis
+    "bear_researcher":        GPT,     # ← flipped from CLAUDE: shorter, more rebuttable bear
+    "research_manager":       GPT,     # ← flipped from CLAUDE: rubric verdict, no Buy→Hold drift
+    "trader":                 GPT,
+    "aggressive_analyst":     CLAUDE,  # ← flipped from GPT: deepest aggressive synthesis
+    "neutral_analyst":        GPT,     # ← flipped from CLAUDE: aggressive-crowner disposition
+    "conservative_analyst":   GPT,     # ← flipped from CLAUDE: capital pres but rebuttable
+    "portfolio_manager":      GPT,
 }
 
 PERSONA_ROUTING_TABLES = {
@@ -167,8 +169,8 @@ def _build_config(risk_profile: str | None = None,
     # quick / deep fall-throughs for any role NOT in persona_models. With the
     # current map every role is overridden, so these only matter for the
     # framework's reflector / signal_processor (utility, not persona).
-    cfg["quick_think_llm"] = GPT55
-    cfg["deep_think_llm"] = OPUS
+    cfg["quick_think_llm"] = GPT
+    cfg["deep_think_llm"] = CLAUDE
     cfg["max_debate_rounds"] = 1
     cfg["checkpoint_enabled"] = True
     cfg["persona_models"] = persona_models or PERSONA_MODELS
@@ -332,11 +334,11 @@ def main() -> int:
         real_stdout.write(f"│ Date      : {trade_date}\n")
         real_stdout.write(f"│ Routing   : {routing}\n")
         real_stdout.write(f"│ PIT fix   : Path D (yf_pit_derivations) active\n")
-        real_stdout.write(f"│ PM model  : GPT-5.5  (operational rubric output)\n")
+        real_stdout.write(f"│ PM model  : {GPT}  (operational rubric output)\n")
         real_stdout.write(f"│ Output    : {runs_dir.resolve()}\n")
         real_stdout.write(f"└────────────────────────────────────────────────────────────\n")
         for role, model in persona_models.items():
-            tag = "GPT-5.5" if model == GPT55 else "Opus 4.7"
+            tag = model
             real_stdout.write(f"   {role:<22} → {tag}\n")
         real_stdout.write("\n")
 
@@ -459,7 +461,7 @@ def main() -> int:
         f"- **Provider:** copilot",
         f"- **Routing:** {routing}",
         f"- **PIT fix:** Path D (yf_pit_derivations) active",
-        f"- **PM model:** GPT-5.5",
+        f"- **PM model:** {GPT}",
         f"- **Tickers:** {len(results)}",
         "",
         "## Persona → model assignment",
@@ -468,7 +470,7 @@ def main() -> int:
         "|---|---|",
     ]
     for role, model in persona_models.items():
-        tag = "GPT-5.5" if model == GPT55 else "Opus 4.7 xhigh"
+        tag = model
         md_lines.append(f"| `{role}` | {tag} |")
     md_lines += [
         "",

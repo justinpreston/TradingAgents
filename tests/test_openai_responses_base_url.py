@@ -41,3 +41,18 @@ class ResponsesApiSelectionTests:
         ).get_llm()
         # use_responses_api should be absent/False so the client speaks Chat Completions.
         assert getattr(llm, "use_responses_api", False) is False
+
+
+@pytest.mark.unit
+class TestCopilotResponsesApi:
+    @pytest.mark.parametrize("model", ["gpt-5.5", "gpt-6-sol", "gpt-6.1-sol"])
+    def test_gpt5_and_later_use_responses_api(self, monkeypatch, model):
+        monkeypatch.setenv("GITHUB_TOKEN", "gh-test")
+        llm = OpenAIClient(model, provider="copilot").get_llm()
+        assert getattr(llm, "use_responses_api", False) is True
+
+    @pytest.mark.parametrize("model", ["gpt-4.1", "gpt-4o", "claude-sonnet-5.5"])
+    def test_older_and_claude_models_use_chat_completions(self, monkeypatch, model):
+        monkeypatch.setenv("GITHUB_TOKEN", "gh-test")
+        llm = OpenAIClient(model, provider="copilot").get_llm()
+        assert not getattr(llm, "use_responses_api", False)

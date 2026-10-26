@@ -19,6 +19,11 @@ the whole point — never re-run matrix on REPEAT tickers whose verdicts are
 still valid. (Revised from Friday-17:00 post-close on 2026-07-01 — the
 screener uses Thursday EOD bars either way; see CLAUDE.md.)
 
+### 1a. Matrix models are pinned
+All LLM calls go through the Copilot endpoint. The matrix runs `gpt-5.5` and
+`claude-sonnet-5.5` (Opus and gpt-6-astra left Copilot 2026-10-09). Don't move
+GPT seats to gpt-6.x; it vetoes everything. See CLAUDE.md "Matrix models".
+
 ### 2. Long calls are the default options strategy
 User preference: *"I generally prefer long calls for ease of trading."*
 Default is `--strategy-mode long-call --long-call-delta 0.55` (slightly ITM).
