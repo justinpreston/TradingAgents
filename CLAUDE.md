@@ -668,8 +668,14 @@ to re-check on every sync:
   `GPT = "gpt-5.6-sol"`, with the decision seats on CLAUDE; see "Matrix models" above.
 - Since v0.6.0 a graph run has a **Memory Log** step beside the analysts that
   settles *every* ticker's due decisions (#1428, #1445), not only the run's own
-  ticker. Matrix cells share `~/.tradingagents/memory/trading_memory.md`; only
-  one cell settles at a time (`wait=False`), the others skip.
+  ticker. Only one run settles a log at a time (`wait=False`), the others skip.
+  Matrix cells don't use the global `~/.tradingagents/memory/trading_memory.md`
+  (since 2026-10-27): `run_copilot_matrix.py` points each stage at
+  `~/.tradingagents/memory/matrix/<profile>.md` (`--memory-log-dir`; opt out with
+  `--shared-memory-log`). The log keeps one entry per (ticker, date), so on one
+  shared log the Stage-B conservative decision was dropped behind Stage A's
+  aggressive one; separate logs also keep ad-hoc/CLI tickers out of the matrix's
+  settlement. Pinned by `tests/test_matrix_memory_log.py`.
 - Hold wording at the four decision sites (RM + PM prompts, `ResearchPlan` /
   `PortfolioDecision` field descriptions) stays at the pre-port "be decisive /
   reserve Hold for genuinely balanced" text. Upstream's #1321 wording tripled
@@ -705,8 +711,9 @@ stay local). `.env` is also gitignored.
 ## Testing
 
 ```bash
-# Full suite (baseline 2026-10-26 after the upstream v0.7.0 port: 2157 pass,
-# 2 env-gated skips, ~30s-2min; deselect the polygon_pacer flake under load).
+# Full suite (baseline 2026-10-27, after PR #12 and the matrix memory logs:
+# 2164 pass on macOS, 2167 on Linux; 2 env-gated skips, ~30s-2min. The
+# polygon_pacer test is no longer deselected, see below).
 # On macOS three tests/test_cache_writes.py::test_on_windows_* tests fail
 # (errno.EDEADLOCK is Windows-only); they are not regressions.
 .venv/bin/python -m pytest tests/ -x -q
@@ -892,7 +899,8 @@ sqlite3 runs/index.db "SELECT ticker, COUNT(*) AS n FROM ticker_history GROUP BY
 `run_copilot_matrix.py`: `--tickers ...` **xor** `--tickers-from-latest-screener`,
 `--top N`, `--profiles aggressive conservative`, `--max-parallel`,
 `--stop-on-overweight`, `--no-stage-b`, `--date`, `--run-id`,
-`--no-dashboard`.
+`--no-dashboard`, `--memory-log-dir` (default `~/.tradingagents/memory/matrix`),
+`--shared-memory-log`.
 
 `run_copilot_persona_aligned.py`: `<tickers>...`, `--run-id`, `--date`.
 

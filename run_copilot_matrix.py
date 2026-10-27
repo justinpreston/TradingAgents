@@ -150,6 +150,32 @@ _RATING_RE = re.compile(r"\*\*Rating\*\*:\s*([A-Za-z]+)")
 _PT_RE = re.compile(r"\*\*Price Target\*\*:\s*\$?\s*(\d[\d,]*(?:\.\d+)?)")
 
 
+# Matrix cells keep their own memory log, one file per profile, apart from the
+# global ~/.tradingagents/memory/trading_memory.md that ad-hoc runs and the CLI
+# write. One log per profile because the log keeps one entry per (ticker, date):
+# on a shared log the Stage-B conservative decision for a ticker was dropped
+# behind its Stage-A aggressive one. A separate log also means each cell's
+# Memory Log step (v0.6.0+) only settles matrix decisions, not every ticker
+# any other run has ever logged.
+DEFAULT_MEMORY_LOG_DIR = Path.home() / ".tradingagents" / "memory" / "matrix"
+MEMORY_LOG_ENV = "TRADINGAGENTS_MEMORY_LOG_PATH"
+
+
+def _memory_log_path(memory_log_dir: Path | None, profile: str) -> Path | None:
+    """The memory log a profile's cells write, or None to inherit the global one."""
+    if memory_log_dir is None:
+        return None
+    return memory_log_dir / f"{profile}.md"
+
+
+def _stage_env(env: dict, memory_log_dir: Path | None, profile: str) -> dict:
+    """``env`` for one stage's cells, pointed at that profile's memory log."""
+    path = _memory_log_path(memory_log_dir, profile)
+    if path is None:
+        return env
+    return {**env, MEMORY_LOG_ENV: str(path)}
+
+
 def _extract_from_state(state_path: Path) -> tuple[str | None, str | None]:
     """Pull rating + price target out of the saved state.json's final_trade_decision."""
     try:
@@ -669,6 +695,19 @@ def _parse_args() -> argparse.Namespace:
              "auto-built options overlay also picks it up to push expiry "
              "past earnings on long horizons.",
     )
+    p.add_argument(
+        "--memory-log-dir", default=str(DEFAULT_MEMORY_LOG_DIR),
+        help="Directory for the matrix's own memory logs, one <profile>.md per "
+             "profile, kept across weekly runs. Default: %(default)s.",
+    )
+    p.add_argument(
+        "--shared-memory-log", action="store_true",
+        help="Use the global memory log (TRADINGAGENTS_MEMORY_LOG_PATH or "
+             "~/.tradingagents/memory/trading_memory.md) instead of the matrix's "
+             "per-profile logs. The conservative decision for a ticker is then "
+             "dropped behind the aggressive one, since the log keeps one entry "
+             "per ticker and date.",
+    )
     return p.parse_args()
 
 
@@ -875,6 +914,7 @@ def main() -> int:
     no_dashboard = True
     _ = args.no_dashboard
 
+    memory_log_dir = None if args.shared_memory_log else Path(args.memory_log_dir).expanduser()
     manifest = {
         "run_id": run_id,
         "trade_date": trade_date,
@@ -886,6 +926,10 @@ def main() -> int:
         "secondary_profile": secondary,
         "max_parallel": args.max_parallel,
         "stop_on_overweight": args.stop_on_overweight,
+        "memory_logs": (
+            None if memory_log_dir is None
+            else {pr: str(_memory_log_path(memory_log_dir, pr)) for pr in profiles}
+        ),
         "started_at": datetime.now().isoformat(timespec="seconds"),
         "screener_run": (
             str(screener_dir.relative_to(REPO_ROOT))
@@ -897,6 +941,8 @@ def main() -> int:
 
     env = os.environ.copy()
     env["GITHUB_TOKEN"] = _resolve_github_token()
+    if memory_log_dir is not None:
+        sys.stdout.write(f"🧠 Matrix memory logs: {memory_log_dir}/<profile>.md\n")
     if args.news_enrichment:
         ne_path = Path(args.news_enrichment).resolve()
         if not ne_path.exists():
@@ -943,7 +989,7 @@ def main() -> int:
         tickers=tickers,
         trade_date=trade_date,
         matrix_dir=matrix_dir,
-        env=env,
+        env=_stage_env(env, memory_log_dir, primary),
         max_parallel=args.max_parallel,
         no_dashboard=no_dashboard,
         writer=writer,
@@ -966,7 +1012,7 @@ def main() -> int:
                 tickers=promotes,
                 trade_date=trade_date,
                 matrix_dir=matrix_dir,
-                env=env,
+                env=_stage_env(env, memory_log_dir, secondary),
                 max_parallel=args.max_parallel,
                 no_dashboard=no_dashboard,
                 writer=writer,
