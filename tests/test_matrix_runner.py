@@ -337,3 +337,16 @@ class TestRunCellSubprocessInvocation:
         )
         # And it should still capture stdout/stderr for forensics
         assert captured["kwargs"].get("capture_output") is True
+
+
+# Free-text PM fallback (e.g. Claude on Copilot, which refuses forced
+# tool_choice) writes the target with a dollar sign and thousands commas.
+@pytest.mark.parametrize("line, expected", [
+    ("**Price Target**: $170. This is the resistance zone.", "170"),
+    ("**Price Target**: $1,234.50 over 6 months", "1234.50"),
+    ("**Price Target**: 1,234", "1234"),
+])
+def test_dollar_and_comma_price_target(tmp_path, line, expected):
+    p = _write_state(tmp_path, "X", f"**Rating**: Hold\n{line}\n")
+    _, pt = matrix_mod._extract_from_state(p)
+    assert pt == expected

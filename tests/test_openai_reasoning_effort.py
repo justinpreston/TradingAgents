@@ -41,3 +41,12 @@ def test_reasoning_model_receives_effort(monkeypatch):
 def test_non_reasoning_model_drops_effort(monkeypatch):
     # gpt-4.1 would 400 with reasoning_effort — it must be dropped.
     assert _effort_on("gpt-4.1", monkeypatch) is None
+
+
+def test_copilot_forwards_reasoning_effort():
+    """Fork: Copilot's GPT-5 family takes openai_reasoning_effort (kept through
+    upstream v0.7.0's REASONING_EFFORT_PROVIDERS refactor)."""
+    from tradingagents.llm_clients.factory import build_llm_kwargs
+
+    kwargs = build_llm_kwargs({"llm_provider": "copilot", "openai_reasoning_effort": "high"})
+    assert kwargs["reasoning_effort"] == "high"

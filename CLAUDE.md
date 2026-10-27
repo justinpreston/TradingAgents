@@ -187,16 +187,27 @@ Every LLM call goes through the GitHub Copilot endpoint (`api.githubcopilot.com`
 On 2026-10-09 Copilot stopped serving every `claude-opus-*` model and `gpt-6-astra`,
 so the `aggressive-aligned` table in `run_copilot_persona_aligned.py` is now:
 
-- `CLAUDE = "claude-sonnet-5.5"`: bull researcher, aggressive risk analyst, and `deep_think_llm`.
-- `GPT = "gpt-5.5"`: every other role, including the Portfolio Manager.
+- `CLAUDE = "claude-sonnet-5.5"`: bull researcher, aggressive risk analyst, research manager,
+  conservative risk analyst, Portfolio Manager, and `deep_think_llm`.
+- `GPT = "gpt-5.6-sol"`: the four analysts, bear researcher, trader, neutral risk analyst.
+  This was `gpt-5.5` until Copilot dropped it (found 2026-10-26); gpt-5.6-sol is its nearest successor.
+
+The three decision seats moved to Claude on 2026-10-26. With gpt-5.6-sol in every GPT seat,
+PCTY/ADI/KEYS at 2026-10-09 all flipped to conservative Underweight (0/3 picks, on `main`
+and on the v0.7.0 port alike). With Sonnet in those seats they came back 3/3 (A, A, B), close
+to the gpt-5.5 run. Copilot's Sonnet refuses forced `tool_choice`, so the research manager and PM
+fall back to free text and write targets as `$170`. The `**Price Target**` parsers in
+`run_copilot_matrix.py` and `scripts/build_run_accounting.py` accept `$` and commas for that reason.
 
 Copilot serves GPT-5 and later only through `/responses`; `openai_client.py`
 routes them there (`_COPILOT_RESPONSES_ONLY`). Claude models stay on chat completions.
 **Don't move the GPT seats to gpt-6.x.** gpt-6.1-sol gave 0/15 picks, with
 conservative Underweight on every ticker and no conservative PTs (2026-10-02 shadow run and
-2026-10-09 run), because the prompts are calibrated on gpt-5.5. The Opus launchers
+2026-10-09 run), because the prompts were calibrated on gpt-5.5. The Opus launchers
 above no longer work on Copilot. Runs from 2026-10-09 on are a model change,
-so note it before comparing their pick rates with earlier weeks.
+so note it before comparing their pick rates with earlier weeks (and again from 2026-10-26).
+`run_copilot_matrix.py` exits 0 even when every cell errors, so after a model change
+check `events.jsonl` or `matrix.md` for `error` cells, not the exit code.
 
 **Rule of thumb:** if it isn't `run_screener.py` or `run_copilot_matrix.py`,
 it isn't part of the cadence. Don't feed it to
@@ -614,8 +625,9 @@ runs/matrix_2026-05-01_top25/
 
 ## Upstream sync (TauricResearch/TradingAgents)
 
-Remote `upstream`; synced through **v0.5.2** (2026-10-02, PR #8; earlier
-v0.4.0 → v0.5.0 → v0.5.1 tag-by-tag on 2026-09-27, PR #7). Merge
+Remote `upstream`; synced through **v0.7.0** (v0.6.0 → v0.7.0 tag-by-tag on
+2026-10-26, PR #11; v0.5.2 on 2026-10-02, PR #8; v0.4.0 → v0.5.0 → v0.5.1 on
+2026-09-27, PR #7). Merge
 upstream a release tag at a time and run the full suite after each. Fork seams
 to re-check on every sync:
 
@@ -644,8 +656,20 @@ to re-check on every sync:
   placeholder detection is structural (`<…>` lines + router sentinels).
 - `graph/trading_graph.py` — `progress_listener`, `persona_models`,
   `assert_analyst_grounding`; `graph/setup.py` — `persona_llms`, `risk_profile`.
-- `llm_clients/openai_client.py` (Copilot headers), `llm_clients/factory.py`
-  (Copilot `reasoning_effort`).
+  Since v0.6.0 the deep/quick tiers come from `create_tier_client` (#1440), but
+  the `persona_models` overrides still build their own clients with
+  `create_llm_client` + `build_llm_kwargs` on `llm_provider` / `backend_url`.
+  Pinned by `tests/test_checkpoint_key_fork.py::test_persona_models_build_their_own_clients`.
+- `llm_clients/openai_client.py` (Copilot headers; `_COPILOT_RESPONSES_ONLY`
+  routes GPT-5+ to `/responses`), `llm_clients/factory.py` (`copilot` in
+  `REASONING_EFFORT_PROVIDERS`, pinned by
+  `tests/test_openai_reasoning_effort.py::test_copilot_forwards_reasoning_effort`).
+- `run_copilot_persona_aligned.py` — `CLAUDE = "claude-sonnet-5.5"`,
+  `GPT = "gpt-5.6-sol"`, with the decision seats on CLAUDE; see "Matrix models" above.
+- Since v0.6.0 a graph run has a **Memory Log** step beside the analysts that
+  settles *every* ticker's due decisions (#1428, #1445), not only the run's own
+  ticker. Matrix cells share `~/.tradingagents/memory/trading_memory.md`; only
+  one cell settles at a time (`wait=False`), the others skip.
 - Hold wording at the four decision sites (RM + PM prompts, `ResearchPlan` /
   `PortfolioDecision` field descriptions) stays at the pre-port "be decisive /
   reserve Hold for genuinely balanced" text. Upstream's #1321 wording tripled
@@ -681,8 +705,10 @@ stay local). `.env` is also gitignored.
 ## Testing
 
 ```bash
-# Full suite (baseline 2026-09-27 after the upstream v0.5.1 port: 1749 pass,
-# 2 env-gated skips, ~2min; deselect the polygon_pacer flake under load)
+# Full suite (baseline 2026-10-26 after the upstream v0.7.0 port: 2157 pass,
+# 2 env-gated skips, ~30s-2min; deselect the polygon_pacer flake under load).
+# On macOS three tests/test_cache_writes.py::test_on_windows_* tests fail
+# (errno.EDEADLOCK is Windows-only); they are not regressions.
 .venv/bin/python -m pytest tests/ -x -q
 
 # Single test file
@@ -717,8 +743,6 @@ tradingagents/
 │   ├── analyst_execution.py      ← ANALYST_NODE_SPECS: each analyst's tool node built from its module's TOOLS
 │   ├── propagation.py            ← Propagator: initial state + graph invoke
 │   ├── conditional_logic.py      ← Edge predicates (debate rounds, risk discussion)
-│   ├── settlement.py             ← Settles past decisions (returns, alpha, reflection) into the decision log
-│   ├── reflection.py             ← Cross-run memory reflection (decision log)
 │   └── checkpointer.py           ← LangGraph checkpoint resume (opt-in)
 │
 ├── agents/                       ← Node implementations (each is a LangGraph node)
@@ -747,7 +771,9 @@ tradingagents/
 │   ├── tool_errors.py            ← (fork) [[TOOL_ERROR:…]] markers + data-gaps section
 │   └── news_enrichment_loader.py ← (fork) Loads pre-computed news enrichment from env var
 │
-├── decision_log.py               ← TradingMemoryLog (decision log persistence)
+├── memory/                       ← Decision log: log.py (TradingMemoryLog), settlement.py
+│                                   (returns/alpha from the first close after the date, #1518),
+│                                   reflection.py (lessons fed to the Portfolio Manager)
 ├── llm_clients/                  ← Provider abstraction
 │   ├── factory.py                ← create_llm_client(provider, model), build_llm_kwargs(config)
 │   ├── model_catalog.py          ← Canonical model names per provider

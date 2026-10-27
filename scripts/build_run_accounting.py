@@ -49,14 +49,14 @@ def _parse_state(path: pathlib.Path) -> dict | None:
         return None
     ftd = d.get("final_trade_decision", "") or ""
     rating_m = re.search(r"\*\*Rating\*\*:\s*([A-Za-z]+)", ftd)
-    pt_m = re.search(r"\*\*Price Target\*\*:\s*([\d.]+)", ftd)
+    pt_m = re.search(r"\*\*Price Target\*\*:\s*\$?\s*(\d[\d,]*(?:\.\d+)?)", ftd)
     horizon_m = re.search(r"\*\*Time Horizon\*\*:\s*([^\n]+)", ftd)
     exec_m = re.search(r"\*\*Executive Summary\*\*:\s*([^\n]+(?:\n(?!\*\*)[^\n]+)*)", ftd)
     thesis_m = re.search(r"\*\*Investment Thesis\*\*:\s*([^\n]+(?:\n(?!\*\*)[^\n]+)*)", ftd)
     actions_m = re.search(r"\*\*Strategic Actions\*\*:\s*([^\n]+(?:\n(?!\*\*)[^\n]+)*)", ftd)
     return {
         "rating": rating_m.group(1) if rating_m else None,
-        "price_target": float(pt_m.group(1)) if pt_m else None,
+        "price_target": float(pt_m.group(1).replace(",", "")) if pt_m else None,
         "horizon": horizon_m.group(1).strip() if horizon_m else None,
         "executive_summary": exec_m.group(1).strip() if exec_m else None,
         "thesis": thesis_m.group(1).strip() if thesis_m else None,
