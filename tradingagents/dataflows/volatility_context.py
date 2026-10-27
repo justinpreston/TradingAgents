@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import math
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any
 
 from tradingagents.dataflows.vendors.polygon.common import _make_request
@@ -123,10 +123,7 @@ def _rank_pct(value: float, history: list[float]) -> tuple[float, float]:
         return (0.0, 0.0)
     lo = min(history)
     hi = max(history)
-    if hi <= lo:
-        rank = 50.0
-    else:
-        rank = max(0.0, min(100.0, (value - lo) / (hi - lo) * 100.0))
+    rank = 50.0 if hi <= lo else max(0.0, min(100.0, (value - lo) / (hi - lo) * 100.0))
     below = sum(1 for v in history if v < value)
     pct = below / len(history) * 100.0
     return (rank, pct)

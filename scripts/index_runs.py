@@ -56,7 +56,7 @@ import argparse
 import json
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from tradingagents.tiers import tier_for_row
@@ -222,7 +222,7 @@ FROM screener_picks;
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def _classify_run(run_dir: Path) -> str | None:

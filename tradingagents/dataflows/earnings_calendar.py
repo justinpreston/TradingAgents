@@ -24,7 +24,7 @@ Design:
 from __future__ import annotations
 
 import math
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Any
 
 import pandas as pd
@@ -235,7 +235,7 @@ def build_summary(ticker: str, *, today: date | None = None) -> dict | None:
         return None
     payload: dict[str, Any] = {
         "ticker": ticker.upper(),
-        "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "fetched_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
     }
     if nxt:
         payload["next_earnings"] = nxt

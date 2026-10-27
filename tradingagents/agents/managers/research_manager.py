@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from tradingagents.agents.context import get_instrument_context_from_state, get_language_instruction
+from tradingagents.agents.managers._risk_profile import format_risk_profile_block
 from tradingagents.agents.schemas import ResearchPlan, render_research_plan
 from tradingagents.agents.structured import (
     NO_EXTERNAL_TOOLS,
     bind_structured,
     invoke_structured_or_freetext,
 )
-from tradingagents.agents.managers._risk_profile import format_risk_profile_block
 
 
 def create_research_manager(llm, risk_profile: str | None = None):

@@ -28,14 +28,15 @@ want to test the scoring tail).
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Callable
 
 from tradingagents.dataflows.errors import VendorUnavailableError
 from tradingagents.dataflows.vendors.polygon.common import (
     PolygonRateLimitError,
     min_request_interval,
+    recommended_min_interval_for_tier as _recommended_min_interval_for_tier,
 )
 from tradingagents.screener.fundamentals import (
     FundamentalSignals,
@@ -48,14 +49,11 @@ from tradingagents.screener.score import (
 )
 from tradingagents.screener.technicals import compute_technical_signals
 from tradingagents.screener.universe import (
-    UniverseEntry,
     build_universe,
 )
 
 log = logging.getLogger(__name__)
 
-
-from tradingagents.dataflows.vendors.polygon.common import recommended_min_interval_for_tier as _recommended_min_interval_for_tier
 
 DEFAULT_MIN_REQUEST_INTERVAL_S = _recommended_min_interval_for_tier()
 

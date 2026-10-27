@@ -13,22 +13,17 @@ from pathlib import Path
 import pytest
 
 from scripts.portfolio_load_context import (
+    _matrix_run_trade_date,
+    _strip_help_keys,
+    _tier_rank,
     build_context,
-    compute_flags,
-    enrich_position,
     find_matrix_runs_for_latest_trade_date,
-    load_matrix_run,
     load_matrix_runs,
-    load_policy,
     load_positions,
     load_trades_log,
     recent_actions_for_position,
     validate_positions,
-    _matrix_run_trade_date,
-    _strip_help_keys,
-    _tier_rank,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -323,7 +318,6 @@ def test_demoted_tier_flag(tmp_path, tmp_policy, tmp_matrix_run):
     doc["overlays"][0]["tier"] = "C"
     ov_path.write_text(json.dumps(doc))
 
-    book = json.loads((tmp_matrix_run / "verdict_ledger.json").read_text())  # reuse for shape
     # write a minimal book with VIRT entered at tier B
     minimal = {
         "as_of": "2026-05-09",

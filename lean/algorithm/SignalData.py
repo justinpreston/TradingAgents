@@ -9,7 +9,7 @@ objects with that same shape.
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from AlgorithmImports import *
 
@@ -57,5 +57,5 @@ class TradingAgentsSignalData(PythonData):
         except ValueError:
             return None
         if parsed.tzinfo is not None:
-            return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+            return parsed.astimezone(UTC).replace(tzinfo=None)
         return parsed

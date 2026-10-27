@@ -1,6 +1,6 @@
 import logging
 from collections import Counter
-from typing import Any, Dict, Optional, TypedDict
+from typing import Any, TypedDict
 
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
@@ -99,8 +99,8 @@ class GraphSetup:
         deep_thinking_llm: Any,
         conditional_logic: ConditionalLogic,
         max_tool_rounds: int,
-        persona_llms: Optional[Dict[str, Any]] = None,
-        risk_profile: Optional[str] = None,
+        persona_llms: dict[str, Any] | None = None,
+        risk_profile: str | None = None,
         analyst_concurrency_limit: int = 1,
     ):
         """Initialize with required components.

@@ -34,8 +34,8 @@ def _synthetic_bars(n: int, start_price: float = 100.0, drift: float = 0.001, vo
         noise = math.sin(i * 0.7) * vol
         price = price * (1 + drift + noise)
         h = price * 1.005
-        l = price * 0.995
-        bars.append({"o": price, "h": h, "l": l, "c": price, "v": 1_000_000 + (i * 1_000)})
+        low = price * 0.995
+        bars.append({"o": price, "h": h, "l": low, "c": price, "v": 1_000_000 + (i * 1_000)})
     return bars
 
 
@@ -96,7 +96,7 @@ def test_compute_fundamental_re_acceleration():
         "2023-03-31", "2023-06-30", "2023-09-30", "2023-12-31",
         "2024-03-31", "2024-06-30", "2024-09-30", "2024-12-31",
     ]
-    for i, (r, c) in enumerate(zip(revenues_by_q, cogs_by_q)):
+    for i, (r, c) in enumerate(zip(revenues_by_q, cogs_by_q, strict=False)):
         reports.append({
             "end": quarter_ends[i],
             "revenue": r * 1_000_000,

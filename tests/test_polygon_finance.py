@@ -22,7 +22,6 @@ from tradingagents.dataflows.vendors.polygon.common import (
     PolygonRateLimitError,
 )
 
-
 # ---------------------------------------------------------------------------
 # get_fundamentals end-to-end (mocked HTTP)
 # ---------------------------------------------------------------------------
@@ -179,9 +178,8 @@ class TestPolygonNews:
             pn,
             "paginated_results",
             side_effect=PolygonNotFoundError("404 page not found"),
-        ) as mock_paginate:
-            with pytest.raises(PolygonError):
-                pn.get_insider_transactions("NVDA")
+        ) as mock_paginate, pytest.raises(PolygonError):
+            pn.get_insider_transactions("NVDA")
         # Should have probed every spelling, not just the first.
         assert mock_paginate.call_count == len(pn._INSIDER_TXN_ENDPOINTS)
         called_paths = [c.args[0] for c in mock_paginate.call_args_list]
@@ -297,16 +295,18 @@ class TestVendorRouterFallback:
         def bad_input(*args, **kwargs):
             raise ValueError("ticker must be a non-empty string")
 
-        with patch.object(interface, "get_vendor", return_value="polygon,yfinance,alpha_vantage"), \
-             patch.dict(
-                 interface.VENDOR_METHODS["get_fundamentals"],
-                 {
-                     "polygon": bad_input,
-                     "yfinance": bad_input,
-                     "alpha_vantage": bad_input,
-                 },
-             ):
-            with pytest.raises(ValueError, match="non-empty string"):
-                interface.route_to_vendor(
-                    "get_fundamentals", "NVDA", "2024-05-10"
-                )
+        with (
+            patch.object(interface, "get_vendor", return_value="polygon,yfinance,alpha_vantage"),
+            patch.dict(
+                interface.VENDOR_METHODS["get_fundamentals"],
+                {
+                    "polygon": bad_input,
+                    "yfinance": bad_input,
+                    "alpha_vantage": bad_input,
+                },
+            ),
+            pytest.raises(ValueError, match="non-empty string"),
+        ):
+            interface.route_to_vendor(
+                "get_fundamentals", "NVDA", "2024-05-10"
+            )

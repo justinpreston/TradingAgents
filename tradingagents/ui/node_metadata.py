@@ -17,9 +17,6 @@ What we DO show as progress steps is the human-readable list below.
 
 from __future__ import annotations
 
-from typing import Dict, List, Set
-
-
 # ---- Phase definitions ------------------------------------------------------
 
 # Phase keys are short ALL CAPS tokens that fit nicely in a status column.
@@ -29,7 +26,7 @@ SYNTHESIS = "SYNTHESIS"
 RISK = "RISK"
 DECISION = "DECISION"
 
-PHASE_LABELS: Dict[str, str] = {
+PHASE_LABELS: dict[str, str] = {
     ANALYSTS: "Analysts",
     DEBATE: "Bull/Bear",
     SYNTHESIS: "Synthesis",
@@ -43,7 +40,7 @@ PHASE_LABELS: Dict[str, str] = {
 # This is the canonical "user-facing" order. The dashboard advances the
 # progress bar each time one of these nodes emits an update event. Hidden
 # nodes (tools_*, Msg Clear *) do not advance the bar.
-NODE_DISPLAY_ORDER: List[str] = [
+NODE_DISPLAY_ORDER: list[str] = [
     "Market Analyst",
     "Social Analyst",
     "News Analyst",
@@ -58,7 +55,7 @@ NODE_DISPLAY_ORDER: List[str] = [
     "Portfolio Manager",
 ]
 
-PHASE_FOR_NODE: Dict[str, str] = {
+PHASE_FOR_NODE: dict[str, str] = {
     "Market Analyst": ANALYSTS,
     "Social Analyst": ANALYSTS,
     "News Analyst": ANALYSTS,
@@ -78,7 +75,7 @@ PHASE_FOR_NODE: Dict[str, str] = {
 
 # Nodes whose updates we silently consume (don't advance the bar, don't log
 # to the event tail). Membership tested via prefix on the second set.
-_HIDDEN_PREFIXES: Set[str] = {
+_HIDDEN_PREFIXES: set[str] = {
     "Msg Clear ",
     "tools_",
 }
@@ -93,7 +90,7 @@ TOOL_NODE_PREFIX = "tools_"
 # made" event for the ticker — not strictly necessary because we also use
 # the run-complete event, but useful for highlighting the moment in the
 # event tail.
-DECISION_NODES: Set[str] = {"Portfolio Manager"}
+DECISION_NODES: set[str] = {"Portfolio Manager"}
 
 
 def is_visible_node(node_name: str) -> bool:
@@ -103,10 +100,7 @@ def is_visible_node(node_name: str) -> bool:
 
 def is_hidden_node(node_name: str) -> bool:
     """Return ``True`` for plumbing nodes (Msg Clear *, tools_*)."""
-    for prefix in _HIDDEN_PREFIXES:
-        if node_name.startswith(prefix):
-            return True
-    return False
+    return any(node_name.startswith(prefix) for prefix in _HIDDEN_PREFIXES)
 
 
 def phase_label(phase: str) -> str:

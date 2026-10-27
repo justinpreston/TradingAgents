@@ -43,15 +43,14 @@ needed).
 """
 
 from __future__ import annotations
+
 import argparse
 import json
 import math
-import re
 import sys
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -61,10 +60,9 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(REPO_ROOT / ".env")
 
-from tradingagents.dataflows.vendors.polygon.common import _make_request  # noqa: E402
 from tradingagents.dataflows.vendors.polygon.options import (  # noqa: E402
-    _is_auth_blip_error,
-    _is_rate_limit_error,
+    _is_auth_blip_error,  # noqa: F401  (re-exported for callers and tests)
+    _is_rate_limit_error,  # noqa: F401
     fetch_chain as _fetch_chain,
 )
 from tradingagents.dataflows.volatility_context import (  # noqa: E402
@@ -72,7 +70,6 @@ from tradingagents.dataflows.volatility_context import (  # noqa: E402
     render_vol_advisory,
 )
 from tradingagents.tiers import tier_for_row  # noqa: E402
-
 
 # ──────────────────────────────────────────────────────────────────────
 # Tier classification (mirrors build_run_accounting / build_html_report)
@@ -929,7 +926,7 @@ def main():
 
     picks_analyzed = len(overlays)
     strategies_built = sum(1 for o in overlays if "strategy" in o and "error" not in o)
-    generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    generated_at = datetime.now(UTC).replace(microsecond=0).isoformat()
 
     out_json.write_text(json.dumps({
         "matrix_run": matrix_run.name,

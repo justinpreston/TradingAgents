@@ -33,8 +33,6 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Optional
-
 
 RATING_ORDER = {
     "Sell": -2,
@@ -104,7 +102,7 @@ def _load_trader_proposal(run_dir: Path, ticker: str) -> str:
     if not log_path.exists():
         return ""
     last = ""
-    with open(log_path, "r", encoding="utf-8", errors="replace") as fp:
+    with open(log_path, encoding="utf-8", errors="replace") as fp:
         for line in fp:
             if "FINAL TRANSACTION PROPOSAL" in line:
                 m = re.search(r"\b(BUY|SELL|HOLD)\b", line)
@@ -141,7 +139,7 @@ def _build_markdown(left_dir: Path, left: dict, right_dir: Path, right: dict) ->
             tickers.append(t)
 
     lines = []
-    lines.append(f"# Run comparison")
+    lines.append("# Run comparison")
     lines.append("")
     lines.append(f"- **Left**:  `{left_dir.name}`  ({left_label})")
     lines.append(f"- **Right**: `{right_dir.name}`  ({right_label})")
@@ -157,12 +155,12 @@ def _build_markdown(left_dir: Path, left: dict, right_dir: Path, right: dict) ->
     )
 
     for t in tickers:
-        l = left_ix.get(t, {})
-        r = right_ix.get(t, {})
-        l_decision = l.get("final_trade_decision", "")
-        r_decision = r.get("final_trade_decision", "")
-        l_rating = l.get("signal", "")
-        r_rating = r.get("signal", "")
+        lrow = left_ix.get(t, {})
+        rrow = right_ix.get(t, {})
+        l_decision = lrow.get("final_trade_decision", "")
+        r_decision = rrow.get("final_trade_decision", "")
+        l_rating = lrow.get("signal", "")
+        r_rating = rrow.get("signal", "")
         l_trader = _load_trader_proposal(left_dir, t)
         r_trader = _load_trader_proposal(right_dir, t)
         l_pt = _parse_field(l_decision, "Price Target") or "—"
@@ -182,31 +180,31 @@ def _build_markdown(left_dir: Path, left: dict, right_dir: Path, right: dict) ->
     lines.append("| Ticker | LLM calls (L→R) | Tokens in (L→R) | Tokens out (L→R) | Wall (L→R) |")
     lines.append("|---|---|---|---|---|")
     for t in tickers:
-        l = left_ix.get(t, {})
-        r = right_ix.get(t, {})
+        lrow = left_ix.get(t, {})
+        rrow = right_ix.get(t, {})
         lines.append(
             f"| **{t}** | "
-            f"{l.get('llm_calls', '?')}→{r.get('llm_calls', '?')} | "
-            f"{l.get('tokens_in', '?')}→{r.get('tokens_in', '?')} | "
-            f"{l.get('tokens_out', '?')}→{r.get('tokens_out', '?')} | "
-            f"{l.get('elapsed_sec', '?')}s→{r.get('elapsed_sec', '?')}s |"
+            f"{lrow.get('llm_calls', '?')}→{rrow.get('llm_calls', '?')} | "
+            f"{lrow.get('tokens_in', '?')}→{rrow.get('tokens_in', '?')} | "
+            f"{lrow.get('tokens_out', '?')}→{rrow.get('tokens_out', '?')} | "
+            f"{lrow.get('elapsed_sec', '?')}s→{rrow.get('elapsed_sec', '?')}s |"
         )
 
     lines.append("")
     lines.append("## Per-ticker thesis snippets")
     lines.append("")
     for t in tickers:
-        l = left_ix.get(t, {})
-        r = right_ix.get(t, {})
+        lrow = left_ix.get(t, {})
+        rrow = right_ix.get(t, {})
         lines.append(f"### {t}")
         lines.append("")
-        lines.append(f"**{left_label}** — {l.get('signal', '?')}")
-        l_summary = _parse_field(l.get("final_trade_decision", ""), "Executive Summary")
+        lines.append(f"**{left_label}** — {lrow.get('signal', '?')}")
+        l_summary = _parse_field(lrow.get("final_trade_decision", ""), "Executive Summary")
         if l_summary:
             lines.append(f"> {l_summary}")
         lines.append("")
-        lines.append(f"**{right_label}** — {r.get('signal', '?')}")
-        r_summary = _parse_field(r.get("final_trade_decision", ""), "Executive Summary")
+        lines.append(f"**{right_label}** — {rrow.get('signal', '?')}")
+        r_summary = _parse_field(rrow.get("final_trade_decision", ""), "Executive Summary")
         if r_summary:
             lines.append(f"> {r_summary}")
         lines.append("")

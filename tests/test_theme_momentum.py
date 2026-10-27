@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch, MagicMock
-from datetime import date
+from unittest.mock import patch
 
 import pytest
 
 from tradingagents.dataflows.theme_momentum import (
-    fetch_daily_closes,
-    compute_returns,
-    relative_strength,
     build_theme_snapshot,
+    compute_returns,
+    fetch_daily_closes,
+    relative_strength,
 )
 
 

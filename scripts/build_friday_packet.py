@@ -39,7 +39,7 @@ import json
 import math
 import sys
 import time
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -384,7 +384,7 @@ def render_markdown(
         regime = macro_snapshot.get("regime", "unknown")
         lines.append(f"**Macro regime:** `{regime}`")
     else:
-        lines.append("**Macro regime:** not built (no `runs/macro_{}.json`)".format(trade_date))
+        lines.append(f"**Macro regime:** not built (no `runs/macro_{trade_date}.json`)")
     lines.append("")
 
     # 2. Ranked ticket table

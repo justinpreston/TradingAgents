@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from .common import _make_request, PolygonError
+from .common import PolygonError, _make_request
 
 
 def get_short_interest(ticker: str, limit: int = 1) -> dict[str, Any] | None:

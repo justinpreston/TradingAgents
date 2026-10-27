@@ -2,8 +2,8 @@ import json
 import math
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, date
-from typing import Any, Dict, List, Optional
+from datetime import date, datetime
+from typing import Any
 
 from AlgorithmImports import *
 
@@ -14,18 +14,18 @@ class SignalSpec:
     ticker: str
     tier: str
     classification: str
-    underlying_ref_price: Optional[float]
+    underlying_ref_price: float | None
     right: str
     strike: float
     expiry: date
-    target_delta: Optional[float]
+    target_delta: float | None
     occ_symbol: str
-    ref_premium_per_share: Optional[float]
+    ref_premium_per_share: float | None
     max_premium_per_share: float
     size_pct: float
     max_size_pct: float
-    cons_pt: Optional[float]
-    aggr_pt: Optional[float]
+    cons_pt: float | None
+    aggr_pt: float | None
     rule: str
     stop_loss_premium_pct: float
     time_stop_dte: int
@@ -38,13 +38,13 @@ class PositionState:
     signal: SignalSpec
     underlying_symbol: Any
     option_symbol: Any
-    entry_order_id: Optional[int] = None
-    entry_fill_price: Optional[float] = None
+    entry_order_id: int | None = None
+    entry_fill_price: float | None = None
     entry_quantity: int = 0
     cons_leg_fired: bool = False
     aggr_leg_fired: bool = False
     closed: bool = False
-    exit_order_ids: List[int] = field(default_factory=list)
+    exit_order_ids: list[int] = field(default_factory=list)
 
 
 class TradingAgentsAlgorithm(QCAlgorithm):
@@ -55,15 +55,15 @@ class TradingAgentsAlgorithm(QCAlgorithm):
         self.SetEndDate(2027, 1, 31)
         self.SetCash(100000)
 
-        self.signal_specs: Dict[str, SignalSpec] = {}
-        self.pending_signals: Dict[str, SignalSpec] = {}
-        self.positions_by_id: Dict[str, PositionState] = {}
-        self.order_to_signal: Dict[int, str] = {}
-        self.underlying_symbols: Dict[str, Any] = {}
-        self.option_roots: Dict[str, Any] = {}
-        self.latest_chains: Dict[str, Any] = {}
-        self.daily_highs: Dict[Any, float] = {}
-        self.daily_high_date: Optional[date] = None
+        self.signal_specs: dict[str, SignalSpec] = {}
+        self.pending_signals: dict[str, SignalSpec] = {}
+        self.positions_by_id: dict[str, PositionState] = {}
+        self.order_to_signal: dict[int, str] = {}
+        self.underlying_symbols: dict[str, Any] = {}
+        self.option_roots: dict[str, Any] = {}
+        self.latest_chains: dict[str, Any] = {}
+        self.daily_highs: dict[Any, float] = {}
+        self.daily_high_date: date | None = None
 
         self.default_stop_loss_pct = self._get_float_parameter("stop-loss-pct", -0.40)
         self.default_time_stop_dte = self._get_int_parameter("time-stop-dte", 21)
@@ -130,7 +130,6 @@ class TradingAgentsAlgorithm(QCAlgorithm):
                 state.closed = True
                 continue
 
-            signal = state.signal
             underlying_high = self.daily_highs.get(state.underlying_symbol)
             if underlying_high is None:
                 underlying_high = self.Securities[state.underlying_symbol].Price
@@ -148,7 +147,7 @@ class TradingAgentsAlgorithm(QCAlgorithm):
                 f"entry={state.entry_fill_price:.2f}"
             )
 
-    def _load_signals(self, path: str) -> List[SignalSpec]:
+    def _load_signals(self, path: str) -> list[SignalSpec]:
         candidate_paths = [path]
         if not os.path.isabs(path):
             candidate_paths.append(os.path.join(os.getcwd(), path))
@@ -160,7 +159,7 @@ class TradingAgentsAlgorithm(QCAlgorithm):
         for candidate in candidate_paths:
             if candidate and os.path.exists(candidate):
                 chosen_path = candidate
-                with open(candidate, "r", encoding="utf-8") as handle:
+                with open(candidate, encoding="utf-8") as handle:
                     manifest = json.load(handle)
                 break
 
@@ -181,7 +180,7 @@ class TradingAgentsAlgorithm(QCAlgorithm):
                 self.Log(f"Skipping malformed signal {raw.get('id', '<unknown>')}: {exc}")
         return parsed
 
-    def _parse_signal(self, raw: Dict[str, Any]) -> SignalSpec:
+    def _parse_signal(self, raw: dict[str, Any]) -> SignalSpec:
         option = raw.get("option", {})
         entry = raw.get("entry", {})
         exits = raw.get("exits", {})

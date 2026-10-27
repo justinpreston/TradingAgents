@@ -10,16 +10,16 @@ Usage:
         --subtitle "Large-Cap (4/30) + Mid-Cap (5/1) · 50 tickers, 21 picks"
 """
 from __future__ import annotations
+
 import argparse
-import json
 import html
+import json
 from datetime import datetime
 from pathlib import Path
 
-MUTED_DASH = '<span class="muted">—</span>'
-
 from tradingagents.tiers import tier_for_row
 
+MUTED_DASH = '<span class="muted">—</span>'
 
 # ──────────────────────────────────────────────────────────────────────
 # Data assembly
@@ -1966,11 +1966,6 @@ def _recon_pair_position(pos: dict, snap: str | None) -> str:
     if is_opt:
         dte = _option_dte(pos.get("expiration"), snap)
         dte_str = f" · {dte}d to expiry" if dte is not None else ""
-        moneyness = ""
-        if pos.get("last_price") and pos.get("strike"):
-            # For long-call: ITM if underlying > strike. We don't have underlying spot here,
-            # so just show structure.
-            moneyness = ""
         detail = f'<span class="meta">${pos.get("strike",0):.0f} {pos.get("option_type","").upper()} {pos.get("expiration","")}{dte_str} · ×{pos.get("contracts",0)} · cost ${pos.get("avg_cost",0):.2f}</span>'
     else:
         detail = f'<span class="meta">{pos.get("quantity",0):g} sh · cost ${pos.get("avg_cost",0):,.2f} · last ${pos.get("last_price",0):,.2f}</span>'
@@ -2278,7 +2273,7 @@ def _render_realized_pl(portfolio: dict) -> str:
     # Equity sells without cost basis
     other_sells = [t for t in trades if t.get("realized_pl") is None and t.get("action") in ("SELL",)]
     if other_sells:
-        parts.append('<details style="margin-top:16px"><summary style="cursor:pointer;color:var(--text-muted);font-size:13px"><strong>Equity sells without cost basis</strong> · {n} trades — proceeds only</summary>'.format(n=len(other_sells)))
+        parts.append(f'<details style="margin-top:16px"><summary style="cursor:pointer;color:var(--text-muted);font-size:13px"><strong>Equity sells without cost basis</strong> · {len(other_sells)} trades — proceeds only</summary>')
         parts.append('<div class="table-wrap"><table>')
         parts.append('<thead><tr><th>Date</th><th>Symbol</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Proceeds</th><th>Notes</th></tr></thead><tbody>')
         for t in sorted(other_sells, key=lambda x: x.get("trade_date",""), reverse=True):

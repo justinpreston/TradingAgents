@@ -10,7 +10,6 @@ Covers:
 """
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 
@@ -20,8 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tradingagents.tiers import TIER_RANK, tier_for_row, tier_rank
-
+from tradingagents.tiers import TIER_RANK, tier_for_row, tier_rank  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 1. Derivation matrix

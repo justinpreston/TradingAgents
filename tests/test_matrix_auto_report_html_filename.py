@@ -12,12 +12,10 @@ pass --output explicitly and this fix doesn't touch build_html_report.py).
 
 from __future__ import annotations
 
+import importlib
 from datetime import datetime
 from pathlib import Path
 
-import pytest
-
-import importlib
 matrix_mod = importlib.import_module("run_copilot_matrix")
 
 

@@ -11,7 +11,6 @@ import pytest
 from tradingagents.dataflows._disk_cache import DiskCache
 from tradingagents.screener import technicals
 from tradingagents.screener.technicals import (
-    TechnicalSignals,
     _signals_from_dict,
     compute_technical_signals,
 )

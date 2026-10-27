@@ -22,7 +22,7 @@ for an analyst that has tools bound.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +30,14 @@ logger = logging.getLogger(__name__)
 # (analyst report key in final state, expected to call tools, label)
 # Sentiment analyst is deliberately omitted — it pre-fetches data into
 # the prompt rather than binding tools (see grounding/__init__.py).
-_TOOL_BOUND_ANALYSTS: Tuple[Tuple[str, str], ...] = (
+_TOOL_BOUND_ANALYSTS: tuple[tuple[str, str], ...] = (
     ("market_report", "market_analyst"),
     ("news_report", "news_analyst"),
     ("fundamentals_report", "fundamentals_analyst"),
 )
 
 
-def _count_tool_calls_in_messages(messages: List[Any]) -> int:
+def _count_tool_calls_in_messages(messages: list[Any]) -> int:
     """Return the total number of tool calls across all AIMessages.
 
     LangChain's AIMessage exposes ``tool_calls`` as a list of dicts.
@@ -60,14 +60,14 @@ def _count_tool_calls_in_messages(messages: List[Any]) -> int:
     return count
 
 
-def assert_analyst_grounding(final_state: Dict[str, Any], ticker: str = "?") -> List[str]:
+def assert_analyst_grounding(final_state: dict[str, Any], ticker: str = "?") -> list[str]:
     """Inspect ``final_state`` and warn for any tool-bound analyst that
     produced a non-empty report without making any tool calls.
 
     Returns the list of warning strings emitted (also logged to stderr
     via ``logger.warning``). Empty list = all clear.
     """
-    warnings: List[str] = []
+    warnings: list[str] = []
     messages = final_state.get("messages") or []
     total_tool_calls = _count_tool_calls_in_messages(messages)
 

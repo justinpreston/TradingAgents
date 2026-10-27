@@ -65,17 +65,15 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts._env import load_repo_env  # noqa: E402
-
 from tradingagents.dataflows.date_window import resolve_trade_date  # noqa: E402
 
 load_repo_env()
@@ -99,12 +97,12 @@ class CellResult:
     ticker: str
     profile: str
     status: str  # "ok" | "error" | "skipped"
-    rating: Optional[str] = None
-    price_target: Optional[str] = None
-    elapsed_s: Optional[float] = None
-    error: Optional[str] = None
-    cell_dir: Optional[str] = None
-    log_size: Optional[int] = None
+    rating: str | None = None
+    price_target: str | None = None
+    elapsed_s: float | None = None
+    error: str | None = None
+    cell_dir: str | None = None
+    log_size: int | None = None
     attempt: int = 1  # 1 = first try; 2 = succeeded/recorded after one auto-retry
 
 
@@ -112,7 +110,7 @@ class CellResult:
 # Tickers + run-id resolution
 # ---------------------------------------------------------------------------
 
-def _latest_screener_dir(base: Path = Path("runs")) -> Optional[Path]:
+def _latest_screener_dir(base: Path = Path("runs")) -> Path | None:
     candidates = sorted(base.glob("screener_*"), key=lambda p: p.stat().st_mtime, reverse=True)
     for c in candidates:
         if (c / "screener.json").exists():
@@ -152,7 +150,7 @@ _RATING_RE = re.compile(r"\*\*Rating\*\*:\s*([A-Za-z]+)")
 _PT_RE = re.compile(r"\*\*Price Target\*\*:\s*\$?\s*(\d[\d,]*(?:\.\d+)?)")
 
 
-def _extract_from_state(state_path: Path) -> tuple[Optional[str], Optional[str]]:
+def _extract_from_state(state_path: Path) -> tuple[str | None, str | None]:
     """Pull rating + price target out of the saved state.json's final_trade_decision."""
     try:
         data = json.loads(state_path.read_text(encoding="utf-8"))
@@ -282,7 +280,7 @@ def _run_cell(
     matrix_dir: Path,
     env: dict,
     no_dashboard: bool,
-    writer: "Optional[_LiveWriter]" = None,
+    writer: _LiveWriter | None = None,
     stage: str = "",
 ) -> CellResult:
     """Run a (ticker, profile) cell, auto-retrying ONCE (fresh subprocess,
@@ -449,7 +447,7 @@ def _write_matrix_md(matrix_dir: Path, manifest: dict, results: dict) -> None:
 
 def _write_high_conviction(
     matrix_dir: Path, manifest: dict, results: dict,
-    primary: str, secondary: Optional[str],
+    primary: str, secondary: str | None,
 ) -> list[str]:
     """Emit the ADI-pattern picks: Overweight/Buy in primary AND not Underweight/Sell in secondary."""
     high_conv = []
@@ -707,7 +705,7 @@ def _run_auto_report(matrix_dir: Path, long_call_delta: float,
     matrix_rel = matrix_dir.relative_to(REPO_ROOT) if matrix_dir.is_absolute() else matrix_dir
     py = sys.executable
 
-    screener_run: Optional[str] = None
+    screener_run: str | None = None
     try:
         manifest = json.loads((matrix_dir / "manifest.json").read_text(encoding="utf-8"))
         screener_run = manifest.get("screener_run")
@@ -827,7 +825,7 @@ def main() -> int:
     args = _parse_args()
 
     # Resolve tickers
-    screener_dir: Optional[Path] = None
+    screener_dir: Path | None = None
     if args.tickers_from_latest_screener:
         screener_dir = _latest_screener_dir()
         if not screener_dir:
@@ -906,7 +904,7 @@ def main() -> int:
         else:
             env["TRADINGAGENTS_NEWS_ENRICHMENT_PATH"] = str(ne_path)
             sys.stdout.write(f"📰 News enrichment active: {ne_path}\n")
-    earnings_cal_path: Optional[Path] = None
+    earnings_cal_path: Path | None = None
     if args.earnings_calendar:
         ec_path = Path(args.earnings_calendar).resolve()
         if not ec_path.exists():
@@ -954,7 +952,6 @@ def main() -> int:
     )
 
     # Stage B: secondary profile, but only on Stage-A promotes
-    stage_b_results: dict[str, CellResult] = {}
     if secondary:
         promotes = [
             t for t in tickers
@@ -964,7 +961,7 @@ def main() -> int:
             sys.stdout.write(
                 f"\n📈 Stage A produced {len(promotes)} promote(s): {', '.join(promotes)}\n"
             )
-            stage_b_results = _run_stage(
+            _run_stage(
                 profile=secondary,
                 tickers=promotes,
                 trade_date=trade_date,
@@ -996,7 +993,7 @@ def main() -> int:
     if high_conv:
         sys.stdout.write(f"      Picks: {', '.join(high_conv)}\n")
     else:
-        sys.stdout.write(f"      No tickers passed the high-conviction filter.\n")
+        sys.stdout.write("      No tickers passed the high-conviction filter.\n")
 
     if not args.no_auto_report:
         try:

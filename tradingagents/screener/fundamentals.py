@@ -85,7 +85,7 @@ def fetch_quarterly_financials(ticker: str, *, max_quarters: int = 8, as_of_date
     return sec_edgar.quarterly_income_series(ticker, as_of_date, max_quarters, persist=False)
 
 
-def _signals_from_dict(d: dict) -> "FundamentalSignals":
+def _signals_from_dict(d: dict) -> FundamentalSignals:
     """Reconstruct :class:`FundamentalSignals` from a JSON-cached payload.
 
     Tolerant of schema additions: unknown keys are ignored, missing keys fall
@@ -135,7 +135,7 @@ def compute_fundamental_signals(
     return sig
 
 
-def _build_signals(ticker: str, reports: list[dict]) -> "FundamentalSignals":
+def _build_signals(ticker: str, reports: list[dict]) -> FundamentalSignals:
     """Compute :class:`FundamentalSignals` from a report list (no I/O)."""
     sig = FundamentalSignals(ticker=ticker, quarters_available=len(reports))
 

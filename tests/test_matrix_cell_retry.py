@@ -10,13 +10,11 @@ event stream, and the final CellResult carries an `attempt` field.
 
 from __future__ import annotations
 
+import importlib
 import json
 import subprocess as _sp
 from pathlib import Path
 
-import pytest
-
-import importlib
 matrix_mod = importlib.import_module("run_copilot_matrix")
 
 CellResult = matrix_mod.CellResult

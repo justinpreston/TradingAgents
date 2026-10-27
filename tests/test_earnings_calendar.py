@@ -22,9 +22,7 @@ from unittest import mock
 import pandas as pd
 import pytest
 
-from tradingagents.dataflows import earnings_calendar as ec
-from tradingagents.dataflows import news_enrichment_loader as nel
-
+from tradingagents.dataflows import earnings_calendar as ec, news_enrichment_loader as nel
 
 # ──────────────────────────────────────────────────────────────────────
 # earnings_calendar dataflow

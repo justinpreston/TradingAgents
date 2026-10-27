@@ -25,8 +25,10 @@ threads, so the lock is cheap insurance.
 
 from __future__ import annotations
 
+import contextlib
 import threading
-from typing import Any, Dict, List, Mapping, Optional
+from collections.abc import Mapping
+from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage
@@ -35,7 +37,7 @@ from langchain_core.outputs import LLMResult
 from .progress_listener import NoOpListener, ProgressListener
 
 
-def _extract_token_usage(response: LLMResult) -> Optional[Dict[str, Any]]:
+def _extract_token_usage(response: LLMResult) -> dict[str, Any] | None:
     """Return ``{"input_tokens": int, "output_tokens": int, "model": str|None}``
     or ``None`` if the response carries no usable token metadata.
     """
@@ -46,7 +48,7 @@ def _extract_token_usage(response: LLMResult) -> Optional[Dict[str, Any]]:
     except (IndexError, TypeError):
         generation = None
 
-    model: Optional[str] = None
+    model: str | None = None
     if generation is not None:
         message = getattr(generation, "message", None)
         if isinstance(message, AIMessage):
@@ -114,11 +116,11 @@ class TokenToolCallbackHandler(BaseCallbackHandler):
     :func:`TradingAgentsGraph._run_graph`.
     """
 
-    def __init__(self, listener: Optional[ProgressListener] = None) -> None:
+    def __init__(self, listener: ProgressListener | None = None) -> None:
         super().__init__()
         self._lock = threading.Lock()
         self._listener: ProgressListener = listener or NoOpListener()
-        self.current_ticker: Optional[str] = None
+        self.current_ticker: str | None = None
 
         # local stats — useful for tests / ad-hoc inspection
         self.llm_calls: int = 0
@@ -128,12 +130,12 @@ class TokenToolCallbackHandler(BaseCallbackHandler):
 
     # ---- API ---------------------------------------------------------
 
-    def set_ticker(self, ticker: Optional[str]) -> None:
+    def set_ticker(self, ticker: str | None) -> None:
         """Set the ticker that subsequent callbacks should be attributed to."""
         with self._lock:
             self.current_ticker = ticker
 
-    def get_stats(self) -> Dict[str, int]:
+    def get_stats(self) -> dict[str, int]:
         """Return cumulative stats since handler construction."""
         with self._lock:
             return {
@@ -147,8 +149,8 @@ class TokenToolCallbackHandler(BaseCallbackHandler):
 
     def on_llm_start(
         self,
-        serialized: Dict[str, Any],
-        prompts: List[str],
+        serialized: dict[str, Any],
+        prompts: list[str],
         **kwargs: Any,
     ) -> None:
         with self._lock:
@@ -156,8 +158,8 @@ class TokenToolCallbackHandler(BaseCallbackHandler):
 
     def on_chat_model_start(
         self,
-        serialized: Dict[str, Any],
-        messages: List[List[Any]],
+        serialized: dict[str, Any],
+        messages: list[list[Any]],
         **kwargs: Any,
     ) -> None:
         with self._lock:
@@ -171,20 +173,18 @@ class TokenToolCallbackHandler(BaseCallbackHandler):
             self.tokens_in += usage["input_tokens"]
             self.tokens_out += usage["output_tokens"]
             ticker = self.current_ticker
-        try:
+        # Never let dashboard rendering break the run.
+        with contextlib.suppress(Exception):
             self._listener.on_llm_tokens(
                 ticker or "",
                 usage["input_tokens"],
                 usage["output_tokens"],
                 usage["model"],
             )
-        except Exception:
-            # Never let dashboard rendering break the run.
-            pass
 
     def on_tool_start(
         self,
-        serialized: Dict[str, Any],
+        serialized: dict[str, Any],
         input_str: str,
         **kwargs: Any,
     ) -> None:
@@ -196,7 +196,5 @@ class TokenToolCallbackHandler(BaseCallbackHandler):
         with self._lock:
             self.tool_calls += 1
             ticker = self.current_ticker
-        try:
+        with contextlib.suppress(Exception):
             self._listener.on_tool_call(ticker or "", tool_name)
-        except Exception:
-            pass

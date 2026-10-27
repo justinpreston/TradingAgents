@@ -3,10 +3,10 @@ import json
 import logging
 import os
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import tradingagents
 from tradingagents.agents.context import build_instrument_context, resolve_instrument_identity
@@ -15,7 +15,13 @@ from tradingagents.dataflows.config import run_config, run_config_context, set_c
 from tradingagents.dataflows.date_window import get_current_date, is_historical
 from tradingagents.dataflows.symbols import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.llm_clients import build_llm_kwargs, create_llm_client, create_tier_client, tier_provider
+from tradingagents.grounding.runtime import assert_analyst_grounding
+from tradingagents.llm_clients import (
+    build_llm_kwargs,
+    create_llm_client,
+    create_tier_client,
+    tier_provider,
+)
 from tradingagents.memory import TradingMemoryLog, settlement
 from tradingagents.memory.reflection import Reflector
 from tradingagents.reporting import write_report_tree
@@ -24,7 +30,6 @@ from .checkpointer import checkpoint_step, clear_checkpoint, get_checkpointer, t
 from .conditional_logic import ConditionalLogic
 from .propagation import Propagator
 from .setup import GraphSetup
-from tradingagents.grounding.runtime import assert_analyst_grounding
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +62,9 @@ class TradingAgentsGraph:
         self,
         selected_analysts=("market", "social", "news", "fundamentals"),
         debug=False,
-        config: Dict[str, Any] = None,
-        callbacks: Optional[List] = None,
-        progress_listener: Optional[Any] = None,
+        config: dict[str, Any] = None,
+        callbacks: list | None = None,
+        progress_listener: Any | None = None,
     ):
         """Initialize the trading agents graph and components.
 
@@ -94,11 +99,11 @@ class TradingAgentsGraph:
         # model identifier; we cache one client per unique model so two
         # personas pointing at the same model share an LLM instance.
         persona_models = self.config.get("persona_models") or {}
-        persona_llms: Dict[str, Any] = {}
+        persona_llms: dict[str, Any] = {}
         if persona_models:
             # Persona overrides run on llm_provider / backend_url, not a tier's own.
             llm_kwargs = {**build_llm_kwargs(self.config), **extra}
-            client_cache: Dict[str, Any] = {
+            client_cache: dict[str, Any] = {
                 self.config["deep_think_llm"]: self.deep_thinking_llm,
                 self.config["quick_think_llm"]: self.quick_thinking_llm,
             }
@@ -242,10 +247,8 @@ class TradingAgentsGraph:
                 )
                 return final_state, signal
             except BaseException as exc:
-                try:
+                with suppress(Exception):
                     self.progress_listener.on_run_error(company_name, exc)
-                except Exception:
-                    pass
                 raise
 
     def begin_checkpoint(self, company_name, trade_date, asset_type: str = "stock", portfolio=None) -> str | None:
@@ -455,13 +458,11 @@ class TradingAgentsGraph:
                     # branches), so iterate.
                     if isinstance(chunk, dict):
                         for node_name, delta in chunk.items():
-                            try:
+                            # Never let UI bugs break the run.
+                            with suppress(Exception):
                                 self.progress_listener.on_node_complete(
                                     company_name, node_name, delta or {}
                                 )
-                            except Exception:
-                                # Never let UI bugs break the run.
-                                pass
                 elif mode == "values":
                     final_state = chunk
             if final_state is None:

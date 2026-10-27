@@ -25,8 +25,8 @@ import os
 import random
 import threading
 import time
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
-from datetime import datetime, timezone
 from typing import Any
 
 import requests
@@ -195,7 +195,7 @@ class min_request_interval:
         self._prev_interval: float | None = None
         self._prev_adaptive: bool | None = None
 
-    def __enter__(self) -> "min_request_interval":
+    def __enter__(self) -> min_request_interval:
         global _min_interval_s, _pacer_adaptive
         with _pace_lock:
             self._prev_interval = _min_interval_s
@@ -277,8 +277,8 @@ def _parse_retry_after(value: str | None) -> float | None:
     if dt is None:
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    delta = (dt - datetime.now(timezone.utc)).total_seconds()
+        dt = dt.replace(tzinfo=UTC)
+    delta = (dt - datetime.now(UTC)).total_seconds()
     return max(0.0, delta)
 
 
@@ -399,7 +399,7 @@ def paginated_results(
     at ``max_pages`` to bound runaway crawls (financials/news for a single
     ticker rarely need more than 2-3 pages).
     """
-    from urllib.parse import urlparse, parse_qs
+    from urllib.parse import parse_qs, urlparse
 
     out: list[dict[str, Any]] = []
     payload = _make_request(initial_path, initial_params)

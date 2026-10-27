@@ -12,11 +12,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.build_position_greeks import (
-    fetch_contract_snapshot,
-    build_portfolio_greeks,
     aggregate_greeks,
+    build_portfolio_greeks,
+    fetch_contract_snapshot,
 )
-
 
 MOCK_SNAPSHOT = {
     "results": [

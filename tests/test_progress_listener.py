@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from collections.abc import Mapping
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -24,7 +25,6 @@ from tradingagents.ui.node_metadata import (
     phase_label,
 )
 
-
 # ---------------------------------------------------------------------------
 # Recording listener used to assert event ordering in graph-level tests.
 # ---------------------------------------------------------------------------
@@ -34,7 +34,7 @@ class RecordingListener:
     """In-memory ``ProgressListener`` that captures every event."""
 
     def __init__(self) -> None:
-        self.events: List[Tuple[str, tuple, dict]] = []
+        self.events: list[tuple[str, tuple, dict]] = []
 
     def on_run_start(self, ticker: str, trade_date: str) -> None:
         self.events.append(("on_run_start", (ticker, trade_date), {}))
@@ -62,13 +62,13 @@ class RecordingListener:
         self.events.append(("on_tool_call", (ticker, tool_name), {}))
 
     def on_llm_tokens(
-        self, ticker: str, in_tokens: int, out_tokens: int, model: Optional[str]
+        self, ticker: str, in_tokens: int, out_tokens: int, model: str | None
     ) -> None:
         self.events.append(
             ("on_llm_tokens", (ticker, in_tokens, out_tokens, model), {})
         )
 
-    def names(self) -> List[str]:
+    def names(self) -> list[str]:
         return [name for (name, _, _) in self.events]
 
 
@@ -287,7 +287,7 @@ class _SilentDashboard(RunDashboard):
         return None
 
 
-def _make_dashboard(tickers: List[str]) -> _SilentDashboard:
+def _make_dashboard(tickers: list[str]) -> _SilentDashboard:
     from rich.console import Console
 
     return _SilentDashboard(

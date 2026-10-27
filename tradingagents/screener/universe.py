@@ -27,9 +27,9 @@ and above.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from typing import Iterable
 
 from tradingagents.dataflows.vendors.polygon.common import (
     PolygonNotFoundError,
@@ -99,9 +99,7 @@ def _is_common_stock_shape(ticker: str) -> bool:
         return False
     if "." in ticker or "-" in ticker:
         return False
-    if len(ticker) == 5 and ticker[-1] in {"W", "R", "U"}:
-        return False
-    return True
+    return not (len(ticker) == 5 and ticker[-1] in {"W", "R", "U"})
 
 
 def latest_trading_day(reference: date | None = None) -> date:

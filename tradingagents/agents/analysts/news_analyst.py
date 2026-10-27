@@ -9,7 +9,6 @@ from tradingagents.agents.tools import (
     get_news,
     get_prediction_markets,
 )
-from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.news_enrichment_loader import (
     build_enrichment_prefix,
 )

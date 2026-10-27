@@ -4,14 +4,12 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
-
+from tradingagents.dataflows.vendors.polygon.common import PolygonNotFoundError
 from tradingagents.dataflows.vendors.polygon.shorts import (
+    build_shorts_snapshot,
     get_short_interest,
     get_short_volume,
-    build_shorts_snapshot,
 )
-from tradingagents.dataflows.vendors.polygon.common import PolygonNotFoundError
 
 
 class TestGetShortInterest:

@@ -10,7 +10,6 @@ import pytest
 from tradingagents.dataflows._disk_cache import DiskCache
 from tradingagents.screener import fundamentals
 from tradingagents.screener.fundamentals import (
-    FundamentalSignals,
     _signals_from_dict,
     compute_fundamental_signals,
 )
@@ -29,7 +28,7 @@ def _make_reports(revenues: list[float], cogs: list[float]) -> list[dict]:
             "gross_profit": (r - c) * 1_000_000,
             "operating_income": (r - c - 10) * 1_000_000,
         }
-        for i, (r, c) in enumerate(zip(revenues, cogs))
+        for i, (r, c) in enumerate(zip(revenues, cogs, strict=False))
     ]
 
 

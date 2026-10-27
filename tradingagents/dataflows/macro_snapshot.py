@@ -32,7 +32,7 @@ indicate completeness.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime
 from typing import Any
 
 try:
@@ -200,7 +200,7 @@ def build_snapshot(*, today: date | None = None,
 
     return {
         "schema_version": 1,
-        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "as_of_date": today.isoformat(),
         "status": status,
         "warnings": warnings,

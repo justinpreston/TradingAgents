@@ -15,15 +15,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import subprocess
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from tradingagents.dataflows.vendors.polygon import options as polygon_options_mod
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "build_options_overlay.py"
 

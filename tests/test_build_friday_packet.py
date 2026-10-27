@@ -20,7 +20,6 @@ from scripts.build_friday_packet import (
     write_packet,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 
@@ -484,9 +483,9 @@ def test_write_packet_only_touches_output_dir(runs_dir, two_tier_runs, policy_fi
         positions_path=None, policy_path=policy_file, skip_live=True,
     )
     out_dir = tmp_path / "packet_output"
-    before = {p for p in runs_dir.rglob("*")}
+    before = set(runs_dir.rglob("*"))
     md_path, html_path = write_packet(packet, out_dir)
-    after = {p for p in runs_dir.rglob("*")}
+    after = set(runs_dir.rglob("*"))
     assert before == after  # nothing in runs_dir was touched
     assert md_path.exists()
     assert html_path.exists()

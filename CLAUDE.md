@@ -723,8 +723,9 @@ stay local). `.env` is also gitignored.
 .venv/bin/python -m pytest -m integration -x -q # needs external services
 ```
 
-Known flake: `tests/test_polygon_pacer.py::TestMakeRequestRetry::test_retry_after_seconds_is_honored`
-is timing-sensitive — deselect if a parallel run perturbs sleep budgets.
+`tests/test_polygon_pacer.py::TestMakeRequestRetry::test_retry_after_seconds_is_honored`
+used to flake (the retry's 0–1s random jitter vs a 0.9s budget); it now pins the
+jitter to 0, so it should only fail under heavy load. Deselect it in that case.
 
 ---
 

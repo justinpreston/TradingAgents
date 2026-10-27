@@ -28,7 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -102,7 +102,7 @@ def append_audit_record(
     ts: str | None = None,
 ) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    record_ts = ts or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    record_ts = ts or datetime.now(UTC).isoformat(timespec="seconds")
     with log_path.open("a", encoding="utf-8") as f:
         for signal_id in ids:
             record = {

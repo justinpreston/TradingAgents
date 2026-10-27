@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 from pydantic import BaseModel
 
 from tradingagents.agents import structured as struct_mod

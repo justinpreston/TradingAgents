@@ -54,7 +54,6 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts._env import load_repo_env  # noqa: E402
-
 from tradingagents.agents.managers.portfolio_manager import create_portfolio_manager  # noqa: E402
 from tradingagents.llm_clients import create_llm_client  # noqa: E402
 
@@ -144,7 +143,7 @@ def _extract_signal(decision_md: str) -> str:
 
 
 def _load_state(state_path: Path) -> dict:
-    with open(state_path, "r", encoding="utf-8") as fp:
+    with open(state_path, encoding="utf-8") as fp:
         return json.load(fp)
 
 
@@ -180,13 +179,13 @@ def main() -> int:
 
     pm = _build_pm(args.pm_model, args.risk_profile)
 
-    print(f"┌─ PM resynthesis ─────────────────────────────────────────")
+    print("┌─ PM resynthesis ─────────────────────────────────────────")
     print(f"│ Source        : {args.run_dir}")
     print(f"│ Risk profile  : {args.risk_profile}")
     print(f"│ PM model      : {args.pm_model}")
     print(f"│ Output dir    : {out_dir}")
     print(f"│ Tickers       : {len(state_files)}")
-    print(f"└──────────────────────────────────────────────────────────")
+    print("└──────────────────────────────────────────────────────────")
 
     summary = {
         "source_run": str(args.run_dir),

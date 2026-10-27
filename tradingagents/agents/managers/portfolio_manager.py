@@ -15,14 +15,12 @@ from tradingagents.agents.context import (
     get_language_instruction,
     get_portfolio_context_from_state,
 )
+from tradingagents.agents.managers._risk_profile import (
+    format_risk_profile_block,
+)
 from tradingagents.agents.rating import parse_rating
 from tradingagents.agents.schemas import PortfolioDecision, render_pm_decision
 from tradingagents.agents.structured import NO_EXTERNAL_TOOLS, bind_structured, invoke_structured
-from tradingagents.agents.managers._risk_profile import (
-    RISK_PROFILE_ADDENDA,
-    format_risk_profile_block,
-)
-
 
 _format_risk_profile = format_risk_profile_block
 

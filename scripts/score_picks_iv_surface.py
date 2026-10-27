@@ -70,9 +70,9 @@ import argparse
 import json
 import sys
 import time
-from datetime import date, datetime, timedelta, timezone
+from collections.abc import Iterable
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Iterable
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -85,7 +85,6 @@ load_dotenv(REPO_ROOT / ".env")
 import numpy as np  # noqa: E402
 
 from tradingagents.dataflows.vendors.polygon.options import fetch_chain as _fetch_chain  # noqa: E402
-
 
 SCHEMA_VERSION = 1
 DEFAULT_STRIKE_WINDOW_PCT = 25.0
@@ -555,7 +554,7 @@ def main() -> int:
 
     payload = {
         "schema_version": SCHEMA_VERSION,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "matrix_run": matrix_run.name,
         "snapshot_date": today.isoformat(),
         "earnings_calendar": ec_path.name if ec_path else None,

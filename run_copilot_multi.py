@@ -30,21 +30,18 @@ import subprocess
 import sys
 import time
 import traceback
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout, suppress
 from datetime import datetime
 from pathlib import Path
-
-from typing import Optional
 
 _REPO_ROOT = Path(__file__).resolve().parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts._env import load_repo_env  # noqa: E402
-
+from tradingagents.dataflows.date_window import resolve_trade_date  # noqa: E402
 from tradingagents.default_config import DEFAULT_CONFIG  # noqa: E402
 from tradingagents.graph.trading_graph import TradingAgentsGraph  # noqa: E402
-from tradingagents.dataflows.date_window import resolve_trade_date  # noqa: E402
 
 load_repo_env()
 
@@ -95,16 +92,14 @@ class _TeeStream(io.TextIOBase):
 
     def flush(self):  # type: ignore[override]
         for st in self._streams:
-            try:
+            with suppress(Exception):
                 st.flush()
-            except Exception:
-                pass
 
 
 def _build_config(
     quick_model: str,
     deep_model: str,
-    reasoning_effort: Optional[str],
+    reasoning_effort: str | None,
     runs_dir: Path,
     share_memory: bool,
 ) -> dict:
@@ -227,14 +222,13 @@ def main() -> int:
     run_id = args.run_id or f"{_safe_slug(model_label)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
     runs_dir = Path("runs") / run_id
-    if runs_dir.exists() and any(runs_dir.iterdir()):
-        # Refuse to clobber a previous run unless the user passed an explicit
-        # --run-id (signalling intent to resume / append).
-        if not args.run_id:
-            sys.exit(
-                f"runs/{run_id} already has output. Pass --run-id <name> to be explicit "
-                "about resuming/appending, or remove the directory."
-            )
+    # Refuse to clobber a previous run unless the user passed an explicit
+    # --run-id (signalling intent to resume / append).
+    if runs_dir.exists() and any(runs_dir.iterdir()) and not args.run_id:
+        sys.exit(
+            f"runs/{run_id} already has output. Pass --run-id <name> to be explicit "
+            "about resuming/appending, or remove the directory."
+        )
     runs_dir.mkdir(parents=True, exist_ok=True)
 
     os.environ["GITHUB_TOKEN"] = _resolve_github_token()
@@ -244,11 +238,11 @@ def main() -> int:
 
     # runs_dir already created above
 
-    print(f"┌─ Multi-ticker batch ──────────────────────────────────")
+    print("┌─ Multi-ticker batch ──────────────────────────────────")
     print(f"│ Tickers : {', '.join(tickers)}")
     print(f"│ System  : {system_date}")
     print(f"│ Date    : {trade_date}  ({date_label})")
-    print(f"│ Provider: copilot")
+    print("│ Provider: copilot")
     if quick_model == deep_model:
         print(f"│ Model   : {quick_model}")
     else:
@@ -258,7 +252,7 @@ def main() -> int:
         print(f"│ Effort  : {reasoning_effort}")
     print(f"│ Memory  : {'shared global' if args.share_memory else 'per-run (private)'}")
     print(f"│ Output  : {runs_dir.resolve()}")
-    print(f"└────────────────────────────────────────────────────────\n")
+    print("└────────────────────────────────────────────────────────\n")
 
     # One graph instance — memory log accumulates across tickers (intended).
     ta = TradingAgentsGraph(debug=True, config=config)
@@ -334,7 +328,7 @@ def main() -> int:
         "",
         f"- **Date:** {trade_date}  ({date_label})",
         f"- **System date at run:** {system_date}",
-        f"- **Provider:** copilot",
+        "- **Provider:** copilot",
         f"- **Quick model:** `{quick_model}`",
         f"- **Deep model:** `{deep_model}`",
         f"- **Tickers:** {len(results)}",
