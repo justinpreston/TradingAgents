@@ -11,7 +11,6 @@ TOOLS = (
     get_indicators,
     get_verified_market_snapshot,
 )
-from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.tool_errors import (
     build_data_gaps_section,
     extract_tool_errors,

@@ -10,7 +10,6 @@ import pytest
 from tradingagents.dataflows._disk_cache import DiskCache
 from tradingagents.screener import fundamentals
 from tradingagents.screener.fundamentals import (
-    FundamentalSignals,
     _signals_from_dict,
     compute_fundamental_signals,
 )

@@ -30,7 +30,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tradingagents.dataflows.macro_snapshot import (  # noqa: E402
-    DEFAULTS, build_snapshot, render_banner_text,
+    DEFAULTS,
+    build_snapshot,
+    render_banner_text,
 )
 
 

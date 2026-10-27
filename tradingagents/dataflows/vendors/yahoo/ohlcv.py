@@ -96,7 +96,7 @@ def _load_ohlcv_polygon(symbol: str, curr_date_dt: pd.Timestamp) -> pd.DataFrame
     Low, Close, Volume`` columns. Bars are split-adjusted; bars on or after
     ``curr_date_dt`` are filtered by the caller.
     """
-    from tradingagents.dataflows.vendors.polygon.common import _make_request, PolygonError
+    from tradingagents.dataflows.vendors.polygon.common import _make_request
 
     today_date = pd.Timestamp.today()
     start_date = today_date - pd.DateOffset(years=5)

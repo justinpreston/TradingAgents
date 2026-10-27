@@ -11,7 +11,6 @@ the PM seat, also injected at the RM seat so the upstream investment plan
 
 from __future__ import annotations
 
-
 RISK_PROFILE_ADDENDA: dict = {
     "aggressive": (
         "**Investor Risk Profile: Aggressive Growth.**\n"

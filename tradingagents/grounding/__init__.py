@@ -41,7 +41,7 @@ class UngroundedRationale:
     mitigation: str
 
 
-UNGROUNDED_BY_DESIGN: Dict[str, UngroundedRationale] = {
+UNGROUNDED_BY_DESIGN: dict[str, UngroundedRationale] = {
     "tradingagents.agents.researchers.bull_researcher": UngroundedRationale(
         module="tradingagents.agents.researchers.bull_researcher",
         rationale=(

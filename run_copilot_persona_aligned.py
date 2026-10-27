@@ -60,10 +60,9 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts._env import load_repo_env  # noqa: E402
-
+from tradingagents.dataflows.date_window import resolve_trade_date  # noqa: E402
 from tradingagents.default_config import DEFAULT_CONFIG  # noqa: E402
 from tradingagents.graph.trading_graph import TradingAgentsGraph  # noqa: E402
-from tradingagents.dataflows.date_window import resolve_trade_date  # noqa: E402
 from tradingagents.ui import RunDashboard, TokenToolCallbackHandler  # noqa: E402
 
 load_repo_env()
@@ -333,10 +332,10 @@ def main() -> int:
         real_stdout.write(f"│ Tickers   : {', '.join(tickers)}\n")
         real_stdout.write(f"│ Date      : {trade_date}\n")
         real_stdout.write(f"│ Routing   : {routing}\n")
-        real_stdout.write(f"│ PIT fix   : Path D (yf_pit_derivations) active\n")
+        real_stdout.write("│ PIT fix   : Path D (yf_pit_derivations) active\n")
         real_stdout.write(f"│ PM model  : {GPT}  (operational rubric output)\n")
         real_stdout.write(f"│ Output    : {runs_dir.resolve()}\n")
-        real_stdout.write(f"└────────────────────────────────────────────────────────────\n")
+        real_stdout.write("└────────────────────────────────────────────────────────────\n")
         for role, model in persona_models.items():
             tag = model
             real_stdout.write(f"   {role:<22} → {tag}\n")
@@ -458,9 +457,9 @@ def main() -> int:
         "",
         f"- **Date:** {trade_date}  ({date_label})",
         f"- **System date at run:** {system_date}",
-        f"- **Provider:** copilot",
+        "- **Provider:** copilot",
         f"- **Routing:** {routing}",
-        f"- **PIT fix:** Path D (yf_pit_derivations) active",
+        "- **PIT fix:** Path D (yf_pit_derivations) active",
         f"- **PM model:** {GPT}",
         f"- **Tickers:** {len(results)}",
         "",

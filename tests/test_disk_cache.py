@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import time
 from pathlib import Path
-
-import pytest
 
 from tradingagents.dataflows._disk_cache import DiskCache, _safe_key
 

@@ -24,11 +24,8 @@ thin re-exec shim. These tests prove:
 from __future__ import annotations
 
 import importlib
-import runpy
 import sys
 from pathlib import Path
-
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:

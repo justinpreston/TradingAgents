@@ -13,22 +13,17 @@ from pathlib import Path
 import pytest
 
 from scripts.portfolio_load_context import (
+    _matrix_run_trade_date,
+    _strip_help_keys,
+    _tier_rank,
     build_context,
-    compute_flags,
-    enrich_position,
     find_matrix_runs_for_latest_trade_date,
-    load_matrix_run,
     load_matrix_runs,
-    load_policy,
     load_positions,
     load_trades_log,
     recent_actions_for_position,
     validate_positions,
-    _matrix_run_trade_date,
-    _strip_help_keys,
-    _tier_rank,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

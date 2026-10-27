@@ -8,12 +8,12 @@ gating around PROMOTE_RATINGS / VETO_RATINGS.
 
 from __future__ import annotations
 
+import importlib
 import json
 from pathlib import Path
 
 import pytest
 
-import importlib
 matrix_mod = importlib.import_module("run_copilot_matrix")
 
 CellResult = matrix_mod.CellResult

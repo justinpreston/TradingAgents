@@ -29,11 +29,10 @@ from __future__ import annotations
 
 import ast
 import importlib
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 import pytest
-
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AGENTS_DIR = REPO_ROOT / "tradingagents" / "agents"

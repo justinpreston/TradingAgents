@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import math
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any
 
 from tradingagents.dataflows.vendors.polygon.common import _make_request

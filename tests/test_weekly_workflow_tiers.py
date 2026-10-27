@@ -113,8 +113,6 @@ def test_user_supplied_dests(ww, argv, expected):
 
 def test_main_parser_accepts_tier_flag(ww):
     """The --tier flag is in the parser and validates against the choices."""
-    import io
-    import contextlib
 
     # Inspect the parser by calling main() with --help; we just want the flag.
     parser_src = WW_PATH.read_text()

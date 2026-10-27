@@ -64,7 +64,7 @@ import shlex
 import sqlite3
 import subprocess
 import sys
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -471,14 +471,14 @@ def phase_chain(screener_run: Path, args: argparse.Namespace, diff: dict) -> Non
     runner_path = REPO_ROOT / args.chain_runner
     if not runner_path.exists():
         print(f"  ❌ Runner not found: {runner_path}")
-        print(f"     Pass --chain-runner with a valid runner script.")
+        print("     Pass --chain-runner with a valid runner script.")
         return
 
     is_matrix_runner = runner_path.name == "run_copilot_matrix.py"
     if not is_matrix_runner:
         print(f"  ⚠ {runner_path.name} produces flat output that the rest of the")
-        print(f"    cadence (options_overlay, accounting) cannot consume. Use")
-        print(f"    run_copilot_matrix.py for cadence chaining.")
+        print("    cadence (options_overlay, accounting) cannot consume. Use")
+        print("    run_copilot_matrix.py for cadence chaining.")
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
     tier_label = f"_{args.tier}" if args.tier else ""
@@ -523,7 +523,7 @@ def phase_chain(screener_run: Path, args: argparse.Namespace, diff: dict) -> Non
 
     rc = _run(cmd, args.dry_run)
     if rc == 0 and not args.dry_run:
-        print(f"  ✅ Matrix complete. Re-index with: .venv/bin/python scripts/index_runs.py")
+        print("  ✅ Matrix complete. Re-index with: .venv/bin/python scripts/index_runs.py")
     elif rc != 0:
         print(f"  ⚠ Runner exited {rc}", file=sys.stderr)
 
@@ -700,11 +700,11 @@ def main() -> int:
     _apply_tier_preset(args, tier=args.tier, user_set=user_set)
 
     started = datetime.now()
-    print(f"╔══════════════════════════════════════════════════════════════════════╗")
+    print("╔══════════════════════════════════════════════════════════════════════╗")
     tier_suffix = f" · tier={args.tier}" if args.tier else ""
     print(f"║ Weekly TradingAgents cadence · "
           f"{started.strftime('%Y-%m-%d %H:%M %a')}{tier_suffix}".ljust(72) + "║")
-    print(f"╚══════════════════════════════════════════════════════════════════════╝")
+    print("╚══════════════════════════════════════════════════════════════════════╝")
     if args.tier:
         print(f"  tier preset → mcap=${args.min_mcap/1e9:.1f}B-${args.max_mcap/1e9:.1f}B "
               f"· ADV ≥ ${args.min_dollar_adv/1e6:.0f}M · price ≥ ${args.min_price:.0f}")

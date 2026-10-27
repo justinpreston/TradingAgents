@@ -40,10 +40,9 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts._env import load_repo_env  # noqa: E402
-
+from tradingagents.dataflows.date_window import resolve_trade_date  # noqa: E402
 from tradingagents.default_config import DEFAULT_CONFIG  # noqa: E402
 from tradingagents.graph.trading_graph import TradingAgentsGraph  # noqa: E402
-from tradingagents.dataflows.date_window import resolve_trade_date  # noqa: E402
 
 load_repo_env()
 
@@ -142,13 +141,13 @@ def main() -> int:
     runs_dir = Path("runs") / run_id
     runs_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"┌─ Multi-ticker batch ──────────────────────────────────")
+    print("┌─ Multi-ticker batch ──────────────────────────────────")
     print(f"│ Tickers : {', '.join(tickers)}")
     print(f"│ System  : {system_date}")
     print(f"│ Date    : {trade_date}  ({date_label})")
-    print(f"│ Provider: copilot / claude-opus-4.8")
+    print("│ Provider: copilot / claude-opus-4.8")
     print(f"│ Output  : {runs_dir.resolve()}")
-    print(f"└────────────────────────────────────────────────────────\n")
+    print("└────────────────────────────────────────────────────────\n")
 
     # One graph instance — memory log accumulates across tickers (intended).
     ta = TradingAgentsGraph(debug=True, config=config)
@@ -217,7 +216,7 @@ def main() -> int:
         "",
         f"- **Date:** {trade_date}  ({date_label})",
         f"- **System date at run:** {system_date}",
-        f"- **Provider:** copilot / claude-opus-4.8",
+        "- **Provider:** copilot / claude-opus-4.8",
         f"- **Tickers:** {len(results)}",
         "",
         "| Ticker | Signal | Elapsed | Status |",

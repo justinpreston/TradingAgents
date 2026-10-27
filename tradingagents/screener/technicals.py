@@ -29,10 +29,9 @@ are served instantly from cache. Pass ``use_cache=False`` to bypass.
 from __future__ import annotations
 
 import logging
-import math
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field, fields
 from datetime import date, timedelta
-from typing import Sequence
 
 from tradingagents.dataflows._disk_cache import DiskCache
 from tradingagents.dataflows.vendors.polygon.common import _make_request
@@ -130,7 +129,7 @@ def fetch_daily_bars(
     return payload.get("results") or []
 
 
-def _signals_from_dict(d: dict) -> "TechnicalSignals":
+def _signals_from_dict(d: dict) -> TechnicalSignals:
     """Reconstruct :class:`TechnicalSignals` from a JSON-cached payload.
 
     Tolerant of schema additions: unknown keys ignored, missing keys default.

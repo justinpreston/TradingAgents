@@ -40,8 +40,8 @@ import json
 import os
 import sqlite3
 import sys
-from datetime import datetime, date
 from collections import defaultdict
+from datetime import date, datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

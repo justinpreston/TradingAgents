@@ -33,8 +33,6 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Optional
-
 
 RATING_ORDER = {
     "Sell": -2,
@@ -104,7 +102,7 @@ def _load_trader_proposal(run_dir: Path, ticker: str) -> str:
     if not log_path.exists():
         return ""
     last = ""
-    with open(log_path, "r", encoding="utf-8", errors="replace") as fp:
+    with open(log_path, encoding="utf-8", errors="replace") as fp:
         for line in fp:
             if "FINAL TRANSACTION PROPOSAL" in line:
                 m = re.search(r"\b(BUY|SELL|HOLD)\b", line)
@@ -141,7 +139,7 @@ def _build_markdown(left_dir: Path, left: dict, right_dir: Path, right: dict) ->
             tickers.append(t)
 
     lines = []
-    lines.append(f"# Run comparison")
+    lines.append("# Run comparison")
     lines.append("")
     lines.append(f"- **Left**:  `{left_dir.name}`  ({left_label})")
     lines.append(f"- **Right**: `{right_dir.name}`  ({right_label})")

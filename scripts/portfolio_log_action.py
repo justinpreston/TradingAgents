@@ -34,7 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -71,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--log-file", type=Path, default=DEFAULT_TRADES_LOG)
     args = p.parse_args(argv)
 
-    ts = args.ts or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    ts = args.ts or datetime.now(UTC).isoformat(timespec="seconds")
     entry = {
         "ts": ts,
         "ticker": args.ticker.upper(),

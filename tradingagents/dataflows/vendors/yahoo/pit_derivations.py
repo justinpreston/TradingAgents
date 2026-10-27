@@ -23,10 +23,7 @@ historical fact, and have no PIT-correct yfinance source.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import pandas as pd
-
 
 # yfinance row labels for each statement line item often vary by ticker /
 # statement vintage. We accept the first match against a list of synonyms.
@@ -75,7 +72,7 @@ def _strip_tz(idx):
     return idx
 
 
-def _first_match(df: Optional[pd.DataFrame], keys):
+def _first_match(df: pd.DataFrame | None, keys):
     if df is None or not isinstance(df, pd.DataFrame) or df.empty:
         return None
     for k in keys:
@@ -84,7 +81,7 @@ def _first_match(df: Optional[pd.DataFrame], keys):
     return None
 
 
-def _ttm_sum(df, synonyms, curr_date) -> Optional[float]:
+def _ttm_sum(df, synonyms, curr_date) -> float | None:
     """Sum the four most-recent quarterly values whose period ends on or
     before ``curr_date``. Returns ``None`` if fewer than four are available
     or any of those four are NaN — partial TTM is worse than no TTM."""
@@ -103,7 +100,7 @@ def _ttm_sum(df, synonyms, curr_date) -> Optional[float]:
     return float(sum(vals))
 
 
-def _latest_le(df, synonyms, curr_date) -> Optional[float]:
+def _latest_le(df, synonyms, curr_date) -> float | None:
     """Most recent point-in-time value of a balance-sheet line item with
     period ending on or before ``curr_date``."""
     row = _first_match(df, synonyms)
@@ -118,7 +115,7 @@ def _latest_le(df, synonyms, curr_date) -> Optional[float]:
     return float(val) if pd.notna(val) else None
 
 
-def _close_at(history: pd.DataFrame, curr_date) -> Optional[float]:
+def _close_at(history: pd.DataFrame, curr_date) -> float | None:
     """Most recent close on or before ``curr_date``."""
     if history is None or history.empty or "Close" not in history.columns:
         return None
@@ -132,7 +129,7 @@ def _close_at(history: pd.DataFrame, curr_date) -> Optional[float]:
     return float(val) if pd.notna(val) else None
 
 
-def _shares_at(shares, curr_date) -> Optional[float]:
+def _shares_at(shares, curr_date) -> float | None:
     """Share count on or before ``curr_date``. yfinance's ``get_shares_full``
     returns a Series indexed by datetime."""
     if shares is None or len(shares) == 0:

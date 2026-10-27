@@ -20,7 +20,6 @@ from scripts.build_friday_packet import (
     write_packet,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 

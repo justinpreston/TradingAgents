@@ -6,7 +6,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import tradingagents
 from tradingagents.agents.context import build_instrument_context, resolve_instrument_identity
@@ -15,6 +15,7 @@ from tradingagents.dataflows.config import run_config, run_config_context, set_c
 from tradingagents.dataflows.date_window import get_current_date, is_historical
 from tradingagents.dataflows.symbols import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.grounding.runtime import assert_analyst_grounding
 from tradingagents.llm_clients import build_llm_kwargs, create_llm_client
 from tradingagents.memory import TradingMemoryLog, settlement
 from tradingagents.memory.reflection import Reflector
@@ -24,7 +25,6 @@ from .checkpointer import checkpoint_step, clear_checkpoint, get_checkpointer, t
 from .conditional_logic import ConditionalLogic
 from .propagation import Propagator
 from .setup import GraphSetup
-from tradingagents.grounding.runtime import assert_analyst_grounding
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +57,9 @@ class TradingAgentsGraph:
         self,
         selected_analysts=("market", "social", "news", "fundamentals"),
         debug=False,
-        config: Dict[str, Any] = None,
-        callbacks: Optional[List] = None,
-        progress_listener: Optional[Any] = None,
+        config: dict[str, Any] = None,
+        callbacks: list | None = None,
+        progress_listener: Any | None = None,
     ):
         """Initialize the trading agents graph and components.
 
@@ -111,9 +111,9 @@ class TradingAgentsGraph:
         # model identifier; we cache one client per unique model so two
         # personas pointing at the same model share an LLM instance.
         persona_models = self.config.get("persona_models") or {}
-        persona_llms: Dict[str, Any] = {}
+        persona_llms: dict[str, Any] = {}
         if persona_models:
-            client_cache: Dict[str, Any] = {
+            client_cache: dict[str, Any] = {
                 self.config["deep_think_llm"]: self.deep_thinking_llm,
                 self.config["quick_think_llm"]: self.quick_thinking_llm,
             }

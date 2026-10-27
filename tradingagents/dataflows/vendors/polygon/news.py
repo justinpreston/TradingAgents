@@ -14,7 +14,6 @@ from typing import Annotated, Any
 from .common import (
     PolygonError,
     PolygonNotFoundError,
-    _make_request,
     paginated_results,
 )
 
@@ -23,7 +22,7 @@ def _format_news_entries(entries: list[dict[str, Any]], header_label: str) -> st
     if not entries:
         return f"# {header_label}\n# No news found in the requested window\n"
 
-    lines = [f"# {header_label}", f"# Source: Polygon", f"# Total items: {len(entries)}\n"]
+    lines = [f"# {header_label}", "# Source: Polygon", f"# Total items: {len(entries)}\n"]
     for item in entries:
         published = item.get("published_utc", "")
         title = item.get("title", "(untitled)")

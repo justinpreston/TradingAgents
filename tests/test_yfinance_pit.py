@@ -20,7 +20,6 @@ import pytest
 
 from tradingagents.dataflows.vendors.yahoo import fundamentals as y_finance
 
-
 # A representative subset of the live-snapshot field labels the function
 # is expected to *suppress* on historical calls. (Picked to span price-
 # derived, TTM, and rolling-window categories.)
@@ -472,7 +471,6 @@ def test_empty_info_payload():
     string the agent might fabricate around.
     """
     from tradingagents.dataflows.errors import NoMarketDataError
-
     from tradingagents.dataflows.vendors.yahoo import common
 
     # An empty payload probes Yahoo to tell "no data" from an outage; keep the

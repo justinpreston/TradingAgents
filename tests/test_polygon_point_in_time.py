@@ -10,8 +10,7 @@ from unittest import mock
 
 import pytest
 
-from tradingagents.dataflows.vendors.polygon import finance as pf
-from tradingagents.dataflows.vendors.polygon import news as pn
+from tradingagents.dataflows.vendors.polygon import finance as pf, news as pn
 
 pytestmark = pytest.mark.unit
 

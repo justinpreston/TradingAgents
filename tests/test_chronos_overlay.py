@@ -17,14 +17,12 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import pytest
-
 from build_chronos_overlay import (
     _agreement_label,
     _select_device,
     _tier,
     _value_to_quantile,
 )
-
 
 # ──────────────────────────────────────────────────────────────────────
 # _value_to_quantile — linear interpolation across the quantile grid

@@ -52,7 +52,7 @@ def _load_enrichment_map() -> dict[str, dict[str, Any]]:
     if not path:
         _CACHE, _CACHE_KEY = {}, None
         return _CACHE
-    if _CACHE_KEY == path and _CACHE is not None:
+    if path == _CACHE_KEY and _CACHE is not None:
         return _CACHE
     try:
         data = json.loads(Path(path).read_text())
@@ -71,7 +71,7 @@ def _load_earnings_map() -> dict[str, dict[str, Any]]:
     if not path:
         _EARN_CACHE, _EARN_CACHE_KEY = {}, None
         return _EARN_CACHE
-    if _EARN_CACHE_KEY == path and _EARN_CACHE is not None:
+    if path == _EARN_CACHE_KEY and _EARN_CACHE is not None:
         return _EARN_CACHE
     try:
         data = json.loads(Path(path).read_text())

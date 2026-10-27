@@ -59,7 +59,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -91,7 +91,7 @@ def _fetch_headlines(
     Returns the Polygon /v2/reference/news payload (list of dicts).
     Empty list on error or empty result.
     """
-    end_dt = datetime.now(timezone.utc)
+    end_dt = datetime.now(UTC)
     start_dt = end_dt - timedelta(days=lookback_days)
     params = {
         "ticker": ticker.upper(),
@@ -269,7 +269,7 @@ def _rerank_screener(run_dir: Path, enriched: list[dict[str, Any]],
         "candidates": rescored,
         "rerank_metadata": {
             "alpha": alpha,
-            "applied_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "applied_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             "n_with_sentiment": sum(1 for r in rescored if r["sentiment_polarity"] != 0.0),
         },
     }
@@ -385,7 +385,7 @@ def main() -> int:
 
     output: dict[str, Any] = {
         "schema_version": 1,
-        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "scorer_choice": args.scorer,
         "lookback_days": args.lookback_days,
         "n_tickers": len(enriched),
@@ -421,7 +421,7 @@ def main() -> int:
         if rerank_path is not None:
             print(f"\nRe-ranked screener written to {rerank_path}", flush=True)
             print(f"  alpha={args.rerank_alpha} · multiplier ∈ [0.5, 1.5]")
-            print(f"  top_tickers_sentiment_reranked.txt also updated.")
+            print("  top_tickers_sentiment_reranked.txt also updated.")
 
     return 0
 

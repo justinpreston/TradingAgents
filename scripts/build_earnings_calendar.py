@@ -36,7 +36,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -136,7 +136,7 @@ def _write_calendar(*, tickers: list[str], out_path: Path,
     n_next = sum(1 for r in enriched if "next_earnings" in r)
     output: dict[str, Any] = {
         "schema_version": 1,
-        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "n_tickers": len(enriched),
         "n_with_next_earnings": n_next,
         "source_run": source_run,

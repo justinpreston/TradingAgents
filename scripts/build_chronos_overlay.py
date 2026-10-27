@@ -76,7 +76,6 @@ load_dotenv(REPO_ROOT / ".env")
 from tradingagents.dataflows.volatility_context import _fetch_daily_aggs  # noqa: E402
 from tradingagents.tiers import tier_for_row  # noqa: E402
 
-
 # ──────────────────────────────────────────────────────────────────────
 # Tier classification (mirrors build_options_overlay / build_run_accounting)
 # ──────────────────────────────────────────────────────────────────────
@@ -441,7 +440,7 @@ def main() -> int:
               f"~3 months should be treated as directional rather than calibrated.")
 
     # Lazy-import torch + chronos so --help and arg validation are fast
-    print(f"[chronos] loading model (first run downloads ~200 MB to ~/.cache/huggingface)...")
+    print("[chronos] loading model (first run downloads ~200 MB to ~/.cache/huggingface)...")
     t0 = time.time()
     try:
         import torch

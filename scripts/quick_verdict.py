@@ -17,14 +17,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import pathlib
 import subprocess
 import sys
 from datetime import datetime
 
 from tradingagents.tiers import tier_for_row
-
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 

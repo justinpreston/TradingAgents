@@ -30,19 +30,17 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import os
 import pathlib
 import re
 import sys
 import time
 from datetime import datetime
-from typing import Optional
 
 PROMOTE_RATINGS = {"Overweight", "Buy"}
 VETO_RATINGS = {"Underweight", "Sell"}
 
 
-def _parse_state(path: pathlib.Path) -> Optional[dict]:
+def _parse_state(path: pathlib.Path) -> dict | None:
     if not path.exists():
         return None
     try:
@@ -67,7 +65,7 @@ def _parse_state(path: pathlib.Path) -> Optional[dict]:
     }
 
 
-def _classify(aggr_rating: Optional[str], cons_rating: Optional[str]) -> str:
+def _classify(aggr_rating: str | None, cons_rating: str | None) -> str:
     aggr = aggr_rating or "ERROR"
     cons = cons_rating or "ERROR"
     if aggr in PROMOTE_RATINGS and cons not in VETO_RATINGS and cons != "ERROR":
@@ -90,7 +88,7 @@ def _classify(aggr_rating: Optional[str], cons_rating: Optional[str]) -> str:
 PT_SUSPECT_PCT = 50.0  # ±50% from current price
 
 
-def _pt_quality(pt: Optional[float], current_price: Optional[float]) -> tuple[str, Optional[float]]:
+def _pt_quality(pt: float | None, current_price: float | None) -> tuple[str, float | None]:
     """Classify a persona PT's plausibility relative to current price.
 
     Returns (label, distance_pct):
@@ -139,16 +137,16 @@ def _fetch_prices(tickers: list[str], pace: float = 1.4, retry_sleep: float = 70
     return out
 
 
-def _fmt_price(p: Optional[float]) -> str:
+def _fmt_price(p: float | None) -> str:
     return f"${p:,.2f}" if p is not None else "—"
 
 
-def _fmt_pct(p: Optional[float]) -> str:
+def _fmt_pct(p: float | None) -> str:
     return f"{p:+.1f}%" if p is not None else "—"
 
 
-def _per_ticker_md(t: str, cand: dict, cur: Optional[float], aggr: Optional[dict],
-                   cons: Optional[dict], classification: str) -> str:
+def _per_ticker_md(t: str, cand: dict, cur: float | None, aggr: dict | None,
+                   cons: dict | None, classification: str) -> str:
     aggr_rating = aggr["rating"] if aggr else "ERROR"
     cons_rating = cons["rating"] if cons else "ERROR"
     aggr_pt = aggr["price_target"] if aggr else None
@@ -198,7 +196,7 @@ def _per_ticker_md(t: str, cand: dict, cur: Optional[float], aggr: Optional[dict
     return "\n".join(lines)
 
 
-def _trade_synthesis_md(run_id: str, screener_run: Optional[str], ledger: list[dict],
+def _trade_synthesis_md(run_id: str, screener_run: str | None, ledger: list[dict],
                          picks: list[dict], vetoed: list[dict], snapshot_date: str) -> str:
     source_pipeline_line = (
         f"**Source pipeline**: `runs/{screener_run}/` → top-25 candidates → dual-frame matrix (aggressive ∧ conservative)."
@@ -334,7 +332,7 @@ def _trade_synthesis_md(run_id: str, screener_run: Optional[str], ledger: list[d
     return "\n".join(lines)
 
 
-def _readme_md(run_id: str, screener_run: Optional[str], picks: list[dict], vetoed: list[dict],
+def _readme_md(run_id: str, screener_run: str | None, picks: list[dict], vetoed: list[dict],
                snapshot_date: str, n_total: int) -> str:
     pick_tickers = " · ".join(r["ticker"] for r in picks)
     vetoed_tickers = " · ".join(r["ticker"] for r in vetoed)
@@ -442,7 +440,7 @@ def main() -> int:
     args = p.parse_args()
 
     matrix_run = args.matrix_run.resolve()
-    screener_run: Optional[pathlib.Path] = (
+    screener_run: pathlib.Path | None = (
         args.screener_run.resolve() if args.screener_run is not None else None
     )
     if not matrix_run.is_dir():
@@ -478,7 +476,7 @@ def main() -> int:
             load_repo_env()
         except Exception:
             pass
-        from tradingagents.dataflows.vendors.polygon.common import _make_request, PolygonError  # type: ignore
+        from tradingagents.dataflows.vendors.polygon.common import PolygonError, _make_request  # type: ignore
         for t in tickers_missing_sector:
             try:
                 r = _make_request(f"/v3/reference/tickers/{t}")
@@ -596,10 +594,10 @@ def main() -> int:
 
     print()
     print(f"  ✅ verdict_ledger.csv  ({len(ledger)} rows)")
-    print(f"  ✅ verdict_ledger.json")
+    print("  ✅ verdict_ledger.json")
     print(f"  ✅ per_ticker/         ({len(tickers)} files)")
-    print(f"  ✅ trade_synthesis.md")
-    print(f"  ✅ README.md")
+    print("  ✅ trade_synthesis.md")
+    print("  ✅ README.md")
     print(f"  ✅ current_prices.json ({len(prices)}/{len(tickers)} tickers priced)")
     print()
     print(f"  PICKs ({len(picks)}): {[r['ticker'] for r in picks]}")

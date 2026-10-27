@@ -8,16 +8,16 @@ from pathlib import Path
 
 import pytest
 
-from scripts.portfolio_load_context import build_context
-from scripts.portfolio_check import recommend_for_position
 from scripts.portfolio_allocation import (
+    _deployed_capital_for_position,
+    _market_value_for_position,
     aggregate_exposures,
     cash_buffer_status,
     compute_breaches,
     simulate_candidate,
-    _deployed_capital_for_position,
-    _market_value_for_position,
 )
+from scripts.portfolio_check import recommend_for_position
+from scripts.portfolio_load_context import build_context
 from scripts.portfolio_trade_tickets import build_queue
 
 

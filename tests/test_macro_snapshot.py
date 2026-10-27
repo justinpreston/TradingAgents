@@ -5,8 +5,6 @@ import json
 from datetime import date
 from pathlib import Path
 
-import pytest
-
 from tradingagents.dataflows import macro_snapshot as ms
 
 

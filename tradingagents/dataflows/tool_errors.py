@@ -19,8 +19,8 @@ without losing detection coverage.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, List
 
 # Canonical machine-readable marker. Picked to be obvious in logs, easy
 # to grep, and unlikely to collide with legitimate report content.
@@ -65,7 +65,7 @@ def format_tool_error(tool_name: str, target: str | None, exc: BaseException | s
     return f"{TOOL_ERROR_OPEN} {body} {TOOL_ERROR_CLOSE}"
 
 
-def extract_tool_errors(text: str | None) -> List[ToolError]:
+def extract_tool_errors(text: str | None) -> list[ToolError]:
     """Find every tool-error occurrence in ``text``.
 
     Detects both the new ``[[TOOL_ERROR: ...]]`` marker and the legacy
@@ -74,7 +74,7 @@ def extract_tool_errors(text: str | None) -> List[ToolError]:
     """
     if not text:
         return []
-    errors: List[ToolError] = []
+    errors: list[ToolError] = []
     seen: set[str] = set()
 
     for match in _MARKER_RE.finditer(text):

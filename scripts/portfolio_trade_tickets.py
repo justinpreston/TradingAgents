@@ -30,17 +30,15 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.portfolio_allocation import (  # noqa: E402
+    simulate_candidate,
+)
+from scripts.portfolio_check import recommend_for_position  # noqa: E402
 from scripts.portfolio_load_context import (  # noqa: E402
     DEFAULT_POLICY,
     DEFAULT_POSITIONS,
     build_context,
 )
-from scripts.portfolio_check import recommend_for_position  # noqa: E402
-from scripts.portfolio_allocation import (  # noqa: E402
-    aggregate_exposures,
-    simulate_candidate,
-)
-
 
 # ---------------------------------------------------------------------------
 # New-pick discovery

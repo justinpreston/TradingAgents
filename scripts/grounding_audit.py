@@ -51,7 +51,6 @@ import re
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -65,7 +64,6 @@ from tradingagents.dataflows.tool_errors import (  # noqa: E402
     extract_tool_errors,
 )
 from tradingagents.tiers import tier_for_row  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Regex catalog for "unsourced specific numeric" detection.
@@ -112,15 +110,15 @@ _DATA_GAPS_BLOCK_RE = re.compile(
 @dataclass
 class TickerGroundingScore:
     ticker: str
-    tier: Optional[str] = None
-    classification: Optional[str] = None
+    tier: str | None = None
+    classification: str | None = None
     # PT sanity (signal #1)
     pt_quality_flags: list[str] = field(default_factory=list)
-    aggressive_pt: Optional[float] = None
-    conservative_pt: Optional[float] = None
-    current_price: Optional[float] = None
-    aggressive_pt_distance_pct: Optional[float] = None
-    conservative_pt_distance_pct: Optional[float] = None
+    aggressive_pt: float | None = None
+    conservative_pt: float | None = None
+    current_price: float | None = None
+    aggressive_pt_distance_pct: float | None = None
+    conservative_pt_distance_pct: float | None = None
     # Data gaps in analyst reports (signal #2)
     analyst_data_gaps: dict = field(default_factory=dict)  # report_key -> error_count
     n_analyst_reports_with_gaps: int = 0
@@ -129,11 +127,11 @@ class TickerGroundingScore:
     unsourced_numeric_claims: dict = field(default_factory=dict)  # pattern_name -> count
     n_unsourced_numeric_claims: int = 0
     # Analyst PT consensus check (signal #4)
-    analyst_consensus_mean: Optional[float] = None
-    analyst_consensus_high: Optional[float] = None
-    analyst_consensus_low: Optional[float] = None
-    analyst_consensus_source: Optional[str] = None
-    conservative_pt_vs_consensus_pct: Optional[float] = None
+    analyst_consensus_mean: float | None = None
+    analyst_consensus_high: float | None = None
+    analyst_consensus_low: float | None = None
+    analyst_consensus_source: str | None = None
+    conservative_pt_vs_consensus_pct: float | None = None
     consensus_divergence_flag: bool = False
     # Roll-up
     risk_score: float = 0.0  # 0=clean, increases with severity
@@ -147,7 +145,7 @@ def _load_verdict_ledger(matrix_run: Path) -> dict:
     return json.loads(p.read_text())
 
 
-def _load_cell_state(matrix_run: Path, profile: str, ticker: str) -> Optional[dict]:
+def _load_cell_state(matrix_run: Path, profile: str, ticker: str) -> dict | None:
     p = matrix_run / "cells" / profile / ticker / f"{ticker}.state.json"
     if not p.exists():
         return None
@@ -193,7 +191,7 @@ def _scan_analyst_reports(cell_state: dict) -> tuple[dict[str, int], bool]:
     return gap_counts, sentiment_insufficient
 
 
-def _persona_text(cell_state: Optional[dict]) -> str:
+def _persona_text(cell_state: dict | None) -> str:
     """Concatenate the persona-generated text streams into one searchable blob."""
     if not cell_state:
         return ""
@@ -224,8 +222,8 @@ def _persona_text(cell_state: Optional[dict]) -> str:
 
 def _score_ticker(
     row: dict,
-    aggressive_cell: Optional[dict],
-    conservative_cell: Optional[dict],
+    aggressive_cell: dict | None,
+    conservative_cell: dict | None,
     consensus: AnalystPriceTargets,
     consensus_divergence_pct: float,
 ) -> TickerGroundingScore:
@@ -287,7 +285,7 @@ def _score_ticker(
     return score
 
 
-def _tier_for_row(row: dict) -> Optional[str]:
+def _tier_for_row(row: dict) -> str | None:
     """Delegates to tradingagents.tiers.tier_for_row (canonical source of
     truth). Note: unlike the shared canonical rule (which returns '—' for
     non-PICK/non-VETOED rows), this site returns None — preserved here."""

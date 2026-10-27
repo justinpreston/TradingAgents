@@ -7,9 +7,9 @@ level so we can exercise the 429/Retry-After/backoff paths deterministically.
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -72,14 +72,14 @@ class TestParseRetryAfter:
         assert _parse_retry_after("-5") == 0.0
 
     def test_http_date_in_future(self):
-        future = datetime.now(timezone.utc) + timedelta(seconds=45)
+        future = datetime.now(UTC) + timedelta(seconds=45)
         header = format_datetime(future, usegmt=True)
         parsed = _parse_retry_after(header)
         assert parsed is not None
         assert 35.0 < parsed <= 50.0  # rough — wall-clock drift tolerance
 
     def test_http_date_in_past_clamped(self):
-        past = datetime.now(timezone.utc) - timedelta(seconds=10)
+        past = datetime.now(UTC) - timedelta(seconds=10)
         header = format_datetime(past, usegmt=True)
         assert _parse_retry_after(header) == 0.0
 
@@ -228,13 +228,12 @@ class TestRateLimitPropagation:
         with patch(
             "tradingagents.screener.universe._make_request",
             side_effect=PolygonRateLimitError("test"),
-        ):
-            with pytest.raises(PolygonRateLimitError):
-                _enrich_with_reference("AAPL")
+        ), pytest.raises(PolygonRateLimitError):
+            _enrich_with_reference("AAPL")
 
     def test_universe_enrich_swallows_404(self):
-        from tradingagents.screener.universe import _enrich_with_reference
         from tradingagents.dataflows.vendors.polygon.common import PolygonNotFoundError
+        from tradingagents.screener.universe import _enrich_with_reference
 
         with patch(
             "tradingagents.screener.universe._make_request",
@@ -249,9 +248,8 @@ class TestRateLimitPropagation:
         with patch(
             "tradingagents.screener.fundamentals.sec_edgar.quarterly_income_series",
             side_effect=VendorUnavailableError("SEC EDGAR request failed (429)"),
-        ):
-            with pytest.raises(VendorUnavailableError):
-                fetch_quarterly_financials("AAPL")
+        ), pytest.raises(VendorUnavailableError):
+            fetch_quarterly_financials("AAPL")
 
     def test_fundamentals_no_coverage_is_empty(self):
         from tradingagents.screener.fundamentals import fetch_quarterly_financials
@@ -271,6 +269,7 @@ class TestRateLimitPropagation:
 class TestScreenerResultPartial:
     def test_is_partial_false_when_no_failures(self):
         from datetime import date as _date
+
         from tradingagents.screener.orchestrator import ScreenerResult
         r = ScreenerResult(
             trading_date=_date(2026, 4, 29),
@@ -283,6 +282,7 @@ class TestScreenerResultPartial:
 
     def test_is_partial_true_when_failures_present(self):
         from datetime import date as _date
+
         from tradingagents.screener.orchestrator import ScreenerResult
         r = ScreenerResult(
             trading_date=_date(2026, 4, 29),

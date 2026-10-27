@@ -44,9 +44,10 @@ import sys
 import threading
 import time
 from collections import deque
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Deque, Dict, List, Mapping, Optional, Tuple
+from typing import Any
 
 from rich.console import Console, Group
 from rich.live import Live
@@ -69,8 +70,6 @@ from .node_metadata import (
     phase_for_node,
     phase_label,
 )
-from .progress_listener import ProgressListener
-
 
 _STATUS_PENDING = "pending"
 _STATUS_RUNNING = "running"
@@ -107,15 +106,15 @@ class _TickerState:
     phase: str = ""
     current_node: str = "pending"
     nodes_completed: int = 0
-    started_at: Optional[float] = None
-    finished_at: Optional[float] = None
-    signal: Optional[str] = None
-    error: Optional[str] = None
+    started_at: float | None = None
+    finished_at: float | None = None
+    signal: str | None = None
+    error: str | None = None
     llm_calls: int = 0
     tool_calls: int = 0
     tokens_in: int = 0
     tokens_out: int = 0
-    completed_visible_nodes: List[str] = field(default_factory=list)
+    completed_visible_nodes: list[str] = field(default_factory=list)
 
     def elapsed(self) -> float:
         if self.started_at is None:
@@ -136,13 +135,13 @@ class RunDashboard:
 
     def __init__(
         self,
-        tickers: List[str],
+        tickers: list[str],
         trade_date: str,
         run_id: str,
         title: str = "TradingAgents",
         *,
-        system_date: Optional[str] = None,
-        console: Optional[Console] = None,
+        system_date: str | None = None,
+        console: Console | None = None,
         refresh_per_second: int = 4,
     ) -> None:
         self._tickers = list(tickers)
@@ -156,12 +155,12 @@ class RunDashboard:
         self._console = console or Console(file=sys.stderr, force_terminal=True)
 
         self._lock = threading.Lock()
-        self._states: Dict[str, _TickerState] = {
+        self._states: dict[str, _TickerState] = {
             t: _TickerState(ticker=t) for t in self._tickers
         }
-        self._active: Optional[str] = None
-        self._events: Deque[Tuple[str, str]] = deque(maxlen=self.EVENT_TAIL_LEN)
-        self._batch_started_at: Optional[float] = None
+        self._active: str | None = None
+        self._events: deque[tuple[str, str]] = deque(maxlen=self.EVENT_TAIL_LEN)
+        self._batch_started_at: float | None = None
 
         # Single Rich progress bar tracking the currently-active ticker.
         self._progress = Progress(
@@ -177,13 +176,13 @@ class RunDashboard:
             console=self._console,
             transient=False,
         )
-        self._progress_task: Optional[TaskID] = None
+        self._progress_task: TaskID | None = None
 
-        self._live: Optional[Live] = None
+        self._live: Live | None = None
 
     # ---- context manager --------------------------------------------------
 
-    def __enter__(self) -> "RunDashboard":
+    def __enter__(self) -> RunDashboard:
         self._batch_started_at = time.time()
         self._live = Live(
             self._render(),
@@ -329,7 +328,7 @@ class RunDashboard:
         ticker: str,
         in_tokens: int,
         out_tokens: int,
-        model: Optional[str],
+        model: str | None,
     ) -> None:
         with self._lock:
             state = self._states.setdefault(ticker, _TickerState(ticker=ticker))

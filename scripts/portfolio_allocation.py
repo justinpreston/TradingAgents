@@ -36,7 +36,6 @@ from scripts.portfolio_load_context import (  # noqa: E402
     build_context,
 )
 
-
 # ---------------------------------------------------------------------------
 # Capital deployment math
 

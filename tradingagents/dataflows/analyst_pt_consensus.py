@@ -21,8 +21,7 @@ response never blocks a run.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
-from typing import Optional
+from dataclasses import asdict, dataclass
 
 try:  # yfinance is a transitive dep via stockstats_utils
     import yfinance as yf
@@ -30,7 +29,7 @@ except ImportError:  # pragma: no cover - bootstrap safety
     yf = None  # type: ignore[assignment]
 
 
-_CACHE: dict[str, "AnalystPriceTargets | None"] = {}
+_CACHE: dict[str, AnalystPriceTargets | None] = {}
 
 
 @dataclass(frozen=True)
@@ -42,12 +41,12 @@ class AnalystPriceTargets:
     """
 
     ticker: str
-    current: Optional[float]
-    high: Optional[float]
-    low: Optional[float]
-    mean: Optional[float]
-    median: Optional[float]
-    number_of_analysts: Optional[int]
+    current: float | None
+    high: float | None
+    low: float | None
+    mean: float | None
+    median: float | None
+    number_of_analysts: int | None
     source: str  # "yfinance" | "polygon" | "unavailable"
 
     def as_dict(self) -> dict:
@@ -61,7 +60,7 @@ class AnalystPriceTargets:
         )
 
 
-def _coerce_float(value) -> Optional[float]:
+def _coerce_float(value) -> float | None:
     if value is None:
         return None
     try:
@@ -74,7 +73,7 @@ def _coerce_float(value) -> Optional[float]:
     return f
 
 
-def _coerce_int(value) -> Optional[int]:
+def _coerce_int(value) -> int | None:
     if value is None:
         return None
     try:

@@ -32,7 +32,8 @@ Events
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Optional, Protocol, runtime_checkable
+from collections.abc import Mapping
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -65,7 +66,7 @@ class ProgressListener(Protocol):
         ticker: str,
         in_tokens: int,
         out_tokens: int,
-        model: Optional[str],
+        model: str | None,
     ) -> None: ...
 
 
@@ -106,6 +107,6 @@ class NoOpListener:
         ticker: str,
         in_tokens: int,
         out_tokens: int,
-        model: Optional[str],
+        model: str | None,
     ) -> None:
         return None

@@ -44,6 +44,7 @@ def test_load_repo_env_finds_dotenv_from_foreign_cwd(tmp_path, monkeypatch):
         assert load_dotenv(".env") is False
 
         import importlib
+
         import scripts._env as env_mod
         importlib.reload(env_mod)
         env_mod.load_repo_env()

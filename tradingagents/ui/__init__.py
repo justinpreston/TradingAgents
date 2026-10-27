@@ -11,7 +11,6 @@ Public surface:
   :class:`rich.live.Live`. Implements :class:`ProgressListener`.
 """
 
-from .progress_listener import NoOpListener, ProgressListener
 from .callbacks import TokenToolCallbackHandler
 from .dashboard import RunDashboard
 from .node_metadata import (
@@ -21,6 +20,7 @@ from .node_metadata import (
     is_visible_node,
     phase_label,
 )
+from .progress_listener import NoOpListener, ProgressListener
 
 __all__ = [
     "DECISION_NODES",

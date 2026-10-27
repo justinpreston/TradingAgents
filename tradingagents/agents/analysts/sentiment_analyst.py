@@ -42,10 +42,9 @@ from tradingagents.agents.structured import (
     invoke_structured_or_freetext,
 )
 from tradingagents.agents.tools import get_news
+from tradingagents.dataflows.tool_errors import has_tool_errors
 from tradingagents.dataflows.vendors.reddit import fetch_reddit_posts
 from tradingagents.dataflows.vendors.stocktwits import fetch_stocktwits_messages
-from tradingagents.dataflows.tool_errors import has_tool_errors
-
 
 # Minimum *informative* characters across all three blocks below which
 # the LLM is bypassed entirely. Empirically calibrated so that one

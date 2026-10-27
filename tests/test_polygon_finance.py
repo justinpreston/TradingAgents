@@ -22,7 +22,6 @@ from tradingagents.dataflows.vendors.polygon.common import (
     PolygonRateLimitError,
 )
 
-
 # ---------------------------------------------------------------------------
 # get_fundamentals end-to-end (mocked HTTP)
 # ---------------------------------------------------------------------------
@@ -179,9 +178,8 @@ class TestPolygonNews:
             pn,
             "paginated_results",
             side_effect=PolygonNotFoundError("404 page not found"),
-        ) as mock_paginate:
-            with pytest.raises(PolygonError):
-                pn.get_insider_transactions("NVDA")
+        ) as mock_paginate, pytest.raises(PolygonError):
+            pn.get_insider_transactions("NVDA")
         # Should have probed every spelling, not just the first.
         assert mock_paginate.call_count == len(pn._INSIDER_TXN_ENDPOINTS)
         called_paths = [c.args[0] for c in mock_paginate.call_args_list]
