@@ -187,16 +187,25 @@ Every LLM call goes through the GitHub Copilot endpoint (`api.githubcopilot.com`
 On 2026-10-09 Copilot stopped serving every `claude-opus-*` model and `gpt-6-astra`,
 so the `aggressive-aligned` table in `run_copilot_persona_aligned.py` is now:
 
-- `CLAUDE = "claude-sonnet-5.5"`: bull researcher, aggressive risk analyst, and `deep_think_llm`.
-- `GPT = "gpt-5.5"`: every other role, including the Portfolio Manager.
+- `CLAUDE = "claude-sonnet-5.5"`: bull researcher, aggressive risk analyst, research manager,
+  conservative risk analyst, Portfolio Manager, and `deep_think_llm`.
+- `GPT = "gpt-5.6-sol"`: the four analysts, bear researcher, trader, neutral risk analyst.
+  This was `gpt-5.5` until Copilot dropped it (found 2026-10-26); gpt-5.6-sol is its nearest successor.
+
+The three decision seats moved to Claude on 2026-10-26. With gpt-5.6-sol in every GPT seat,
+PCTY/ADI/KEYS at 2026-10-09 all flipped to conservative Underweight (0/3 picks, on `main`
+and on the v0.7.0 port alike). With Sonnet in those seats they came back 3/3 (A, A, B), close
+to the gpt-5.5 run.
 
 Copilot serves GPT-5 and later only through `/responses`; `openai_client.py`
 routes them there (`_COPILOT_RESPONSES_ONLY`). Claude models stay on chat completions.
 **Don't move the GPT seats to gpt-6.x.** gpt-6.1-sol gave 0/15 picks, with
 conservative Underweight on every ticker and no conservative PTs (2026-10-02 shadow run and
-2026-10-09 run), because the prompts are calibrated on gpt-5.5. The Opus launchers
+2026-10-09 run), because the prompts were calibrated on gpt-5.5. The Opus launchers
 above no longer work on Copilot. Runs from 2026-10-09 on are a model change,
-so note it before comparing their pick rates with earlier weeks.
+so note it before comparing their pick rates with earlier weeks (and again from 2026-10-26).
+`run_copilot_matrix.py` exits 0 even when every cell errors, so after a model change
+check `events.jsonl` or `matrix.md` for `error` cells, not the exit code.
 
 **Rule of thumb:** if it isn't `run_screener.py` or `run_copilot_matrix.py`,
 it isn't part of the cadence. Don't feed it to
@@ -654,7 +663,7 @@ to re-check on every sync:
   `REASONING_EFFORT_PROVIDERS`, pinned by
   `tests/test_openai_reasoning_effort.py::test_copilot_forwards_reasoning_effort`).
 - `run_copilot_persona_aligned.py` — `CLAUDE = "claude-sonnet-5.5"`,
-  `GPT = "gpt-5.5"`; see "Matrix models" above.
+  `GPT = "gpt-5.6-sol"`, with the decision seats on CLAUDE; see "Matrix models" above.
 - Since v0.6.0 a graph run has a **Memory Log** step beside the analysts that
   settles *every* ticker's due decisions (#1428, #1445), not only the run's own
   ticker. Matrix cells share `~/.tradingagents/memory/trading_memory.md`; only

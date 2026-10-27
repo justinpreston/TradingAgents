@@ -45,7 +45,7 @@ class ResponsesApiSelectionTests:
 
 @pytest.mark.unit
 class TestCopilotResponsesApi:
-    @pytest.mark.parametrize("model", ["gpt-5.5", "gpt-6-sol", "gpt-6.1-sol"])
+    @pytest.mark.parametrize("model", ["gpt-5.5", "gpt-5.6-sol", "gpt-6-sol", "gpt-6.1-sol"])
     def test_gpt5_and_later_use_responses_api(self, monkeypatch, model):
         monkeypatch.setenv("GITHUB_TOKEN", "gh-test")
         llm = OpenAIClient(model, provider="copilot").get_llm()
