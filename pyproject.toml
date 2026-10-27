@@ -78,6 +78,7 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "**/__init__.py" = ["F401"]   # intentional re-exports
+"lean/algorithm/*.py" = ["F403", "F405"]   # LEAN idiom: from AlgorithmImports import *
 
 [tool.ruff.lint.isort]
 # Keep multiple aliased names from one module in a single combined import block
