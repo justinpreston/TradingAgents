@@ -149,7 +149,7 @@ def _resolve_github_token() -> str:
 # ---------------------------------------------------------------------------
 
 _RATING_RE = re.compile(r"\*\*Rating\*\*:\s*([A-Za-z]+)")
-_PT_RE = re.compile(r"\*\*Price Target\*\*:\s*([\d.,]+)")
+_PT_RE = re.compile(r"\*\*Price Target\*\*:\s*\$?\s*(\d[\d,]*(?:\.\d+)?)")
 
 
 def _extract_from_state(state_path: Path) -> tuple[Optional[str], Optional[str]]:
@@ -162,7 +162,7 @@ def _extract_from_state(state_path: Path) -> tuple[Optional[str], Optional[str]]
     rating = _RATING_RE.search(text)
     pt = _PT_RE.search(text)
     return (rating.group(1) if rating else None,
-            pt.group(1) if pt else None)
+            pt.group(1).replace(",", "") if pt else None)
 
 
 def _run_cell_once(

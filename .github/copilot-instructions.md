@@ -104,7 +104,7 @@ execution deploys to the **Relay** repo's Node 1 (IBKR). Full doc: `lean/README.
     --positions-file runs/portfolio/positions.json \
     --policy-file runs/portfolio/policy.json
 
-# Tests baseline (2150 pass after the v0.7.0 port; 3 Windows-only cache_writes tests fail on macOS)
+# Tests baseline (2157 pass after the v0.7.0 port; 3 Windows-only cache_writes tests fail on macOS)
 .venv/bin/python -m pytest tests/ -x -q
 ```
 

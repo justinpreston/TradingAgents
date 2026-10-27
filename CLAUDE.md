@@ -195,7 +195,9 @@ so the `aggressive-aligned` table in `run_copilot_persona_aligned.py` is now:
 The three decision seats moved to Claude on 2026-10-26. With gpt-5.6-sol in every GPT seat,
 PCTY/ADI/KEYS at 2026-10-09 all flipped to conservative Underweight (0/3 picks, on `main`
 and on the v0.7.0 port alike). With Sonnet in those seats they came back 3/3 (A, A, B), close
-to the gpt-5.5 run.
+to the gpt-5.5 run. Copilot's Sonnet refuses forced `tool_choice`, so the research manager and PM
+fall back to free text and write targets as `$170`. The `**Price Target**` parsers in
+`run_copilot_matrix.py` and `scripts/build_run_accounting.py` accept `$` and commas for that reason.
 
 Copilot serves GPT-5 and later only through `/responses`; `openai_client.py`
 routes them there (`_COPILOT_RESPONSES_ONLY`). Claude models stay on chat completions.
@@ -703,7 +705,7 @@ stay local). `.env` is also gitignored.
 ## Testing
 
 ```bash
-# Full suite (baseline 2026-10-26 after the upstream v0.7.0 port: 2150 pass,
+# Full suite (baseline 2026-10-26 after the upstream v0.7.0 port: 2157 pass,
 # 2 env-gated skips, ~30s-2min; deselect the polygon_pacer flake under load).
 # On macOS three tests/test_cache_writes.py::test_on_windows_* tests fail
 # (errno.EDEADLOCK is Windows-only); they are not regressions.
