@@ -76,9 +76,11 @@ DEFAULT_TICKERS = ["NVDA", "AAPL", "MSFT", "GOOGL"]
 DEFAULT_DATE: str | None = None
 
 # Copilot dropped every Opus model (2026-10-09); Sonnet 5.5 fills the Claude
-# seats until an Opus route comes back.
+# seats until an Opus route comes back. Copilot then dropped gpt-5.5 (by
+# 2026-10-26); gpt-5.6-sol is its nearest successor. Keep the GPT seats off
+# the gpt-6 family, which vetoes every ticker with these prompts.
 CLAUDE = "claude-sonnet-5.5"
-GPT = "gpt-5.5"
+GPT = "gpt-5.6-sol"
 
 PERSONA_MODELS = {
     "market_analyst":         GPT,
@@ -109,12 +111,12 @@ AGGRESSIVE_PERSONA_MODELS = {
     "fundamentals_analyst":   GPT,
     "bull_researcher":        CLAUDE,  # ← flipped from GPT: deeper bull synthesis
     "bear_researcher":        GPT,     # ← flipped from CLAUDE: shorter, more rebuttable bear
-    "research_manager":       GPT,     # ← flipped from CLAUDE: rubric verdict, no Buy→Hold drift
+    "research_manager":       CLAUDE,  # ← back to CLAUDE 2026-10-26: gpt-5.6-sol tips cons to Underweight
     "trader":                 GPT,
     "aggressive_analyst":     CLAUDE,  # ← flipped from GPT: deepest aggressive synthesis
     "neutral_analyst":        GPT,     # ← flipped from CLAUDE: aggressive-crowner disposition
-    "conservative_analyst":   GPT,     # ← flipped from CLAUDE: capital pres but rebuttable
-    "portfolio_manager":      GPT,
+    "conservative_analyst":   CLAUDE,  # ← back to CLAUDE 2026-10-26: same reason
+    "portfolio_manager":      CLAUDE,  # ← CLAUDE since 2026-10-26: same reason
 }
 
 PERSONA_ROUTING_TABLES = {

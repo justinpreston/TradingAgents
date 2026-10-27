@@ -20,9 +20,9 @@ still valid. (Revised from Friday-17:00 post-close on 2026-07-01 — the
 screener uses Thursday EOD bars either way; see CLAUDE.md.)
 
 ### 1a. Matrix models are pinned
-All LLM calls go through the Copilot endpoint. The matrix runs `gpt-5.5` and
-`claude-sonnet-5.5` (Opus and gpt-6-astra left Copilot 2026-10-09). Don't move
-GPT seats to gpt-6.x; it vetoes everything. See CLAUDE.md "Matrix models".
+All LLM calls go through the Copilot endpoint. The matrix runs `gpt-5.6-sol` and
+`claude-sonnet-5.5` (Opus and gpt-6-astra left Copilot 2026-10-09, gpt-5.5 by 2026-10-26). The research manager, conservative analyst and PM are on Sonnet,
+because gpt-5.6-sol vetoes from those seats. Don't move GPT seats to gpt-6.x; it vetoes everything. See CLAUDE.md "Matrix models".
 
 ### 2. Long calls are the default options strategy
 User preference: *"I generally prefer long calls for ease of trading."*
@@ -104,7 +104,7 @@ execution deploys to the **Relay** repo's Node 1 (IBKR). Full doc: `lean/README.
     --positions-file runs/portfolio/positions.json \
     --policy-file runs/portfolio/policy.json
 
-# Tests baseline (535 pass, 41 subtests, ~16s)
+# Tests baseline (2157 pass after the v0.7.0 port; 3 Windows-only cache_writes tests fail on macOS)
 .venv/bin/python -m pytest tests/ -x -q
 ```
 

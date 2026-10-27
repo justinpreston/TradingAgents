@@ -61,7 +61,7 @@ from tradingagents.llm_clients import create_llm_client  # noqa: E402
 load_repo_env()
 
 
-DEFAULT_PM_MODEL = "gpt-5.5"
+DEFAULT_PM_MODEL = "gpt-5.6-sol"
 
 
 def _resolve_github_token() -> str:
