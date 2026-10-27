@@ -182,13 +182,18 @@ class TestMakeRequestRetry:
             _make_response(429, headers={"Retry-After": "0.05"}),
             _make_response(200, json_body={"ok": True}),
         ]
-        with patch.object(pc, "_get_session", return_value=session):
+        # The retry adds up to 1s of random jitter; pin it to 0 so the test
+        # measures the Retry-After sleep alone instead of failing ~1 run in 6.
+        with (
+            patch.object(pc, "_get_session", return_value=session),
+            patch.object(pc.random, "random", return_value=0.0),
+        ):
             t0 = time.monotonic()
             payload = pc._make_request("/v3/x", max_attempts=3)
             elapsed = time.monotonic() - t0
         assert payload == {"ok": True}
-        # Should have slept ~0.05s + jitter (<1s), well under the 1s default
-        # backoff that would have applied without Retry-After parsing.
+        # Should have slept ~0.05s, well under the 1s default backoff that
+        # would have applied without Retry-After parsing.
         assert elapsed < 0.9, f"expected <0.9s, got {elapsed:.3f}s"
 
     def test_retry_after_caps_at_120s(self):
