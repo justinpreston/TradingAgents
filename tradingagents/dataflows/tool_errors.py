@@ -99,10 +99,7 @@ def has_tool_errors(text: str | None) -> bool:
         return False
     if TOOL_ERROR_OPEN in text:
         return True
-    for pattern in _LEGACY_PATTERNS:
-        if pattern.search(text):
-            return True
-    return False
+    return any(pattern.search(text) for pattern in _LEGACY_PATTERNS)
 
 
 def build_data_gaps_section(errors: Iterable[ToolError]) -> str:

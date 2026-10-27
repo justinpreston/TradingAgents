@@ -187,14 +187,14 @@ def _fake_dividends_none():
 
 
 def _full_pit_overrides():
-    return dict(
-        history=_fake_history_2024(),
-        quarterly_income_stmt=_fake_income_stmt(),
-        quarterly_balance_sheet=_fake_balance_sheet(),
-        quarterly_cashflow=_fake_cashflow(),
-        get_shares_full=_fake_shares_full(),
-        dividends=_fake_dividends_none(),
-    )
+    return {
+        "history": _fake_history_2024(),
+        "quarterly_income_stmt": _fake_income_stmt(),
+        "quarterly_balance_sheet": _fake_balance_sheet(),
+        "quarterly_cashflow": _fake_cashflow(),
+        "get_shares_full": _fake_shares_full(),
+        "dividends": _fake_dividends_none(),
+    }
 
 
 @pytest.mark.unit
@@ -475,6 +475,9 @@ def test_empty_info_payload():
 
     # An empty payload probes Yahoo to tell "no data" from an outage; keep the
     # probe offline and report the vendor as up.
-    with _patch_ticker({}), patch.object(common, "vendor_reachable", lambda *a, **k: True):
-        with pytest.raises(NoMarketDataError):
-            y_finance.get_fundamentals("NVDA", as_of_date=None)
+    with (
+        _patch_ticker({}),
+        patch.object(common, "vendor_reachable", lambda *a, **k: True),
+        pytest.raises(NoMarketDataError),
+    ):
+        y_finance.get_fundamentals("NVDA", as_of_date=None)

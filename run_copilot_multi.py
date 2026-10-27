@@ -30,7 +30,7 @@ import subprocess
 import sys
 import time
 import traceback
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout, suppress
 from datetime import datetime
 from pathlib import Path
 
@@ -92,10 +92,8 @@ class _TeeStream(io.TextIOBase):
 
     def flush(self):  # type: ignore[override]
         for st in self._streams:
-            try:
+            with suppress(Exception):
                 st.flush()
-            except Exception:
-                pass
 
 
 def _build_config(
@@ -224,14 +222,13 @@ def main() -> int:
     run_id = args.run_id or f"{_safe_slug(model_label)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
     runs_dir = Path("runs") / run_id
-    if runs_dir.exists() and any(runs_dir.iterdir()):
-        # Refuse to clobber a previous run unless the user passed an explicit
-        # --run-id (signalling intent to resume / append).
-        if not args.run_id:
-            sys.exit(
-                f"runs/{run_id} already has output. Pass --run-id <name> to be explicit "
-                "about resuming/appending, or remove the directory."
-            )
+    # Refuse to clobber a previous run unless the user passed an explicit
+    # --run-id (signalling intent to resume / append).
+    if runs_dir.exists() and any(runs_dir.iterdir()) and not args.run_id:
+        sys.exit(
+            f"runs/{run_id} already has output. Pass --run-id <name> to be explicit "
+            "about resuming/appending, or remove the directory."
+        )
     runs_dir.mkdir(parents=True, exist_ok=True)
 
     os.environ["GITHUB_TOKEN"] = _resolve_github_token()

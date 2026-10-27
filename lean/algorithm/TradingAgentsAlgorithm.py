@@ -130,7 +130,6 @@ class TradingAgentsAlgorithm(QCAlgorithm):
                 state.closed = True
                 continue
 
-            signal = state.signal
             underlying_high = self.daily_highs.get(state.underlying_symbol)
             if underlying_high is None:
                 underlying_high = self.Securities[state.underlying_symbol].Price

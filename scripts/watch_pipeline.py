@@ -638,7 +638,6 @@ def build_layout(state: WatchState) -> Layout:
 def tail_log(path: Path, state: WatchState, console: Console) -> None:
     """Follow ``path`` and process any new content forever."""
     pos = 0
-    last_size = -1
     refresh_hz = 4
 
     with Live(build_layout(state), console=console, refresh_per_second=refresh_hz, screen=True) as live:
@@ -652,7 +651,6 @@ def tail_log(path: Path, state: WatchState, console: Console) -> None:
                             for line in f:
                                 process_line(line, state)
                         pos = size
-                    last_size = size
 
                 # Detect pipeline completion (stdout includes the next-step block)
                 if state.pipeline_started_at and state.recent_lines:
@@ -661,17 +659,16 @@ def tail_log(path: Path, state: WatchState, console: Console) -> None:
                         "Total elapsed" in last5
                         or "Next steps" in last5
                         or ("✅ HTML:" in last5 and state.matrix.active)
-                    ):
-                        if not state.completed_at:
-                            state.completed_at = datetime.now()
-                            for t in state.tiers.values():
-                                if t.status == "running":
-                                    t.status = "done"
-                                    t.ended_at = state.completed_at
-                            if state.matrix.active and state.matrix.autoreport_step:
-                                if state.matrix.autoreport_step not in state.matrix.autoreport_history:
-                                    state.matrix.autoreport_history.append(state.matrix.autoreport_step)
-                                state.matrix.autoreport_step = ""
+                    ) and not state.completed_at:
+                        state.completed_at = datetime.now()
+                        for t in state.tiers.values():
+                            if t.status == "running":
+                                t.status = "done"
+                                t.ended_at = state.completed_at
+                        if state.matrix.active and state.matrix.autoreport_step:
+                            if state.matrix.autoreport_step not in state.matrix.autoreport_history:
+                                state.matrix.autoreport_history.append(state.matrix.autoreport_step)
+                            state.matrix.autoreport_step = ""
 
                 live.update(build_layout(state))
                 time.sleep(1.0 / refresh_hz)
@@ -741,7 +738,8 @@ def launch_run(preset: str, tickers: list[str] | None = None) -> Path:
 
     log_path = RUNS_DIR / log_name
     RUNS_DIR.mkdir(exist_ok=True)
-    log_fh = open(log_path, "w", buffering=1)  # line-buffered
+    # Line-buffered, and left open: the detached child owns it after Popen.
+    log_fh = open(log_path, "w", buffering=1)  # noqa: SIM115
 
     subprocess.Popen(  # noqa: S603 - cmd is constructed from presets
         cmd,

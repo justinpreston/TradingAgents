@@ -201,7 +201,7 @@ def test_main_approve_flips_and_logs(tmp_path: Path, signals_file: Path):
     adi = next(s for s in doc["signals"] if s["id"] == "ADI-2026-06-27")
     assert adi["approved"] is False
 
-    audit = [json.loads(l) for l in log.read_text().strip().splitlines()]
+    audit = [json.loads(line) for line in log.read_text().strip().splitlines()]
     assert len(audit) == 1
     assert audit[0]["id"] == "NUE-2026-06-27"
     assert audit[0]["action"] == "approve"
@@ -221,7 +221,7 @@ def test_main_unapprove(tmp_path: Path, signals_file: Path):
     nue = next(s for s in doc["signals"] if s["id"] == "NUE-2026-06-27")
     assert nue["approved"] is False
 
-    audit = [json.loads(l) for l in log.read_text().strip().splitlines()]
+    audit = [json.loads(line) for line in log.read_text().strip().splitlines()]
     assert len(audit) == 2
     assert audit[1]["action"] == "unapprove"
 
@@ -237,7 +237,7 @@ def test_main_multiple_ids_repeatable_flag(tmp_path: Path, signals_file: Path):
     assert rc == 0
     doc = json.loads(signals_file.read_text())
     assert all(s["approved"] for s in doc["signals"])
-    audit = [json.loads(l) for l in log.read_text().strip().splitlines()]
+    audit = [json.loads(line) for line in log.read_text().strip().splitlines()]
     assert len(audit) == 2
 
 

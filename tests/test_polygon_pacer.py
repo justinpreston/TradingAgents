@@ -167,9 +167,11 @@ class TestMakeRequestRetry:
         session.get.return_value = _make_response(
             429, headers={"Retry-After": "0"}, text="still rate limited"
         )
-        with patch.object(pc, "_get_session", return_value=session):
-            with pytest.raises(PolygonRateLimitError):
-                pc._make_request("/v3/x", max_attempts=3)
+        with (
+            patch.object(pc, "_get_session", return_value=session),
+            pytest.raises(PolygonRateLimitError),
+        ):
+            pc._make_request("/v3/x", max_attempts=3)
         assert session.get.call_count == 3
 
     def test_retry_after_seconds_is_honored(self):
@@ -197,9 +199,11 @@ class TestMakeRequestRetry:
             _make_response(429, headers={"Retry-After": "9999"}),
             _make_response(200, json_body={"ok": True}),
         ]
-        with patch.object(pc, "_get_session", return_value=session):
-            with patch.object(pc.time, "sleep") as mock_sleep:
-                pc._make_request("/v3/x", max_attempts=3)
+        with (
+            patch.object(pc, "_get_session", return_value=session),
+            patch.object(pc.time, "sleep") as mock_sleep,
+        ):
+            pc._make_request("/v3/x", max_attempts=3)
         # Find the sleep call after the 429 — should be capped at 120 (+ jitter)
         sleep_durations = [c.args[0] for c in mock_sleep.call_args_list]
         assert any(120.0 <= d <= 121.5 for d in sleep_durations), (
@@ -210,9 +214,11 @@ class TestMakeRequestRetry:
         from tradingagents.dataflows.vendors.polygon.common import PolygonNotFoundError
         session = MagicMock()
         session.get.return_value = _make_response(404, text="not found")
-        with patch.object(pc, "_get_session", return_value=session):
-            with pytest.raises(PolygonNotFoundError):
-                pc._make_request("/v3/x")
+        with (
+            patch.object(pc, "_get_session", return_value=session),
+            pytest.raises(PolygonNotFoundError),
+        ):
+            pc._make_request("/v3/x")
         assert session.get.call_count == 1
 
 

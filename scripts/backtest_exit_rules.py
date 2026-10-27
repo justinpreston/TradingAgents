@@ -104,10 +104,10 @@ def load_picks(db: str, dedupe: bool):
         d = _run_date(r["run_id"])
         if not d:
             continue
-        picks.append(dict(run_id=r["run_id"], ticker=r["ticker"], tier=r["tier"],
-                          rec_date=d, rec_px=r["rec_px"], aggr_pt=r["aggr_pt"],
-                          cons_pt=r["cons_pt"], strike=r["strike"],
-                          expiration=r["expiration"]))
+        picks.append({"run_id": r["run_id"], "ticker": r["ticker"], "tier": r["tier"],
+                          "rec_date": d, "rec_px": r["rec_px"], "aggr_pt": r["aggr_pt"],
+                          "cons_pt": r["cons_pt"], "strike": r["strike"],
+                          "expiration": r["expiration"]})
     if dedupe:
         seen = {}
         for p in picks:
@@ -172,7 +172,7 @@ def simulate(picks, measure_date, key, pace):
         rec["cons_pt_hit"] = cons_trig is not None if p["cons_pt"] is not None else None
         rec["aggr_pt_hit"] = aggr_trig is not None
 
-        def roi(exit_px):
+        def roi(exit_px, entry=entry):
             return round((exit_px / entry - 1) * 100, 1) if entry else None
 
         # HOLD
@@ -277,7 +277,7 @@ def report(results):
     summary = {}
     for name, key in strategies:
         avg, med, prof = _stats([r.get(key) for r in ok])
-        summary[name] = dict(avg_roi=avg, median_roi=med, profit_rate=prof)
+        summary[name] = {"avg_roi": avg, "median_roi": med, "profit_rate": prof}
     return summary
 
 
@@ -301,8 +301,8 @@ def main():
     if args.json:
         os.makedirs(os.path.dirname(args.json) or ".", exist_ok=True)
         with open(args.json, "w") as f:
-            json.dump(dict(measure_date=args.measure_date, deduped=args.dedupe,
-                           results=results, summary=summary), f, indent=2)
+            json.dump({"measure_date": args.measure_date, "deduped": args.dedupe,
+                           "results": results, "summary": summary}, f, indent=2)
         print(f"\nWrote {args.json}")
 
 

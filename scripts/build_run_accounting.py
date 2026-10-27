@@ -562,7 +562,7 @@ def main() -> int:
         (per_ticker_dir / f"{t}.md").write_text(_per_ticker_md(t, cand, cur, aggr, cons, classification))
 
     # --- CSV (slim) + JSON (full) ---
-    slim_keys = [k for k in ledger[0].keys() if k != "aggressive_executive_summary"]
+    slim_keys = [k for k in ledger[0] if k != "aggressive_executive_summary"]
     with open(matrix_run / "verdict_ledger.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=slim_keys)
         w.writeheader()

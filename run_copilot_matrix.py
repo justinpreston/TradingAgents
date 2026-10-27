@@ -952,7 +952,6 @@ def main() -> int:
     )
 
     # Stage B: secondary profile, but only on Stage-A promotes
-    stage_b_results: dict[str, CellResult] = {}
     if secondary:
         promotes = [
             t for t in tickers
@@ -962,7 +961,7 @@ def main() -> int:
             sys.stdout.write(
                 f"\n📈 Stage A produced {len(promotes)} promote(s): {', '.join(promotes)}\n"
             )
-            stage_b_results = _run_stage(
+            _run_stage(
                 profile=secondary,
                 tickers=promotes,
                 trade_date=trade_date,

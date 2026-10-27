@@ -78,7 +78,6 @@ def test_matrix_cell_cmd_includes_persona_routing_flag(tmp_path, monkeypatch):
     # Every flag in cmd (minus the executable/script/positional ticker)
     # must be parseable by the actual argparse parser.
     argv = cmd[2:]  # drop [sys.executable, SUB_RUNNER]
-    parsed = persona_mod._parse_args.__wrapped__ if hasattr(persona_mod._parse_args, "__wrapped__") else None
     parser_args = _reparse(argv)
     assert parser_args.persona_routing == "aggressive-aligned"
     assert parser_args.risk_profile == "aggressive"

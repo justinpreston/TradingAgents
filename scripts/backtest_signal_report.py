@@ -104,7 +104,7 @@ def _pearson(xs: list[float], ys: list[float]) -> float | None:
         return None
     mx = statistics.mean(xs)
     my = statistics.mean(ys)
-    num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    num = sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=False))
     dx = sum((x - mx) ** 2 for x in xs) ** 0.5
     dy = sum((y - my) ** 2 for y in ys) ** 0.5
     if dx == 0 or dy == 0:

@@ -318,7 +318,6 @@ def test_demoted_tier_flag(tmp_path, tmp_policy, tmp_matrix_run):
     doc["overlays"][0]["tier"] = "C"
     ov_path.write_text(json.dumps(doc))
 
-    book = json.loads((tmp_matrix_run / "verdict_ledger.json").read_text())  # reuse for shape
     # write a minimal book with VIRT entered at tier B
     minimal = {
         "as_of": "2026-05-09",

@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -255,10 +255,8 @@ class TradingAgentsGraph:
                 )
                 return final_state, signal
             except BaseException as exc:
-                try:
+                with suppress(Exception):
                     self.progress_listener.on_run_error(company_name, exc)
-                except Exception:
-                    pass
                 raise
 
     def begin_checkpoint(self, company_name, trade_date, asset_type: str = "stock", portfolio=None) -> str | None:
@@ -431,13 +429,11 @@ class TradingAgentsGraph:
                     # branches), so iterate.
                     if isinstance(chunk, dict):
                         for node_name, delta in chunk.items():
-                            try:
+                            # Never let UI bugs break the run.
+                            with suppress(Exception):
                                 self.progress_listener.on_node_complete(
                                     company_name, node_name, delta or {}
                                 )
-                            except Exception:
-                                # Never let UI bugs break the run.
-                                pass
                 elif mode == "values":
                     final_state = chunk
             if final_state is None:

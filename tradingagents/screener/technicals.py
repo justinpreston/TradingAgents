@@ -187,9 +187,6 @@ def _build_technical_signals(ticker: str, bars: list[dict]) -> TechnicalSignals:
         return sig
 
     closes = [b["c"] for b in bars]
-    volumes = [b["v"] for b in bars]
-    highs = [b["h"] for b in bars]
-    lows = [b["l"] for b in bars]
 
     sig.last_close = closes[-1]
     sig.ma_50 = _moving_average(closes, 50)

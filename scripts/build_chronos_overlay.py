@@ -120,7 +120,7 @@ def _value_to_quantile(value: float,
     to <0; above the maximum maps to >1. Useful for asking "where does
     the persona PT sit in the model's view at horizon H?"
     """
-    pairs = sorted(zip(quantile_values, quantile_levels))
+    pairs = sorted(zip(quantile_values, quantile_levels, strict=False))
     xs = [p[0] for p in pairs]
     ys = [p[1] for p in pairs]
     if value <= xs[0]:
@@ -237,11 +237,11 @@ def _build_per_ticker_forecast(
 
     forecast_quantiles = {
         f"p{int(q*100)}": round(float(v), 4)
-        for q, v in zip(quantile_levels, final_quantiles)
+        for q, v in zip(quantile_levels, final_quantiles, strict=False)
     }
     forecast_pct = {
         f"p{int(q*100)}_pct": round((float(v) / last_close - 1.0) * 100.0, 2)
-        for q, v in zip(quantile_levels, final_quantiles)
+        for q, v in zip(quantile_levels, final_quantiles, strict=False)
     }
 
     out["forecast_at_horizon"] = forecast_quantiles

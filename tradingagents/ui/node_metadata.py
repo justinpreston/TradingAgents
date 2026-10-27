@@ -100,10 +100,7 @@ def is_visible_node(node_name: str) -> bool:
 
 def is_hidden_node(node_name: str) -> bool:
     """Return ``True`` for plumbing nodes (Msg Clear *, tools_*)."""
-    for prefix in _HIDDEN_PREFIXES:
-        if node_name.startswith(prefix):
-            return True
-    return False
+    return any(node_name.startswith(prefix) for prefix in _HIDDEN_PREFIXES)
 
 
 def phase_label(phase: str) -> str:

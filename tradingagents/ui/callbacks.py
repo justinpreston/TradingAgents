@@ -25,6 +25,7 @@ threads, so the lock is cheap insurance.
 
 from __future__ import annotations
 
+import contextlib
 import threading
 from collections.abc import Mapping
 from typing import Any
@@ -172,16 +173,14 @@ class TokenToolCallbackHandler(BaseCallbackHandler):
             self.tokens_in += usage["input_tokens"]
             self.tokens_out += usage["output_tokens"]
             ticker = self.current_ticker
-        try:
+        # Never let dashboard rendering break the run.
+        with contextlib.suppress(Exception):
             self._listener.on_llm_tokens(
                 ticker or "",
                 usage["input_tokens"],
                 usage["output_tokens"],
                 usage["model"],
             )
-        except Exception:
-            # Never let dashboard rendering break the run.
-            pass
 
     def on_tool_start(
         self,
@@ -197,7 +196,5 @@ class TokenToolCallbackHandler(BaseCallbackHandler):
         with self._lock:
             self.tool_calls += 1
             ticker = self.current_ticker
-        try:
+        with contextlib.suppress(Exception):
             self._listener.on_tool_call(ticker or "", tool_name)
-        except Exception:
-            pass

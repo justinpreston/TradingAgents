@@ -28,7 +28,6 @@ documented rationale — exactly the failure mode that produced the old
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict
 
 
 @dataclass(frozen=True)

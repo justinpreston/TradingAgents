@@ -40,6 +40,7 @@ Key design points
 
 from __future__ import annotations
 
+import contextlib
 import sys
 import threading
 import time
@@ -219,10 +220,8 @@ class RunDashboard:
 
             # (Re)bind the Rich progress bar to this ticker.
             if self._progress_task is not None:
-                try:
+                with contextlib.suppress(Exception):
                     self._progress.remove_task(self._progress_task)
-                except Exception:
-                    pass
             self._progress_task = self._progress.add_task(
                 "run",
                 total=len(NODE_DISPLAY_ORDER),
@@ -356,10 +355,8 @@ class RunDashboard:
     def _refresh(self) -> None:
         if self._live is None:
             return
-        try:
+        with contextlib.suppress(Exception):
             self._live.update(self._render(), refresh=False)
-        except Exception:
-            pass
 
     def _render(self, *, final: bool = False) -> Group:
         return Group(

@@ -321,7 +321,7 @@ class TestRunCellSubprocessInvocation:
 
         monkeypatch.setattr(matrix_mod.subprocess, "run", fake_run)
 
-        result = matrix_mod._run_cell(
+        matrix_mod._run_cell(
             ticker="FOO",
             profile="aggressive",
             trade_date="2026-04-30",

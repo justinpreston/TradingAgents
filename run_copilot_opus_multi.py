@@ -31,7 +31,7 @@ import subprocess
 import sys
 import time
 import traceback
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout, suppress
 from datetime import datetime
 from pathlib import Path
 
@@ -87,10 +87,8 @@ class _TeeStream(io.TextIOBase):
 
     def flush(self):  # type: ignore[override]
         for st in self._streams:
-            try:
+            with suppress(Exception):
                 st.flush()
-            except Exception:
-                pass
 
 
 def _build_config() -> dict:

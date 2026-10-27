@@ -46,6 +46,7 @@ in the output rather than crashing the run.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import re
 import sys
@@ -317,10 +318,8 @@ def audit_matrix_run(
             number_of_analysts=None, source="unavailable",
         )
         if not skip_consensus:
-            try:
+            with contextlib.suppress(Exception):
                 consensus = fetch_analyst_pt_consensus(ticker)
-            except Exception:
-                pass
 
         s = _score_ticker(row, aggr, cons, consensus, consensus_divergence_pct)
         s.tier = _tier_for_row(row)

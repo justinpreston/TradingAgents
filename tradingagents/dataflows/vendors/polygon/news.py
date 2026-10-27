@@ -51,10 +51,7 @@ def _format_news_entries(entries: list[dict[str, Any]], header_label: str) -> st
 
 def _date_window(curr_date: str | None, lookback_days: int = 7) -> tuple[str, str]:
     """Default to a 7-day window ending on curr_date (or today)."""
-    if curr_date:
-        end_dt = datetime.strptime(curr_date[:10], "%Y-%m-%d")
-    else:
-        end_dt = datetime.utcnow()
+    end_dt = datetime.strptime(curr_date[:10], "%Y-%m-%d") if curr_date else datetime.utcnow()
     start_dt = end_dt - timedelta(days=lookback_days)
     return start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")
 

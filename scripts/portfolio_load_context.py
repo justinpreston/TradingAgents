@@ -448,9 +448,8 @@ def validate_positions(book: dict[str, Any], strict: bool = False) -> Validation
                     except ValueError:
                         res.errors.append(f"{prefix}.option.expiry not ISO date: {expiry_s}")
 
-        if instrument in {"vertical_call_spread", "vertical_put_spread"}:
-            if not pos.get("option_short"):
-                res.errors.append(f"{prefix}: spread requires `option_short`")
+        if instrument in {"vertical_call_spread", "vertical_put_spread"} and not pos.get("option_short"):
+            res.errors.append(f"{prefix}: spread requires `option_short`")
     return res
 
 
@@ -748,7 +747,7 @@ def build_context(
     primary_run_id = None
     if primary_run_path is not None:
         primary_run_id = next(
-            (rid for rid, p in zip(matrix.get("run_ids", []), run_paths) if p == primary_run_path),
+            (rid for rid, p in zip(matrix.get("run_ids", []), run_paths, strict=False) if p == primary_run_path),
             matrix.get("run_id"),
         )
 

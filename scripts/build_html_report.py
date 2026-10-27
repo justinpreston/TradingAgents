@@ -17,9 +17,9 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-MUTED_DASH = '<span class="muted">—</span>'
-
 from tradingagents.tiers import tier_for_row
+
+MUTED_DASH = '<span class="muted">—</span>'
 
 # ──────────────────────────────────────────────────────────────────────
 # Data assembly
@@ -1966,11 +1966,6 @@ def _recon_pair_position(pos: dict, snap: str | None) -> str:
     if is_opt:
         dte = _option_dte(pos.get("expiration"), snap)
         dte_str = f" · {dte}d to expiry" if dte is not None else ""
-        moneyness = ""
-        if pos.get("last_price") and pos.get("strike"):
-            # For long-call: ITM if underlying > strike. We don't have underlying spot here,
-            # so just show structure.
-            moneyness = ""
         detail = f'<span class="meta">${pos.get("strike",0):.0f} {pos.get("option_type","").upper()} {pos.get("expiration","")}{dte_str} · ×{pos.get("contracts",0)} · cost ${pos.get("avg_cost",0):.2f}</span>'
     else:
         detail = f'<span class="meta">{pos.get("quantity",0):g} sh · cost ${pos.get("avg_cost",0):,.2f} · last ${pos.get("last_price",0):,.2f}</span>'

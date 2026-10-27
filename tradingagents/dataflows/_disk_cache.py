@@ -18,6 +18,7 @@ from external API responses (idempotent).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -103,15 +104,11 @@ class DiskCache:
     def delete(self, key: str) -> None:
         p = self._path(key)
         if p.exists():
-            try:
+            with contextlib.suppress(OSError):
                 p.unlink()
-            except OSError:
-                pass
 
     def clear(self) -> None:
         """Delete every entry in the namespace."""
         for f in self.dir.glob("*.json"):
-            try:
+            with contextlib.suppress(OSError):
                 f.unlink()
-            except OSError:
-                pass

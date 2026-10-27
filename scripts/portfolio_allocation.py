@@ -183,7 +183,6 @@ def cash_buffer_status(
 
 
 def _matrix_recommended_long_call(ctx: dict[str, Any], ticker: str) -> dict[str, Any] | None:
-    overlays = []
     # The build_context call already retrieved overlays; we re-walk positions for matching ticker.
     # Simpler path: re-load matrix overlays directly from the context's matrix_run path.
     matrix_run = ctx.get("latest_matrix_run")

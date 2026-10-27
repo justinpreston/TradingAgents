@@ -8,6 +8,8 @@ Tier C because tier derivation keys on ``conservative_pt``.
 """
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 
 from tradingagents.agents.managers import portfolio_manager as pm
@@ -36,10 +38,8 @@ def _prompt_seen_by_llm():
         "market_report": "", "sentiment_report": "", "news_report": "", "fundamentals_report": "",
         "investment_plan": "", "trader_investment_plan": "", "past_context": "", "messages": [],
     }
-    try:
+    with contextlib.suppress(Exception):
         node(state)
-    except Exception:
-        pass
     return captured.get("prompt", "")
 
 
