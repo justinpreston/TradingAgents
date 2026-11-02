@@ -56,6 +56,10 @@ from scripts.portfolio_load_context import (  # noqa: E402
 
 RUNS_DIR = REPO_ROOT / "runs"
 GAP_WARN_PCT = 3.0
+# Option price sources that reflect a real market print/quote. Anything else
+# (e.g. "bs") is a theoretical model price and must be verified before sending
+# an order — Polygon's basic plan withholds options quotes entirely.
+MARKET_PRICE_SOURCES = {"mid", "last"}
 TIER_ORDER = {"B": 0, "A": 1, "C": 2}
 EXIT_RULE_BY_TIER = {
     "A": "tier_a_take_profit",
@@ -238,6 +242,14 @@ def build_tickets(
                                 (account_value * float(starter_pct)) / (float(ref_premium) * 100)
                             )
 
+            price_source = leg.get("price_source") if leg is not None else None
+            pricing_flag = None
+            if leg is not None and price_source not in MARKET_PRICE_SOURCES:
+                pricing_flag = (
+                    f"limit is a modeled price (source '{price_source or 'unknown'}', "
+                    "no live quote) — verify against the live chain before sending"
+                )
+
             iv_row = iv_by_ticker.get(ticker)
             liquidity_flags = []
             if leg is not None and leg.get("open_interest") is not None:
@@ -268,6 +280,8 @@ def build_tickets(
                 "expiry": leg.get("expiration", ov.get("expiration")) if leg else None,
                 "ref_premium_per_share": ref_premium,
                 "limit_price_per_share": limit_price,
+                "price_source": price_source,
+                "pricing_flag": pricing_flag,
                 "qty": qty,
                 "cons_pt": None if tier == "C" else ov.get("conservative_pt"),
                 "aggr_pt": ov.get("aggressive_pt"),
@@ -335,6 +349,18 @@ def _fmt_pct(v: float | None) -> str:
     return f"{v:+.2f}%" if v is not None else "—"
 
 
+def _upside_pct(target: float | None, spot: float | None) -> float | None:
+    """Percent move required in the *underlying* to reach ``target``.
+
+    Rendered as its own column so the reader never has to eyeball a ratio
+    between the option premium and the stock price target — those live in
+    different units and dividing one by the other is meaningless.
+    """
+    if target is None or spot is None or spot <= 0:
+        return None
+    return 100.0 * (target / spot - 1.0)
+
+
 # ---------------------------------------------------------------------------
 # Markdown rendering
 
@@ -394,10 +420,11 @@ def render_markdown(
         lines.append("_No A/B/C picks across contributing runs._")
     else:
         lines.append(
-            "| Ticker | Tier | Thesis | Anchor | Live | Gap% | Contract | Limit | Qty | "
-            "Cons PT | Aggr PT | Exit rule | Flags |"
+            "| Ticker | Tier | Thesis | Stock anchor | Stock live | Gap% | Contract | "
+            "Opt limit $/sh | Qty | Cons PT (stock) | Aggr PT (stock) | Aggr upside | "
+            "Exit rule | Flags |"
         )
-        lines.append("|---|---|---|---:|---:|---:|---|---:|---:|---:|---:|---|---|")
+        lines.append("|---|---|---|---:|---:|---:|---|---:|---:|---:|---:|---:|---|---|")
         for t in tickets:
             gap_cell = _fmt_pct(t["gap_pct"])
             if t["gap_warn"]:
@@ -412,14 +439,26 @@ def render_markdown(
             flags = "; ".join(t["liquidity_flags"])
             if t["earnings_flag"]:
                 flags = (flags + "; " if flags else "") + f"earnings {t['earnings_flag']}"
+            if t.get("pricing_flag"):
+                flags = (flags + "; " if flags else "") + f"⚠️ {t['pricing_flag']}"
+            upside = _upside_pct(t["aggr_pt"], t["live_price"] or t["anchor_price"])
             lines.append(
                 f"| {t['ticker']} | {t['tier']} | {_truncate(t['thesis'], 90)} | "
                 f"{_fmt_money(t['anchor_price'])} | {_fmt_money(t['live_price'])} | {gap_cell} | "
                 f"{contract} | {_fmt_money(t['limit_price_per_share'])} | "
                 f"{t['qty'] if t['qty'] is not None else '—'} | "
                 f"{_fmt_money(t['cons_pt'])} | {_fmt_money(t['aggr_pt'])} | "
+                f"{_fmt_pct(upside)} | "
                 f"`{t['exit_rule']}` | {flags or '—'} |"
             )
+        lines.append("")
+        lines.append(
+            "> **Units:** _Stock anchor_, _Stock live_, and both _PT_ columns are "
+            "**underlying share prices**. _Opt limit $/sh_ is the **option premium "
+            "per share** (one contract costs `Qty × 100 × limit`). These are different "
+            "instruments — comparing the premium against a price target is meaningless. "
+            "_Aggr upside_ is the move required in the **stock** to reach the aggressive PT."
+        )
     lines.append("")
 
     # 3. Freshness footer
@@ -555,9 +594,11 @@ def render_html(
         parts.append("<p><em>No A/B/C picks across contributing runs.</em></p>")
     else:
         parts.append("<table><thead><tr>"
-                      "<th>Ticker</th><th>Tier</th><th>Thesis</th><th>Anchor</th><th>Live</th>"
-                      "<th>Gap%</th><th>Contract</th><th>Limit</th><th>Qty</th>"
-                      "<th>Cons PT</th><th>Aggr PT</th><th>Exit rule</th><th>Flags</th>"
+                      "<th>Ticker</th><th>Tier</th><th>Thesis</th>"
+                      "<th>Stock anchor</th><th>Stock live</th>"
+                      "<th>Gap%</th><th>Contract</th><th>Opt limit $/sh</th><th>Qty</th>"
+                      "<th>Cons PT (stock)</th><th>Aggr PT (stock)</th><th>Aggr upside</th>"
+                      "<th>Exit rule</th><th>Flags</th>"
                       "</tr></thead><tbody>")
         for t in tickets:
             gap_cell = e(_fmt_pct(t["gap_pct"]))
@@ -574,6 +615,9 @@ def render_html(
             flags = "; ".join(t["liquidity_flags"])
             if t["earnings_flag"]:
                 flags = (flags + "; " if flags else "") + f"earnings {t['earnings_flag']}"
+            if t.get("pricing_flag"):
+                flags = (flags + "; " if flags else "") + f"⚠️ {t['pricing_flag']}"
+            upside = _upside_pct(t["aggr_pt"], t["live_price"] or t["anchor_price"])
             parts.append(
                 f"<tr><td>{e(t['ticker'])}</td>"
                 f"<td class='tier-{e(t['tier'])}'>{e(t['tier'])}</td>"
@@ -586,10 +630,20 @@ def render_html(
                 f"<td>{t['qty'] if t['qty'] is not None else '—'}</td>"
                 f"<td>{e(_fmt_money(t['cons_pt']))}</td>"
                 f"<td>{e(_fmt_money(t['aggr_pt']))}</td>"
+                f"<td>{e(_fmt_pct(upside))}</td>"
                 f"<td><code>{e(t['exit_rule'])}</code></td>"
                 f"<td>{e(flags) or '—'}</td></tr>"
             )
         parts.append("</tbody></table>")
+        parts.append(
+            "<p class='small'><strong>Units:</strong> <em>Stock anchor</em>, "
+            "<em>Stock live</em>, and both <em>PT</em> columns are <strong>underlying "
+            "share prices</strong>. <em>Opt limit $/sh</em> is the <strong>option "
+            "premium per share</strong> (one contract costs <code>Qty × 100 × limit</code>). "
+            "These are different instruments — comparing the premium against a price "
+            "target is meaningless. <em>Aggr upside</em> is the move required in the "
+            "<strong>stock</strong> to reach the aggressive PT.</p>"
+        )
 
     parts.append("<h2>Freshness</h2><ul>")
     for a in run_artifacts:
