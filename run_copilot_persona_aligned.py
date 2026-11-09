@@ -78,7 +78,7 @@ DEFAULT_DATE: str | None = None
 # seats until an Opus route comes back. Copilot then dropped gpt-5.5 (by
 # 2026-10-26); gpt-5.6-sol is its nearest successor. Keep the GPT seats off
 # the gpt-6 family, which vetoes every ticker with these prompts.
-CLAUDE = "claude-sonnet-5.5"
+CLAUDE = "claude-opus-5.5"
 GPT = "gpt-5.6-sol"
 
 PERSONA_MODELS = {
