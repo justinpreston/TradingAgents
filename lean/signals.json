@@ -1,31 +1,31 @@
 {
   "schema_version": "1.0",
-  "generated_at": "2026-06-28T11:07:25-04:00",
-  "source_run": "runs/matrix_mid_weekly_2026-06-26_2103_chain, runs/matrix_large_weekly_2026-06-26_2126_chain, runs/matrix_mega_weekly_2026-06-26_2146_chain",
-  "measure_date": "2026-06-27",
+  "generated_at": "2026-08-14T17:01:23-04:00",
+  "source_run": "runs/matrix_mid_weekly_2026-08-14_1604_chain, runs/matrix_large_weekly_2026-08-14_1621_chain, runs/matrix_mega_weekly_2026-08-14_1637_chain",
+  "measure_date": "2026-08-14",
   "signals": [
     {
-      "id": "NUE-2026-06-27",
-      "ticker": "NUE",
+      "id": "MS-2026-08-14",
+      "ticker": "MS",
       "tier": "A",
       "classification": "PICK",
-      "underlying_ref_price": 239.78,
+      "underlying_ref_price": 218.38,
       "option": {
         "right": "call",
-        "strike": 240,
+        "strike": 220,
         "expiry": "2026-12-18",
         "target_delta": 0.55,
-        "occ_symbol": "O:NUE261218C00240000",
-        "ref_premium_per_share": 26.37
+        "occ_symbol": "O:MS261218C00220000",
+        "ref_premium_per_share": 17.26
       },
       "entry": {
-        "max_premium_per_share": 27.6885,
+        "max_premium_per_share": 18.123,
         "size_pct": 0.04,
         "max_size_pct": 0.06
       },
       "exits": {
-        "cons_pt": 274.0,
-        "aggr_pt": 274.0,
+        "cons_pt": 232.25,
+        "aggr_pt": 232.25,
         "rule": "tier_a_take_profit",
         "stop_loss_premium_pct": -0.4,
         "time_stop_dte": 21
@@ -34,27 +34,27 @@
       "notes": ""
     },
     {
-      "id": "ADI-2026-06-27",
-      "ticker": "ADI",
+      "id": "AVGO-2026-08-14",
+      "ticker": "AVGO",
       "tier": "C",
       "classification": "PICK",
-      "underlying_ref_price": 386.91,
+      "underlying_ref_price": 417.82,
       "option": {
         "right": "call",
-        "strike": 400,
-        "expiry": "2026-12-18",
+        "strike": 420,
+        "expiry": "2027-06-17",
         "target_delta": 0.55,
-        "occ_symbol": "O:ADI261218C00400000",
-        "ref_premium_per_share": 55.36
+        "occ_symbol": "O:AVGO270617C00420000",
+        "ref_premium_per_share": 79.89
       },
       "entry": {
-        "max_premium_per_share": 58.128,
+        "max_premium_per_share": 83.8845,
         "size_pct": 0.02,
         "max_size_pct": 0.04
       },
       "exits": {
         "cons_pt": null,
-        "aggr_pt": 470.0,
+        "aggr_pt": 475.0,
         "rule": "tier_c_trim",
         "stop_loss_premium_pct": -0.4,
         "time_stop_dte": 21
@@ -63,27 +63,27 @@
       "notes": ""
     },
     {
-      "id": "KLIC-2026-06-27",
-      "ticker": "KLIC",
+      "id": "CRWD-2026-08-14",
+      "ticker": "CRWD",
       "tier": "C",
       "classification": "PICK",
-      "underlying_ref_price": 125.22,
+      "underlying_ref_price": 225.53,
       "option": {
         "right": "call",
-        "strike": 130,
-        "expiry": "2027-01-15",
+        "strike": 222.5,
+        "expiry": "2026-12-18",
         "target_delta": 0.55,
-        "occ_symbol": "O:KLIC270115C00130000",
-        "ref_premium_per_share": 27.13
+        "occ_symbol": "O:CRWD261218C00222500",
+        "ref_premium_per_share": 33.15
       },
       "entry": {
-        "max_premium_per_share": 28.4865,
+        "max_premium_per_share": 34.8075,
         "size_pct": 0.02,
         "max_size_pct": 0.04
       },
       "exits": {
         "cons_pt": null,
-        "aggr_pt": 140.0,
+        "aggr_pt": 250.0,
         "rule": "tier_c_trim",
         "stop_loss_premium_pct": -0.4,
         "time_stop_dte": 21
