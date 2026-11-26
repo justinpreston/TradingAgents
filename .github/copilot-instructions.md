@@ -21,7 +21,7 @@ screener uses Thursday EOD bars either way; see CLAUDE.md.)
 
 ### 1a. Matrix models are pinned
 All LLM calls go through the Copilot endpoint. The matrix runs `gpt-5.6-sol` and
-`claude-sonnet-5.5` (Opus and gpt-6-astra left Copilot 2026-10-09, gpt-5.5 by 2026-10-26). The research manager, conservative analyst and PM are on Sonnet,
+`claude-opus-5.5` (it replaced the interim `claude-sonnet-5.5` after the 2026-11-06 rerun; gpt-5.5 left Copilot by 2026-10-26). The research manager, conservative analyst and PM are on Claude,
 because gpt-5.6-sol vetoes from those seats. Don't move GPT seats to gpt-6.x; it vetoes everything. See CLAUDE.md "Matrix models".
 
 ### 2. Long calls are the default options strategy

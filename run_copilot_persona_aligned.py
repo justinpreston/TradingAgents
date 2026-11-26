@@ -74,11 +74,13 @@ DEFAULT_TICKERS = ["NVDA", "AAPL", "MSFT", "GOOGL"]
 # explicitly via ``--date 2024-05-10`` for the 3-way comparison.
 DEFAULT_DATE: str | None = None
 
-# Copilot dropped every Opus model (2026-10-09); Sonnet 5.5 fills the Claude
-# seats until an Opus route comes back. Copilot then dropped gpt-5.5 (by
+# Copilot dropped every Opus model (2026-10-09) and Sonnet 5.5 filled the
+# Claude seats until claude-opus-5.5 came back. The 2026-11-06 rerun gave
+# 9/15 picks on Opus vs 12/15 on Sonnet; Opus's more conservative set is the
+# default; set this back to "claude-sonnet-5.5" to revert. Copilot dropped gpt-5.5 (by
 # 2026-10-26); gpt-5.6-sol is its nearest successor. Keep the GPT seats off
 # the gpt-6 family, which vetoes every ticker with these prompts.
-CLAUDE = "claude-sonnet-5.5"
+CLAUDE = "claude-opus-5.5"
 GPT = "gpt-5.6-sol"
 
 PERSONA_MODELS = {
