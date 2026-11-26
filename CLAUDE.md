@@ -187,7 +187,8 @@ Every LLM call goes through the GitHub Copilot endpoint (`api.githubcopilot.com`
 On 2026-10-09 Copilot stopped serving every `claude-opus-*` model and `gpt-6-astra`,
 so the `aggressive-aligned` table in `run_copilot_persona_aligned.py` is now:
 
-- `CLAUDE = "claude-sonnet-5.5"`: bull researcher, aggressive risk analyst, research manager,
+- `CLAUDE = "claude-opus-5.5"` (Sonnet 5.5 from 2026-10-09 until Opus 5.5 became the default after the
+  2026-11-06 rerun: 9/15 picks vs Sonnet's 12/15, the more conservative set): bull researcher, aggressive risk analyst, research manager,
   conservative risk analyst, Portfolio Manager, and `deep_think_llm`.
 - `GPT = "gpt-5.6-sol"`: the four analysts, bear researcher, trader, neutral risk analyst.
   This was `gpt-5.5` until Copilot dropped it (found 2026-10-26); gpt-5.6-sol is its nearest successor.
@@ -664,7 +665,7 @@ to re-check on every sync:
   routes GPT-5+ to `/responses`), `llm_clients/factory.py` (`copilot` in
   `REASONING_EFFORT_PROVIDERS`, pinned by
   `tests/test_openai_reasoning_effort.py::test_copilot_forwards_reasoning_effort`).
-- `run_copilot_persona_aligned.py` — `CLAUDE = "claude-sonnet-5.5"`,
+- `run_copilot_persona_aligned.py` — `CLAUDE = "claude-opus-5.5"`,
   `GPT = "gpt-5.6-sol"`, with the decision seats on CLAUDE; see "Matrix models" above.
 - Since v0.6.0 a graph run has a **Memory Log** step beside the analysts that
   settles *every* ticker's due decisions (#1428, #1445), not only the run's own
